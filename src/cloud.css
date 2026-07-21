@@ -1,0 +1,38 @@
+.cloud-grid {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+.hero-copy-blob {
+  position: relative;
+  isolation: isolate;
+}
+
+.hero-copy-blob::before {
+  position: absolute;
+  z-index: -1;
+  inset: clamp(-5rem, -6vw, -2.75rem) clamp(-4rem, -4vw, -2rem) clamp(-4.5rem, -5vw, -2.5rem) clamp(-6rem, -7vw, -3rem);
+  content: "";
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 58% 52% at 28% 30%, rgba(0, 0, 0, 0.92) 0%, rgba(0, 0, 0, 0.72) 38%, rgba(0, 0, 0, 0.3) 68%, transparent 100%),
+    radial-gradient(ellipse 67% 58% at 61% 63%, rgba(0, 0, 0, 0.82) 0%, rgba(0, 0, 0, 0.56) 40%, rgba(0, 0, 0, 0.22) 70%, transparent 100%),
+    radial-gradient(ellipse 38% 46% at 91% 38%, rgba(0, 0, 0, 0.62) 0%, rgba(0, 0, 0, 0.32) 44%, rgba(0, 0, 0, 0.12) 72%, transparent 100%);
+  border-radius: 44% 56% 51% 49% / 52% 43% 57% 48%;
+  filter: blur(36px);
+  transform: rotate(-2deg);
+}
+
+.landing-shader-fade {
+  background: linear-gradient(
+    to top,
+    var(--color-surface-page) 0%,
+    rgba(8, 8, 8, 0.92) 10%,
+    rgba(8, 8, 8, 0.65) 23%,
+    rgba(8, 8, 8, 0.25) 38%,
+    rgba(8, 8, 8, 0.05) 49%,
+    transparent 65%
+  );
+}
