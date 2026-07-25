@@ -28,9 +28,19 @@ Nebula owns:
 - `workspace`
 
 `workspace.member_id` is unique, enforcing one personal workspace per
-organization membership. The table stores only durable product identity and
-desired lifecycle state. Worker credentials, runtime instances, jobs, usage,
-and audit events will receive tables only when those features are implemented.
+organization membership. Database insert and update guards additionally require
+`workspace.organization_id` to match the organization on that Better Auth
+membership, preventing a membership from being paired with another
+organization even if application validation is bypassed.
+
+The authenticated `POST /api/workspaces/personal` operation validates the
+caller's membership and resolves the row inside an immediate SQLite
+transaction. Repeated requests, page reloads, and duplicate attempts return the
+same workspace identity. They cannot create a second personal workspace.
+
+The table stores only durable product identity and desired lifecycle state.
+Worker credentials, runtime instances, jobs, usage, and audit events will
+receive tables only when those features are implemented.
 
 ## Runtime settings
 

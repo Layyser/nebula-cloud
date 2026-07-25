@@ -19,3 +19,24 @@ export interface CloudErrorResponse {
   code: string
   retryable?: boolean
 }
+
+export type PersonalWorkspaceState =
+  | 'pending'
+  | 'provisioning'
+  | 'ready'
+  | 'stopped'
+  | 'failed'
+
+export interface EnsurePersonalWorkspaceRequest {
+  organizationId: string
+}
+
+export interface PersonalWorkspaceResponse {
+  workspace: {
+    id: string
+    organizationId: string
+    state: PersonalWorkspaceState
+    createdAt: number
+    updatedAt: number
+  }
+}

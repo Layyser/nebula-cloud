@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 import { createControlPlaneHandler } from '../src/server'
+import { WorkspaceMembershipNotFoundError } from '@nebula-cloud/database'
 
 test('reports liveness and version without product capabilities', async () => {
   const handler = createControlPlaneHandler({ version: 'test' })
@@ -58,4 +59,73 @@ test('forwards auth routes only to the configured Better Auth handler', async ()
 
   expect(response.status).toBe(200)
   expect(forwardedPath).toBe('/api/auth/get-session')
+})
+
+test('requires authentication before resolving a personal workspace', async () => {
+  const handler = createControlPlaneHandler({
+    resolveSession: async () => null,
+  })
+  const response = await handler(new Request(
+    'http://control-plane.test/api/workspaces/personal',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ organizationId: 'org-1' }),
+    },
+  ))
+
+  expect(response.status).toBe(401)
+  expect((await response.json()).code).toBe('authentication_required')
+})
+
+test('resolves the authenticated membership personal workspace', async () => {
+  const handler = createControlPlaneHandler({
+    resolveSession: async () => ({ userId: 'user-1' }),
+    ensurePersonalWorkspace: input => ({
+      id: `workspace-for-${input.userId}`,
+      organizationId: input.organizationId,
+      state: 'pending',
+      createdAt: 10,
+      updatedAt: 10,
+    }),
+  })
+  const response = await handler(new Request(
+    'http://control-plane.test/api/workspaces/personal',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ organizationId: 'org-1' }),
+    },
+  ))
+
+  expect(response.status).toBe(200)
+  expect(await response.json()).toEqual({
+    workspace: {
+      id: 'workspace-for-user-1',
+      organizationId: 'org-1',
+      state: 'pending',
+      createdAt: 10,
+      updatedAt: 10,
+    },
+  })
+})
+
+test('does not resolve a workspace outside the authenticated membership', async () => {
+  const handler = createControlPlaneHandler({
+    resolveSession: async () => ({ userId: 'user-1' }),
+    ensurePersonalWorkspace: () => {
+      throw new WorkspaceMembershipNotFoundError()
+    },
+  })
+  const response = await handler(new Request(
+    'http://control-plane.test/api/workspaces/personal',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ organizationId: 'org-2' }),
+    },
+  ))
+
+  expect(response.status).toBe(403)
+  expect((await response.json()).code).toBe('workspace_membership_not_found')
 })

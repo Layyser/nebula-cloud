@@ -30,6 +30,10 @@ export default defineConfig({
         target: 'http://127.0.0.1:7790',
         changeOrigin: false,
       },
+      '/api/workspaces/personal': {
+        target: 'http://127.0.0.1:7790',
+        changeOrigin: false,
+      },
       // Development-only stand-in for the authenticated cloud gateway. It
       // preserves the browser-facing workspace route while connecting the
       // preview to the developer's local Nebula operator.

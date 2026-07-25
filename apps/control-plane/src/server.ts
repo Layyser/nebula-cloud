@@ -2,8 +2,11 @@ import {
   CONTROL_PLANE_API_VERSION,
   type CloudErrorResponse,
   type ControlPlaneStatus,
+  type EnsurePersonalWorkspaceRequest,
   type HealthResponse,
+  type PersonalWorkspaceResponse,
 } from '@nebula-cloud/contracts'
+import { WorkspaceMembershipNotFoundError } from '@nebula-cloud/database'
 
 const service = 'nebula-cloud-control-plane' as const
 
@@ -11,6 +14,13 @@ export interface ControlPlaneHandlerOptions {
   version?: string
   isReady?: () => boolean
   authHandler?: (request: Request) => Response | Promise<Response>
+  resolveSession?: (
+    request: Request,
+  ) => Promise<{ userId: string } | null>
+  ensurePersonalWorkspace?: (input: {
+    userId: string
+    organizationId: string
+  }) => PersonalWorkspaceResponse['workspace']
 }
 
 function json(value: unknown, status = 200): Response {
@@ -26,6 +36,8 @@ export function createControlPlaneHandler({
   version = 'dev',
   isReady = () => true,
   authHandler,
+  resolveSession,
+  ensurePersonalWorkspace,
 }: ControlPlaneHandlerOptions = {}): (request: Request) => Promise<Response> {
   return async request => {
     const url = new URL(request.url)
@@ -37,6 +49,59 @@ export function createControlPlaneHandler({
         code: 'auth_unavailable',
         retryable: true,
       } satisfies CloudErrorResponse, 503)
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/workspaces/personal') {
+      const session = resolveSession ? await resolveSession(request) : null
+      if (!session) {
+        return json({
+          error: 'authentication required',
+          code: 'authentication_required',
+        } satisfies CloudErrorResponse, 401)
+      }
+      if (!ensurePersonalWorkspace) {
+        return json({
+          error: 'workspace resolution is unavailable',
+          code: 'workspace_resolution_unavailable',
+          retryable: true,
+        } satisfies CloudErrorResponse, 503)
+      }
+
+      let body: EnsurePersonalWorkspaceRequest
+      try {
+        body = await request.json() as EnsurePersonalWorkspaceRequest
+      } catch {
+        return json({
+          error: 'request body must be valid JSON',
+          code: 'invalid_request',
+        } satisfies CloudErrorResponse, 400)
+      }
+      if (typeof body.organizationId !== 'string' || !body.organizationId.trim()) {
+        return json({
+          error: 'organizationId is required',
+          code: 'invalid_request',
+        } satisfies CloudErrorResponse, 400)
+      }
+
+      try {
+        const workspace = ensurePersonalWorkspace({
+          userId: session.userId,
+          organizationId: body.organizationId,
+        })
+        return json({ workspace } satisfies PersonalWorkspaceResponse)
+      } catch (error) {
+        if (error instanceof WorkspaceMembershipNotFoundError) {
+          return json({
+            error: 'organization membership required',
+            code: error.code,
+          } satisfies CloudErrorResponse, 403)
+        }
+        return json({
+          error: 'personal workspace could not be resolved',
+          code: 'workspace_resolution_failed',
+          retryable: true,
+        } satisfies CloudErrorResponse, 500)
+      }
     }
 
     if (request.method === 'GET' && url.pathname === '/health/live') {

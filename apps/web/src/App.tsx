@@ -12,8 +12,8 @@ import {
   type CloudOrganization,
 } from './components/organization/OrganizationGate'
 import { createCloudRuntimeTransport } from './runtime/cloudRuntimeTransport'
+import { ensurePersonalWorkspace } from './runtime/personalWorkspace'
 
-const demoWorkspaceId = 'demo'
 const runtimeGatewayBase = import.meta.env.VITE_NEBULA_RUNTIME_GATEWAY_BASE || '/api/workspaces'
 
 function usePathname() {
@@ -121,10 +121,32 @@ function AuthenticatedCloudApp({
 }) {
   const [signingOut, setSigningOut] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [workspaceId, setWorkspaceId] = useState('')
+  const [workspaceError, setWorkspaceError] = useState('')
+  const [workspaceAttempt, setWorkspaceAttempt] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    setWorkspaceId('')
+    setWorkspaceError('')
+    void ensurePersonalWorkspace(activeOrganization.id)
+      .then(workspace => {
+        if (!cancelled) setWorkspaceId(workspace.id)
+      })
+      .catch(error => {
+        if (!cancelled) {
+          setWorkspaceError(error instanceof Error ? error.message : 'Personal workspace could not be resolved')
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activeOrganization.id, workspaceAttempt])
+
   const runtimeTransport = useMemo(() => createCloudRuntimeTransport({
-    workspaceId: demoWorkspaceId,
+    workspaceId: workspaceId || 'resolving',
     gatewayBase: runtimeGatewayBase,
-  }), [])
+  }), [workspaceId])
 
   const runtimeNavigation = useMemo<RuntimeNavigationItem[]>(() => [
     {
@@ -150,6 +172,18 @@ function AuthenticatedCloudApp({
       setSigningOut(false)
     }
   }, [navigate, signingOut])
+
+  if (workspaceError) {
+    return (
+      <WorkspaceResolutionError
+        message={workspaceError}
+        onRetry={() => setWorkspaceAttempt(current => current + 1)}
+      />
+    )
+  }
+  if (!workspaceId) {
+    return <AuthLoading label="Resolving your workspace" />
+  }
 
   return (
     <>
@@ -185,6 +219,30 @@ function AuthenticatedCloudApp({
         )}
       </AnimatePresence>
     </>
+  )
+}
+
+function WorkspaceResolutionError({
+  message,
+  onRetry,
+}: {
+  message: string
+  onRetry: () => void
+}) {
+  return (
+    <div className="relative z-[2] flex min-h-screen items-center justify-center px-5 text-white">
+      <div className="w-full max-w-sm rounded-xl border border-white/[0.10] bg-[#111]/95 p-5 shadow-[0_24px_80px_rgba(0,0,0,0.65)] backdrop-blur-xl">
+        <p className="text-[14px] font-semibold text-white/90">Workspace unavailable</p>
+        <p className="mt-2 text-[12px] leading-5 text-white/45">{message}</p>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="mt-5 flex h-9 items-center justify-center rounded-xl bg-white px-4 text-[12px] font-medium text-black transition hover:bg-white/90"
+        >
+          Try again
+        </button>
+      </div>
+    </div>
   )
 }
 

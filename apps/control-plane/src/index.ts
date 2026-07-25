@@ -1,5 +1,6 @@
 import { createControlPlaneHandler } from './server'
 import { initializePersistence } from './persistence'
+import { ensurePersonalWorkspace } from '@nebula-cloud/database'
 
 const hostname = process.env.NEBULA_CLOUD_BIND?.trim() || '127.0.0.1'
 const port = Number.parseInt(process.env.NEBULA_CLOUD_PORT || '7790', 10)
@@ -33,6 +34,25 @@ const server = Bun.serve({
   fetch: createControlPlaneHandler({
     version,
     authHandler: auth.handler,
+    resolveSession: async request => {
+      const session = await auth.api.getSession({
+        headers: request.headers,
+      })
+      return session ? { userId: session.user.id } : null
+    },
+    ensurePersonalWorkspace: ({ userId, organizationId }) => {
+      const workspace = ensurePersonalWorkspace(database, {
+        userId,
+        organizationId,
+      })
+      return {
+        id: workspace.id,
+        organizationId: workspace.organizationId,
+        state: workspace.state,
+        createdAt: workspace.createdAt,
+        updatedAt: workspace.updatedAt,
+      }
+    },
   }),
 })
 

@@ -33,6 +33,7 @@ repository.
 - Email/password sign-up and sign-in backed by Better Auth
 - Session-protected cloud routes and explicit sign-out
 - Organization creation, selection, memberships, roles, and invitations
+- Membership-scoped personal workspace resolution with no browser fallback ID
 - The shared runtime workspace as the authenticated application root
 - The exact standalone New Session, Agents, Capabilities, Search, and
   workspace-grouped Sessions UI
@@ -45,6 +46,7 @@ repository.
 - Liveness, readiness, and versioned status endpoints
 - SQLite initialization before the process becomes ready
 - Better Auth HTTP routes mounted under `/api/auth/*`
+- Authenticated personal-workspace resolution under `/api/workspaces/personal`
 - No fake billing, provisioning, or gateway behavior
 
 `packages/auth` configures Better Auth with Bun's built-in SQLite connection and
@@ -54,9 +56,11 @@ HTTP routes and user-facing login and organization flow are implemented. Email
 delivery for invitations and enterprise SSO remain intentionally deferred.
 
 `packages/database` adds only Nebula's `workspace` table and a tiny migration
-journal. One membership can own one workspace. Runtime instances, provisioning
-jobs, credentials, usage, and audit tables remain deferred until their owning
-features exist. See [`docs/database.md`](docs/database.md).
+journal. One membership can own one workspace, and database guards require that
+workspace to belong to the same organization as the membership. Runtime
+instances, provisioning jobs, credentials, usage, and audit tables remain
+deferred until their owning features exist. See
+[`docs/database.md`](docs/database.md).
 
 ## Development
 
@@ -123,6 +127,7 @@ GET /health/live
 GET /health/ready
 GET /internal/v1/status
 ALL /api/auth/*                    Better Auth handler
+POST /api/workspaces/personal     Resolve the signed-in member's workspace
 ```
 
 Its default development database is
@@ -143,6 +148,12 @@ CLOUD-03 establishes the basic cloud identity boundary:
 - Organization creation and active-organization selection
 - Owner, admin, and member roles managed by Better Auth
 - Membership and pending-invitation views
+
+CLOUD-04 builds on that boundary: after an active organization is selected,
+the Web application asks the control plane for the authenticated membership's
+personal workspace. The database creates it once and returns the same stable ID
+thereafter. The shared Runtime UI is not mounted until that resolution
+succeeds.
 
 Creating an invitation currently records it in SQLite but does not send email.
 Transactional email, invitation acceptance screens, password recovery, email
