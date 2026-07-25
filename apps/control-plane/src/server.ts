@@ -10,6 +10,7 @@ const service = 'nebula-cloud-control-plane' as const
 export interface ControlPlaneHandlerOptions {
   version?: string
   isReady?: () => boolean
+  authHandler?: (request: Request) => Response | Promise<Response>
 }
 
 function json(value: unknown, status = 200): Response {
@@ -24,9 +25,19 @@ function json(value: unknown, status = 200): Response {
 export function createControlPlaneHandler({
   version = 'dev',
   isReady = () => true,
-}: ControlPlaneHandlerOptions = {}): (request: Request) => Response {
-  return request => {
+  authHandler,
+}: ControlPlaneHandlerOptions = {}): (request: Request) => Promise<Response> {
+  return async request => {
     const url = new URL(request.url)
+
+    if (url.pathname.startsWith('/api/auth/')) {
+      if (authHandler) return await authHandler(request)
+      return json({
+        error: 'authentication is unavailable',
+        code: 'auth_unavailable',
+        retryable: true,
+      } satisfies CloudErrorResponse, 503)
+    }
 
     if (request.method === 'GET' && url.pathname === '/health/live') {
       return json({

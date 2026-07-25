@@ -5,12 +5,14 @@ export interface InitializePersistenceOptions {
   databasePath: string
   authSecret: string
   authBaseURL: string
+  trustedOrigins?: string[]
 }
 
 export async function initializePersistence({
   databasePath,
   authSecret,
   authBaseURL,
+  trustedOrigins,
 }: InitializePersistenceOptions) {
   const database = openCloudDatabase({ path: databasePath })
 
@@ -19,6 +21,7 @@ export async function initializePersistence({
       database,
       secret: authSecret,
       baseURL: authBaseURL,
+      trustedOrigins,
     })
     await migrateCloudAuthSchema(auth)
     migrateCloudSchema(database)

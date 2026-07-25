@@ -30,6 +30,9 @@ repository.
 `apps/web` includes:
 
 - The latest commercial Nebula landing from before the standalone/cloud split
+- Email/password sign-up and sign-in backed by Better Auth
+- Session-protected cloud routes and explicit sign-out
+- Organization creation, selection, memberships, roles, and invitations
 - Organization dashboard and Operator templates
 - Placeholder organization, governance, usage, and billing screens
 - The shared runtime workspace with the cloud transport
@@ -39,12 +42,14 @@ repository.
 - A separately buildable Bun process
 - Liveness, readiness, and versioned status endpoints
 - SQLite initialization before the process becomes ready
-- No fake login, organization, billing, provisioning, or gateway behavior
+- Better Auth HTTP routes mounted under `/api/auth/*`
+- No fake billing, provisioning, or gateway behavior
 
 `packages/auth` configures Better Auth with Bun's built-in SQLite connection and
 the organization plugin. Better Auth owns its user, session, account,
 verification, organization, membership, and invitation migrations. The auth
-HTTP routes and user-facing login flow remain CLOUD-03.
+HTTP routes and user-facing login and organization flow are implemented. Email
+delivery for invitations and enterprise SSO remain intentionally deferred.
 
 `packages/database` adds only Nebula's `workspace` table and a tiny migration
 journal. One membership can own one workspace. Runtime instances, provisioning
@@ -63,10 +68,10 @@ Run the Web application:
 
 ```bash
 cp apps/web/.env.example apps/web/.env
-bun run dev
+bun run dev:web
 ```
 
-Run the control-plane scaffold separately:
+Run the control plane in a second terminal:
 
 ```bash
 cp apps/control-plane/.env.example apps/control-plane/.env
@@ -84,10 +89,11 @@ The Web routes remain:
 
 ```text
 /                                  commercial landing
+/login                             sign in or create an account
 /app                               organization dashboard
 /app/operators                     deployed operators
 /app/operators/demo/workspace      shared Nebula runtime UI
-/app/organization                  organization backend placeholder
+/app/organization                  members and invitations
 /app/governance                    governance placeholder
 /app/usage                         usage placeholder
 /app/billing                       billing placeholder
@@ -99,12 +105,32 @@ The control-plane scaffold listens on `127.0.0.1:7790` by default:
 GET /health/live
 GET /health/ready
 GET /internal/v1/status
+ALL /api/auth/*                    Better Auth handler
 ```
 
 Its default development database is
 `apps/control-plane/data/nebula-cloud.sqlite`. Set
 `NEBULA_CLOUD_DATABASE_PATH` to an explicit persistent path in deployment.
 `BETTER_AUTH_SECRET` is required and must contain at least 32 characters.
+`NEBULA_CLOUD_TRUSTED_ORIGINS` is a comma-separated allowlist for browser
+origins. The development default accepts Vite on `localhost:5173` and
+`127.0.0.1:5173`.
+
+## Authentication scope
+
+CLOUD-03 establishes the basic cloud identity boundary:
+
+- Email/password account creation and sign-in
+- Cookie-backed sessions
+- Protected `/app` routes
+- Organization creation and active-organization selection
+- Owner, admin, and member roles managed by Better Auth
+- Membership and pending-invitation views
+
+Creating an invitation currently records it in SQLite but does not send email.
+Transactional email, invitation acceptance screens, password recovery, email
+verification, rate limiting, legal acceptance, and enterprise SSO are required
+before a public launch. They are deliberately not simulated in the frontend.
 
 ## Security boundary
 

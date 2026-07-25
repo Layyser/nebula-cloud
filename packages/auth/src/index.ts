@@ -7,12 +7,14 @@ export interface CreateCloudAuthOptions {
   database: Database
   secret: string
   baseURL: string
+  trustedOrigins?: string[]
 }
 
 export function createCloudAuth({
   database,
   secret,
   baseURL,
+  trustedOrigins = [],
 }: CreateCloudAuthOptions) {
   if (secret.trim().length < 32) {
     throw new Error('Better Auth secret must contain at least 32 characters')
@@ -22,6 +24,10 @@ export function createCloudAuth({
     database,
     secret,
     baseURL,
+    trustedOrigins,
+    emailAndPassword: {
+      enabled: true,
+    },
     advanced: {
       database: {
         generateId: 'uuid',

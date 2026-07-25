@@ -1,11 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Building2, CreditCard, Gauge, LayoutDashboard, ShieldCheck, UsersRound } from 'lucide-react'
 import { NebulaBackground, RuntimeWorkspace, type RuntimeNavigationItem } from '@nebula/runtime-ui'
-import { LandingPage } from './components/landing/LandingPage'
+import { authClient } from './auth/authClient'
+import { AuthLoading } from './components/auth/AuthLoading'
+import { AuthPage } from './components/auth/AuthPage'
 import { CloudShell } from './components/cloud/CloudShell'
 import { Dashboard } from './components/cloud/Dashboard'
 import { Operators } from './components/cloud/Operators'
+import { OrganizationPage } from './components/cloud/OrganizationPage'
 import { PlaceholderPage } from './components/cloud/PlaceholderPage'
+import { LandingPage } from './components/landing/LandingPage'
+import {
+  OrganizationGate,
+  type CloudOrganization,
+} from './components/organization/OrganizationGate'
 import { createCloudRuntimeTransport } from './runtime/cloudRuntimeTransport'
 
 const demoWorkspaceId = 'demo'
@@ -31,7 +39,94 @@ function usePathname() {
 
 export default function App() {
   const { pathname, navigate } = usePathname()
-  const inCloudApp = pathname.startsWith('/app')
+  const cloudRoute = pathname === '/login' || pathname.startsWith('/app')
+
+  if (!cloudRoute) {
+    return (
+      <PageBackground>
+        <LandingPage onLaunch={() => navigate('/app')} />
+      </PageBackground>
+    )
+  }
+
+  return (
+    <PageBackground>
+      <CloudSessionRoute pathname={pathname} navigate={navigate} />
+    </PageBackground>
+  )
+}
+
+function PageBackground({ children }: { children: ReactNode }) {
+  return (
+    <>
+      <NebulaBackground fade={0} variant="classic" palette="graphite" resolutionScale={0.5} />
+      <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-[1] bg-[radial-gradient(circle_at_66%_40%,transparent_0%,rgba(5,6,7,0.08)_28%,rgba(5,6,7,0.76)_78%)]" />
+      {children}
+    </>
+  )
+}
+
+function CloudSessionRoute({
+  pathname,
+  navigate,
+}: {
+  pathname: string
+  navigate: (path: string) => void
+}) {
+  const sessionQuery = authClient.useSession()
+
+  useEffect(() => {
+    if (sessionQuery.isPending) return
+    if (!sessionQuery.data && pathname !== '/login') navigate('/login')
+    if (sessionQuery.data && pathname === '/login') navigate('/app')
+  }, [navigate, pathname, sessionQuery.data, sessionQuery.isPending])
+
+  if (sessionQuery.isPending) {
+    return <AuthLoading />
+  }
+  if (!sessionQuery.data) {
+    return (
+      <AuthPage
+        onBack={() => navigate('/')}
+        onAuthenticated={() => {
+          void sessionQuery.refetch().then(() => navigate('/app'))
+        }}
+      />
+    )
+  }
+  if (pathname === '/login') {
+    return <AuthLoading />
+  }
+  const session = sessionQuery.data
+
+  return (
+    <OrganizationGate>
+      {(activeOrganization, organizations) => (
+        <AuthenticatedCloudApp
+          pathname={pathname}
+          navigate={navigate}
+          user={session.user}
+          activeOrganization={activeOrganization}
+          organizations={organizations}
+        />
+      )}
+    </OrganizationGate>
+  )
+}
+
+function AuthenticatedCloudApp({
+  pathname,
+  navigate,
+  user,
+  activeOrganization,
+  organizations,
+}: {
+  pathname: string
+  navigate: (path: string) => void
+  user: { name: string; email: string }
+  activeOrganization: CloudOrganization
+  organizations: CloudOrganization[]
+}) {
   const inWorkspace = pathname.startsWith('/app/operators/demo/workspace')
   const runtimeTransport = useMemo(() => createCloudRuntimeTransport({
     workspaceId: demoWorkspaceId,
@@ -47,27 +142,14 @@ export default function App() {
 
   if (inWorkspace) {
     return (
-      <>
-        <NebulaBackground fade={0} variant="classic" palette="graphite" resolutionScale={0.5} />
-        <RuntimeWorkspace
-          transport={runtimeTransport}
-          brandLabel="Nebula"
-          identityLabel="George · Nebula"
-          identityInitial="G"
-          onBrandSelect={() => navigate('/app')}
-          externalNavigation={runtimeNavigation}
-        />
-      </>
-    )
-  }
-
-  if (!inCloudApp) {
-    return (
-      <>
-        <NebulaBackground fade={0} variant="classic" palette="graphite" resolutionScale={0.5} />
-        <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-[1] bg-[radial-gradient(circle_at_66%_40%,transparent_0%,rgba(5,6,7,0.08)_28%,rgba(5,6,7,0.76)_78%)]" />
-        <LandingPage onLaunch={() => navigate('/app')} />
-      </>
+      <RuntimeWorkspace
+        transport={runtimeTransport}
+        brandLabel="Nebula"
+        identityLabel={`${user.name} · ${activeOrganization.name}`}
+        identityInitial={user.name.slice(0, 1).toUpperCase() || 'N'}
+        onBrandSelect={() => navigate('/app')}
+        externalNavigation={runtimeNavigation}
+      />
     )
   }
 
@@ -81,10 +163,24 @@ export default function App() {
   ]
 
   return (
-    <CloudShell pathname={pathname} navigation={navigation} onNavigate={navigate}>
-      {pathname === '/app' && <Dashboard onOpenOperators={() => navigate('/app/operators')} />}
+    <CloudShell
+      pathname={pathname}
+      navigation={navigation}
+      onNavigate={navigate}
+      user={user}
+      activeOrganization={activeOrganization}
+      organizations={organizations}
+      onSelectOrganization={async organizationId => {
+        await authClient.organization.setActive({ organizationId })
+      }}
+      onSignOut={async () => {
+        await authClient.signOut()
+        navigate('/login')
+      }}
+    >
+      {pathname === '/app' && <Dashboard userName={user.name} onOpenOperators={() => navigate('/app/operators')} />}
       {pathname === '/app/operators' && <Operators onOpenWorkspace={() => navigate('/app/operators/demo/workspace')} />}
-      {pathname === '/app/organization' && <PlaceholderPage eyebrow="Organization" title="Members and access" description="Identity, membership, roles, and invitations will live in the control-plane backend." />}
+      {pathname === '/app/organization' && <OrganizationPage organization={activeOrganization} />}
       {pathname === '/app/governance' && <PlaceholderPage eyebrow="Governance" title="Policies and audit" description="Organization policy, approvals, budgets, secrets, and audit history belong here—not in Nebula Core." />}
       {pathname === '/app/usage' && <PlaceholderPage eyebrow="Usage" title="Runtime activity" description="The control plane will aggregate operator usage without taking ownership of runtime execution." />}
       {pathname === '/app/billing' && <PlaceholderPage eyebrow="Billing" title="Plans and invoices" description="Subscriptions, seats, operator charges, and invoices remain isolated from the runtime API." />}

@@ -1,12 +1,20 @@
 import { ArrowRight, CircleDollarSign, Cpu, ListChecks } from 'lucide-react'
 
-export function Dashboard({ onOpenOperators }: { onOpenOperators: () => void }) {
+export function Dashboard({
+  userName,
+  onOpenOperators,
+}: {
+  userName: string
+  onOpenOperators: () => void
+}) {
   return (
     <div className="mx-auto max-w-6xl px-10 py-10">
       <div className="flex items-start justify-between gap-8">
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/35">Organization overview</p>
-          <h1 className="mt-3 text-3xl font-medium tracking-[-0.04em] text-white/95">Good morning, George.</h1>
+          <h1 className="mt-3 text-3xl font-medium tracking-[-0.04em] text-white/95">
+            Good morning, {userName}.
+          </h1>
           <p className="mt-2 text-sm text-white/42">Your operators, workspaces, and organization controls in one place.</p>
         </div>
         <span className="rounded-full border border-emerald-300/15 bg-emerald-400/[0.06] px-3 py-1.5 text-[11px] text-emerald-300/75">● All systems healthy</span>

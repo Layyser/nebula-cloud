@@ -18,7 +18,9 @@ Better Auth owns and migrates:
 
 The Better Auth organization plugin is enabled from the beginning so Nebula
 does not create a competing organization or membership schema. Authentication
-routes, login UI, and invitation delivery are implemented in CLOUD-03.
+routes, login UI, sessions, organization selection, memberships, and invitation
+records are implemented in CLOUD-03. Invitation email delivery remains
+deferred; creating an invitation currently persists the Better Auth record.
 
 Nebula owns:
 
@@ -49,6 +51,7 @@ migrations, before it begins listening. Migrations are safe to run repeatedly.
 NEBULA_CLOUD_DATABASE_PATH=./data/nebula-cloud.sqlite
 BETTER_AUTH_SECRET=<at least 32 random characters>
 BETTER_AUTH_URL=http://127.0.0.1:7790
+NEBULA_CLOUD_TRUSTED_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
 ```
 
 Generate a production secret with:

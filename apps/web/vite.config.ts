@@ -9,6 +9,14 @@ const runtimeSource = path.resolve(configDir, '../../../nebula-frontend/src')
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  server: {
+    proxy: {
+      '/api/auth': {
+        target: 'http://127.0.0.1:7790',
+        changeOrigin: false,
+      },
+    },
+  },
   resolve: {
     alias: [
       { find: '@nebula/runtime-ui/styles.css', replacement: path.resolve(runtimeSource, 'index.css') },
