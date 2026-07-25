@@ -46,7 +46,7 @@ export function AuthPage({ onAuthenticated, onBack }: AuthPageProps) {
             <button
               type="button"
               onClick={onBack}
-              className="flex h-6 items-center gap-2.5 text-sm font-semibold leading-none text-white/80 transition hover:text-white"
+              className="flex h-6 cursor-pointer items-center gap-2.5 text-sm font-semibold leading-none text-white/80 transition hover:text-white"
             >
               <NebulaMark size={24} />
               <span className="nebula-wordmark leading-none">Nebula</span>
