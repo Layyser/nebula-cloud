@@ -610,7 +610,7 @@ function PricingCard({ plan, onLaunch }: {
       <p className={`mt-2 min-h-4 text-[11px] font-medium ${plan.priceDetail ? 'text-white/42' : 'invisible'}`}>
         {plan.priceDetail ?? 'Operator pricing'}
       </p>
-      <p className="mt-5 min-h-16 text-sm leading-6 text-white/40">{plan.description}</p>
+      <p className="mt-5 min-h-[72px] text-sm leading-6 text-white/40">{plan.description}</p>
       <div className="mb-5 mt-6 border-t border-white/[0.07]" />
       <p className={`mb-3 text-[9px] font-medium uppercase tracking-[0.12em] ${plan.featured ? 'text-sky-200/48' : 'text-white/28'}`}>
         {plan.inherits ?? 'Included'}
