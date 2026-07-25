@@ -39,20 +39,23 @@ export function AuthPage({ onAuthenticated, onBack }: AuthPageProps) {
   }
 
   return (
-    <div className="relative z-[2] flex min-h-screen items-center justify-center px-5 py-12 text-white">
-      <button
-        type="button"
-        onClick={onBack}
-        className="absolute left-6 top-6 flex items-center gap-2 text-sm font-semibold text-white/80 transition hover:text-white lg:left-10 lg:top-8"
-      >
-        <NebulaMark />
-        <span className="nebula-wordmark">Nebula</span>
-      </button>
-
-      <div className="w-full max-w-[420px] rounded-2xl border border-white/[0.09] bg-[#0d0e0f]/90 p-6 shadow-[0_32px_100px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:p-8">
-        <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-white/30">
-          Nebula Cloud
-        </p>
+    <div className="relative z-[2] flex min-h-screen items-center justify-center px-5 py-8 text-white">
+      <div className="min-h-[612px] w-full max-w-[420px]">
+        <div className="w-full rounded-2xl border border-white/[0.09] bg-[#0d0e0f]/90 p-6 shadow-[0_32px_100px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:p-8">
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={onBack}
+              className="flex items-center gap-2 text-sm font-semibold text-white/80 transition hover:text-white"
+            >
+              <NebulaMark size={18} />
+              <span className="nebula-wordmark">Nebula</span>
+            </button>
+            <span className="h-3.5 w-px bg-white/[0.12]" />
+            <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-white/30">
+              Cloud
+            </span>
+          </div>
         <h1 className="mt-3 text-3xl font-medium tracking-[-0.04em]">
           {mode === 'sign-in' ? 'Welcome back' : 'Create your workspace'}
         </h1>
@@ -62,18 +65,28 @@ export function AuthPage({ onAuthenticated, onBack }: AuthPageProps) {
             : 'Create your account. You can create or join an organization next.'}
         </p>
 
-        <div className="mt-6 grid grid-cols-2 rounded-xl border border-white/[0.08] bg-black/20 p-0.5 text-sm">
+        <div className="relative mt-6 grid grid-cols-2 rounded-xl border border-white/[0.08] bg-black/20 p-0.5 text-sm">
+          <span
+            aria-hidden="true"
+            className={`absolute inset-y-0.5 left-0.5 w-[calc(50%-2px)] rounded-[10px] bg-white/[0.1] shadow-sm transition-transform duration-300 ease-out ${
+              mode === 'sign-up' ? 'translate-x-full' : 'translate-x-0'
+            }`}
+          />
           <button
             type="button"
             onClick={() => { setMode('sign-in'); setError('') }}
-            className={`h-9 rounded-[10px] transition ${mode === 'sign-in' ? 'bg-white/[0.1] text-white' : 'text-white/40 hover:text-white/70'}`}
+            className={`relative z-10 h-9 rounded-[10px] transition-colors duration-300 ${
+              mode === 'sign-in' ? 'text-white' : 'text-white/40 hover:text-white/70'
+            }`}
           >
             Sign in
           </button>
           <button
             type="button"
             onClick={() => { setMode('sign-up'); setError('') }}
-            className={`h-9 rounded-[10px] transition ${mode === 'sign-up' ? 'bg-white/[0.1] text-white' : 'text-white/40 hover:text-white/70'}`}
+            className={`relative z-10 h-9 rounded-[10px] transition-colors duration-300 ${
+              mode === 'sign-up' ? 'text-white' : 'text-white/40 hover:text-white/70'
+            }`}
           >
             Create account
           </button>
@@ -136,6 +149,7 @@ export function AuthPage({ onAuthenticated, onBack }: AuthPageProps) {
         <p className="mt-5 text-center text-[11px] leading-5 text-white/25">
           Terms and privacy pages will be added before public launch.
         </p>
+        </div>
       </div>
     </div>
   )

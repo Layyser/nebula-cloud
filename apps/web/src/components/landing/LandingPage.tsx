@@ -120,7 +120,7 @@ function Header({ onLaunch }: { onLaunch: (event: MouseEvent<HTMLAnchorElement>)
     <header className={`fixed inset-x-0 top-0 z-50 border-b transition-[background-color,border-color,box-shadow] duration-500 ease-out ${scrolled ? 'border-white/[0.08] bg-[#080909]/72 shadow-[0_12px_40px_rgba(0,0,0,0.18)] backdrop-blur-xl' : 'border-transparent bg-transparent'}`}>
       <nav className={`mx-auto flex max-w-[1240px] items-center justify-between px-6 transition-[height] duration-500 ease-out lg:px-10 ${scrolled ? 'h-16' : 'h-24'}`} aria-label="Main navigation">
         <a className="flex items-center gap-2.5 text-sm font-semibold tracking-[-0.01em] text-white">
-          <NebulaMark />
+          <NebulaMark size={24} />
           <span className="nebula-wordmark">Nebula</span>
         </a>
         <div className="hidden items-center gap-8 text-xs font-medium text-[var(--color-text-secondary)] md:flex">
@@ -645,7 +645,7 @@ function FinalCta({ onLaunch }: { onLaunch: (event: MouseEvent<HTMLAnchorElement
         </a>
       </div>
       <div className="flex items-center justify-between pt-7 text-[11px] text-[var(--color-text-muted)]">
-        <span className="flex items-center gap-2"><NebulaMark /> <span className="nebula-wordmark">Nebula</span></span>
+        <span className="flex items-center gap-2"><NebulaMark size={24} /> <span className="nebula-wordmark">Nebula</span></span>
         <span>Persistent AI operators for organizations</span>
       </div>
     </footer>

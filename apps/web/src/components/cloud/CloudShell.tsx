@@ -40,7 +40,7 @@ export function CloudShell({
     <div className="relative z-[2] flex h-screen min-h-0 bg-[#090a0a] text-white">
       <aside className="flex w-60 shrink-0 flex-col border-r border-white/[0.07] bg-[#111111] px-2">
         <button type="button" onClick={() => onNavigate('/app')} className="flex h-16 items-center gap-2 px-2 text-left">
-          <NebulaMark />
+          <NebulaMark size={24} />
           <span className="nebula-wordmark text-[14px] font-semibold">Nebula</span>
         </button>
 

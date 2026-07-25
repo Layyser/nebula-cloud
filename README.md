@@ -78,6 +78,14 @@ cp apps/control-plane/.env.example apps/control-plane/.env
 bun run dev:control-plane
 ```
 
+For local development, add `NEBULA_BOOTSTRAP_NAME`,
+`NEBULA_BOOTSTRAP_EMAIL`, and `NEBULA_BOOTSTRAP_PASSWORD` to the ignored
+control-plane `.env`, then create or verify that account with:
+
+```bash
+bun run --cwd apps/control-plane bootstrap
+```
+
 Validate the complete workspace:
 
 ```bash

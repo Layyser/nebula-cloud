@@ -98,7 +98,7 @@ function OrganizationSetup({
     <div className="relative z-[2] flex min-h-screen items-center justify-center px-5 py-12 text-white">
       <div className="w-full max-w-[520px] rounded-2xl border border-white/[0.09] bg-[#0d0e0f]/92 p-6 shadow-[0_32px_100px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:p-8">
         <div className="flex items-center gap-2.5">
-          <NebulaMark />
+          <NebulaMark size={24} />
           <span className="nebula-wordmark text-sm font-semibold">Nebula</span>
         </div>
         <h1 className="mt-7 text-3xl font-medium tracking-[-0.04em]">Choose your organization</h1>
