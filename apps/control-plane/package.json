@@ -10,7 +10,9 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@nebula-cloud/contracts": "workspace:*"
+    "@nebula-cloud/auth": "workspace:*",
+    "@nebula-cloud/contracts": "workspace:*",
+    "@nebula-cloud/database": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "^1.3.10",

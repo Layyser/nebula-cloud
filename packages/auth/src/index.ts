@@ -1,12 +1,43 @@
-/**
- * Organization-neutral request identity consumed by the control plane.
- * CLOUD-03 will provide the Better Auth implementation.
- */
-export interface CloudPrincipal {
-  userId: string
-  sessionId: string
+import type { Database } from 'bun:sqlite'
+import { betterAuth } from 'better-auth'
+import { getMigrations } from 'better-auth/db/migration'
+import { organization } from 'better-auth/plugins'
+
+export interface CreateCloudAuthOptions {
+  database: Database
+  secret: string
+  baseURL: string
 }
 
-export interface SessionResolver {
-  resolve(request: Request): Promise<CloudPrincipal | null>
+export function createCloudAuth({
+  database,
+  secret,
+  baseURL,
+}: CreateCloudAuthOptions) {
+  if (secret.trim().length < 32) {
+    throw new Error('Better Auth secret must contain at least 32 characters')
+  }
+
+  return betterAuth({
+    database,
+    secret,
+    baseURL,
+    advanced: {
+      database: {
+        generateId: 'uuid',
+      },
+    },
+    plugins: [
+      organization({
+        requireEmailVerificationOnInvitation: true,
+      }),
+    ],
+  })
+}
+
+export type CloudAuth = ReturnType<typeof createCloudAuth>
+
+export async function migrateCloudAuthSchema(auth: CloudAuth): Promise<void> {
+  const { runMigrations } = await getMigrations(auth.options)
+  await runMigrations()
 }

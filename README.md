@@ -13,9 +13,9 @@ nebula-cloud/
 |   |-- web/              commercial landing and organization Web UI
 |   `-- control-plane/    private Bun HTTP service
 |-- packages/
-|   |-- auth/             Better Auth boundary (implementation in CLOUD-03)
+|   |-- auth/             Better Auth configuration and migrations
 |   |-- contracts/        shared cloud HTTP contracts
-|   `-- database/         PostgreSQL boundary (implementation in CLOUD-02)
+|   `-- database/         SQLite connection and Nebula migrations
 |-- pricing.md
 `-- package.json          Bun workspace orchestration
 ```
@@ -38,10 +38,18 @@ repository.
 
 - A separately buildable Bun process
 - Liveness, readiness, and versioned status endpoints
+- SQLite initialization before the process becomes ready
 - No fake login, organization, billing, provisioning, or gateway behavior
 
-`packages/auth` and `packages/database` only define dependency boundaries.
-Better Auth starts in CLOUD-03 and PostgreSQL starts in CLOUD-02.
+`packages/auth` configures Better Auth with Bun's built-in SQLite connection and
+the organization plugin. Better Auth owns its user, session, account,
+verification, organization, membership, and invitation migrations. The auth
+HTTP routes and user-facing login flow remain CLOUD-03.
+
+`packages/database` adds only Nebula's `workspace` table and a tiny migration
+journal. One membership can own one workspace. Runtime instances, provisioning
+jobs, credentials, usage, and audit tables remain deferred until their owning
+features exist. See [`docs/database.md`](docs/database.md).
 
 ## Development
 
@@ -92,6 +100,11 @@ GET /health/live
 GET /health/ready
 GET /internal/v1/status
 ```
+
+Its default development database is
+`apps/control-plane/data/nebula-cloud.sqlite`. Set
+`NEBULA_CLOUD_DATABASE_PATH` to an explicit persistent path in deployment.
+`BETTER_AUTH_SECRET` is required and must contain at least 32 characters.
 
 ## Security boundary
 
