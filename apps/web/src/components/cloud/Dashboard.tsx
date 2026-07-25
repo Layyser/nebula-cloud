@@ -1,11 +1,9 @@
-import { ArrowRight, CircleDollarSign, Cpu, ListChecks } from 'lucide-react'
+import { CircleDollarSign, Cpu, ListChecks } from 'lucide-react'
 
 export function Dashboard({
   userName,
-  onOpenOperators,
 }: {
   userName: string
-  onOpenOperators: () => void
 }) {
   return (
     <div className="mx-auto max-w-6xl px-10 py-10">
@@ -27,14 +25,9 @@ export function Dashboard({
       </div>
 
       <section className="mt-4 rounded-2xl border border-white/[0.075] bg-white/[0.018] p-5">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/35">Operators</p>
-            <h2 className="mt-2 text-lg font-medium text-white/90">Persistent Linux workspaces</h2>
-          </div>
-          <button type="button" onClick={onOpenOperators} className="flex items-center gap-2 rounded-xl border border-white/[0.09] px-3 py-2 text-[12px] text-white/65 transition hover:bg-white/[0.05] hover:text-white">
-            View operators <ArrowRight size={13} />
-          </button>
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/35">Your operator</p>
+          <h2 className="mt-2 text-lg font-medium text-white/90">Persistent Linux workspace</h2>
         </div>
         <div className="mt-5 flex items-center gap-4 rounded-xl border border-white/[0.06] bg-black/20 px-4 py-3">
           <span className="h-9 w-9 rounded-xl border border-sky-300/10 bg-sky-300/[0.06]" />

@@ -33,9 +33,11 @@ repository.
 - Email/password sign-up and sign-in backed by Better Auth
 - Session-protected cloud routes and explicit sign-out
 - Organization creation, selection, memberships, roles, and invitations
-- Organization dashboard and Operator templates
-- Placeholder organization, governance, usage, and billing screens
-- The shared runtime workspace with the cloud transport
+- The shared runtime workspace as the authenticated application root
+- The exact standalone New Session, Agents, Capabilities, Search, and
+  workspace-grouped Sessions UI
+- A host-provided Dashboard inside the shared runtime shell
+- Authenticated user and organization identity in the shared sidebar footer
 
 `apps/control-plane` is deliberately small:
 
@@ -98,14 +100,21 @@ The Web routes remain:
 ```text
 /                                  commercial landing
 /login                             sign in or create an account
-/app                               organization dashboard
-/app/operators                     deployed operators
-/app/operators/demo/workspace      shared Nebula runtime UI
-/app/organization                  members and invitations
-/app/governance                    governance placeholder
-/app/usage                         usage placeholder
-/app/billing                       billing placeholder
+/app                               personal Operator and shared runtime UI
 ```
+
+In local development, Vite acts as a small gateway stand-in:
+
+```text
+/api/workspaces/:workspaceId/runtime/*
+  -> NEBULA_RUNTIME_ORIGIN
+```
+
+This preserves the production browser contract while allowing the Cloud shell
+to display sessions from a locally running Nebula operator. It reads
+`NEBULA_HTTP_TOKEN` when configured, otherwise `~/.nebula/http-token`. This
+development proxy does not implement tenancy or replace the authenticated
+control-plane gateway.
 
 The control-plane scaffold listens on `127.0.0.1:7790` by default:
 
