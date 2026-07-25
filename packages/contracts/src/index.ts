@@ -40,3 +40,20 @@ export interface PersonalWorkspaceResponse {
     updatedAt: number
   }
 }
+
+export type ProvisioningJobStatus = 'queued' | 'running' | 'succeeded' | 'failed'
+
+export interface ProvisioningJobSummary {
+  id: string
+  workspaceId: string
+  operation: 'ensure_running'
+  status: ProvisioningJobStatus
+  attempt: number
+  availableAt: number
+  createdAt: number
+  updatedAt: number
+}
+
+export interface EnsureWorkspaceRunningResponse extends PersonalWorkspaceResponse {
+  job: ProvisioningJobSummary | null
+}

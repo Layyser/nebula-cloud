@@ -3,6 +3,7 @@ import {
   type CloudErrorResponse,
   type ControlPlaneStatus,
   type EnsurePersonalWorkspaceRequest,
+  type EnsureWorkspaceRunningResponse,
   type HealthResponse,
   type PersonalWorkspaceResponse,
 } from '@nebula-cloud/contracts'
@@ -21,6 +22,10 @@ export interface ControlPlaneHandlerOptions {
     userId: string
     organizationId: string
   }) => PersonalWorkspaceResponse['workspace']
+  ensureWorkspaceRunning?: (input: {
+    userId: string
+    organizationId: string
+  }) => EnsureWorkspaceRunningResponse
 }
 
 function json(value: unknown, status = 200): Response {
@@ -38,6 +43,7 @@ export function createControlPlaneHandler({
   authHandler,
   resolveSession,
   ensurePersonalWorkspace,
+  ensureWorkspaceRunning,
 }: ControlPlaneHandlerOptions = {}): (request: Request) => Promise<Response> {
   return async request => {
     const url = new URL(request.url)
@@ -99,6 +105,61 @@ export function createControlPlaneHandler({
         return json({
           error: 'personal workspace could not be resolved',
           code: 'workspace_resolution_failed',
+          retryable: true,
+        } satisfies CloudErrorResponse, 500)
+      }
+    }
+
+    if (
+      request.method === 'POST'
+      && url.pathname === '/api/workspaces/personal/ensure-running'
+    ) {
+      const session = resolveSession ? await resolveSession(request) : null
+      if (!session) {
+        return json({
+          error: 'authentication required',
+          code: 'authentication_required',
+        } satisfies CloudErrorResponse, 401)
+      }
+      if (!ensureWorkspaceRunning) {
+        return json({
+          error: 'workspace provisioning is unavailable',
+          code: 'workspace_provisioning_unavailable',
+          retryable: true,
+        } satisfies CloudErrorResponse, 503)
+      }
+
+      let body: EnsurePersonalWorkspaceRequest
+      try {
+        body = await request.json() as EnsurePersonalWorkspaceRequest
+      } catch {
+        return json({
+          error: 'request body must be valid JSON',
+          code: 'invalid_request',
+        } satisfies CloudErrorResponse, 400)
+      }
+      if (typeof body.organizationId !== 'string' || !body.organizationId.trim()) {
+        return json({
+          error: 'organizationId is required',
+          code: 'invalid_request',
+        } satisfies CloudErrorResponse, 400)
+      }
+
+      try {
+        return json(ensureWorkspaceRunning({
+          userId: session.userId,
+          organizationId: body.organizationId,
+        }))
+      } catch (error) {
+        if (error instanceof WorkspaceMembershipNotFoundError) {
+          return json({
+            error: 'organization membership required',
+            code: error.code,
+          } satisfies CloudErrorResponse, 403)
+        }
+        return json({
+          error: 'workspace provisioning could not be scheduled',
+          code: 'workspace_provisioning_failed',
           retryable: true,
         } satisfies CloudErrorResponse, 500)
       }

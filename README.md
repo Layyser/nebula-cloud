@@ -47,7 +47,9 @@ repository.
 - SQLite initialization before the process becomes ready
 - Better Auth HTTP routes mounted under `/api/auth/*`
 - Authenticated personal-workspace resolution under `/api/workspaces/personal`
-- No fake billing, provisioning, or gateway behavior
+- Durable ensure-running jobs under
+  `/api/workspaces/personal/ensure-running`
+- No fake billing, worker execution, or production gateway behavior
 
 `packages/auth` configures Better Auth with Bun's built-in SQLite connection and
 the organization plugin. Better Auth owns its user, session, account,
@@ -55,12 +57,14 @@ verification, organization, membership, and invitation migrations. The auth
 HTTP routes and user-facing login and organization flow are implemented. Email
 delivery for invitations and enterprise SSO remain intentionally deferred.
 
-`packages/database` adds only Nebula's `workspace` table and a tiny migration
-journal. One membership can own one workspace, and database guards require that
-workspace to belong to the same organization as the membership. Runtime
-instances, provisioning jobs, credentials, usage, and audit tables remain
-deferred until their owning features exist. See
-[`docs/database.md`](docs/database.md).
+`packages/database` owns Nebula's `workspace` and `provisioning_job` tables plus
+a tiny migration journal. One membership can own one workspace, and database
+guards require that workspace to belong to the same organization as the
+membership. Durable provisioning jobs deduplicate ensure-running requests and
+support leases, retries, and restart recovery without Redis. Runtime instances,
+credentials, usage, and audit tables remain deferred until their owning
+features exist. See [`docs/database.md`](docs/database.md) and
+[`docs/provisioning-jobs.md`](docs/provisioning-jobs.md).
 
 ## Development
 
@@ -128,6 +132,8 @@ GET /health/ready
 GET /internal/v1/status
 ALL /api/auth/*                    Better Auth handler
 POST /api/workspaces/personal     Resolve the signed-in member's workspace
+POST /api/workspaces/personal/ensure-running
+                                  Durably request a ready workspace
 ```
 
 Its default development database is

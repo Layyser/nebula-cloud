@@ -129,3 +129,69 @@ test('does not resolve a workspace outside the authenticated membership', async 
   expect(response.status).toBe(403)
   expect((await response.json()).code).toBe('workspace_membership_not_found')
 })
+
+test('schedules an authenticated ensure-running provisioning job', async () => {
+  const scheduledInputs: Array<{ userId: string; organizationId: string }> = []
+  const handler = createControlPlaneHandler({
+    resolveSession: async () => ({ userId: 'user-1' }),
+    ensureWorkspaceRunning: input => {
+      scheduledInputs.push(input)
+      return {
+        workspace: {
+          id: 'workspace-1',
+          organizationId: input.organizationId,
+          state: 'provisioning',
+          createdAt: 10,
+          updatedAt: 20,
+        },
+        job: {
+          id: 'job-1',
+          workspaceId: 'workspace-1',
+          operation: 'ensure_running',
+          status: 'queued',
+          attempt: 0,
+          availableAt: 20,
+          createdAt: 20,
+          updatedAt: 20,
+        },
+      }
+    },
+  })
+  const response = await handler(new Request(
+    'http://control-plane.test/api/workspaces/personal/ensure-running',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ organizationId: 'org-1' }),
+    },
+  ))
+
+  expect(response.status).toBe(200)
+  expect(scheduledInputs).toEqual([
+    { userId: 'user-1', organizationId: 'org-1' },
+  ])
+  expect(await response.json()).toMatchObject({
+    workspace: { id: 'workspace-1', state: 'provisioning' },
+    job: { id: 'job-1', status: 'queued' },
+  })
+})
+
+test('does not expose ensure-running without a signed-in session', async () => {
+  const handler = createControlPlaneHandler({
+    resolveSession: async () => null,
+    ensureWorkspaceRunning: () => {
+      throw new Error('must not be called')
+    },
+  })
+  const response = await handler(new Request(
+    'http://control-plane.test/api/workspaces/personal/ensure-running',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ organizationId: 'org-1' }),
+    },
+  ))
+
+  expect(response.status).toBe(401)
+  expect((await response.json()).code).toBe('authentication_required')
+})

@@ -1,6 +1,9 @@
 import { createControlPlaneHandler } from './server'
 import { initializePersistence } from './persistence'
-import { ensurePersonalWorkspace } from '@nebula-cloud/database'
+import {
+  ensurePersonalWorkspace,
+  ensureWorkspaceRunning,
+} from '@nebula-cloud/database'
 
 const hostname = process.env.NEBULA_CLOUD_BIND?.trim() || '127.0.0.1'
 const port = Number.parseInt(process.env.NEBULA_CLOUD_PORT || '7790', 10)
@@ -51,6 +54,33 @@ const server = Bun.serve({
         state: workspace.state,
         createdAt: workspace.createdAt,
         updatedAt: workspace.updatedAt,
+      }
+    },
+    ensureWorkspaceRunning: ({ userId, organizationId }) => {
+      const result = ensureWorkspaceRunning(database, {
+        userId,
+        organizationId,
+      })
+      return {
+        workspace: {
+          id: result.workspace.id,
+          organizationId: result.workspace.organizationId,
+          state: result.workspace.state,
+          createdAt: result.workspace.createdAt,
+          updatedAt: result.workspace.updatedAt,
+        },
+        job: result.job
+          ? {
+              id: result.job.id,
+              workspaceId: result.job.workspaceId,
+              operation: result.job.operation,
+              status: result.job.status,
+              attempt: result.job.attempt,
+              availableAt: result.job.availableAt,
+              createdAt: result.job.createdAt,
+              updatedAt: result.job.updatedAt,
+            }
+          : null,
       }
     },
   }),
