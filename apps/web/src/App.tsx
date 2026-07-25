@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { LayoutDashboard } from 'lucide-react'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
+import { LayoutDashboard, LogOut, Settings, X } from 'lucide-react'
 import { NebulaBackground, RuntimeWorkspace, type RuntimeNavigationItem } from '@nebula/runtime-ui'
 import { authClient } from './auth/authClient'
 import { AuthLoading } from './components/auth/AuthLoading'
@@ -118,6 +119,8 @@ function AuthenticatedCloudApp({
   user: { name: string; email: string }
   activeOrganization: CloudOrganization
 }) {
+  const [signingOut, setSigningOut] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const runtimeTransport = useMemo(() => createCloudRuntimeTransport({
     workspaceId: demoWorkspaceId,
     gatewayBase: runtimeGatewayBase,
@@ -137,14 +140,121 @@ function AuthenticatedCloudApp({
     },
   ], [user.name])
 
+  const signOut = useCallback(async () => {
+    if (signingOut) return
+    setSigningOut(true)
+    try {
+      await authClient.signOut()
+      navigate('/login')
+    } finally {
+      setSigningOut(false)
+    }
+  }, [navigate, signingOut])
+
   return (
-    <RuntimeWorkspace
-      transport={runtimeTransport}
-      brandLabel="Nebula"
-      identityLabel={`${user.name} · ${activeOrganization.name}`}
-      identityInitial={user.name.slice(0, 1).toUpperCase() || 'N'}
-      onBrandSelect={() => navigate('/')}
-      externalNavigation={runtimeNavigation}
-    />
+    <>
+      <RuntimeWorkspace
+        transport={runtimeTransport}
+        brandLabel="Nebula"
+        identityLabel={`${user.name} · ${activeOrganization.name}`}
+        identityInitial={user.name.slice(0, 1).toUpperCase() || 'N'}
+        identityMenuItems={[
+          {
+            label: 'Settings',
+            icon: <Settings size={14} />,
+            onSelect: () => setSettingsOpen(true),
+          },
+          {
+            label: signingOut ? 'Logging out…' : 'Log out',
+            icon: <LogOut size={14} />,
+            onSelect: () => { void signOut() },
+            disabled: signingOut,
+            tone: 'danger',
+          },
+        ]}
+        onBrandSelect={() => navigate('/')}
+        externalNavigation={runtimeNavigation}
+      />
+      <AnimatePresence>
+        {settingsOpen && (
+          <SettingsWindow
+            user={user}
+            organization={activeOrganization}
+            onClose={() => setSettingsOpen(false)}
+          />
+        )}
+      </AnimatePresence>
+    </>
+  )
+}
+
+function SettingsWindow({
+  user,
+  organization,
+  onClose,
+}: {
+  user: { name: string; email: string }
+  organization: CloudOrganization
+  onClose: () => void
+}) {
+  const reduceMotion = useReducedMotion()
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [onClose])
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-5 backdrop-blur-sm"
+      initial={reduceMotion ? false : { opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: reduceMotion ? 0 : 0.18 }}
+      onMouseDown={event => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
+      <motion.section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="cloud-settings-title"
+        initial={reduceMotion ? false : { opacity: 0, y: 10, scale: 0.985 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 8, scale: 0.985 }}
+        transition={{ duration: reduceMotion ? 0 : 0.22, ease: [0.22, 1, 0.36, 1] }}
+        className="w-full max-w-lg overflow-hidden rounded-xl border border-white/[0.10] bg-[#111] shadow-[0_24px_80px_rgba(0,0,0,0.65)]"
+      >
+        <header className="flex h-14 items-center justify-between border-b border-white/[0.07] px-5">
+          <div>
+            <h2 id="cloud-settings-title" className="text-[14px] font-semibold text-white/90">Settings</h2>
+            <p className="text-[11px] text-white/35">Account and organization preferences</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close settings" className="flex h-8 w-8 items-center justify-center rounded-lg text-white/35 transition-colors hover:bg-white/[0.06] hover:text-white/80">
+            <X size={15} />
+          </button>
+        </header>
+        <div className="space-y-5 p-5">
+          <SettingsField label="Name" value={user.name} />
+          <SettingsField label="Email" value={user.email} />
+          <SettingsField label="Organization" value={organization.name} />
+          <p className="border-t border-white/[0.07] pt-4 text-[11px] leading-5 text-white/35">
+            More account, organization, and operator preferences will appear here as the Cloud control plane grows.
+          </p>
+        </div>
+      </motion.section>
+    </motion.div>
+  )
+}
+
+function SettingsField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/30">{label}</p>
+      <div className="rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2.5 text-[12px] text-white/70">{value}</div>
+    </div>
   )
 }
