@@ -127,19 +127,39 @@ function AuthenticatedCloudApp({
 
   useEffect(() => {
     let cancelled = false
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), 4000)
     setWorkspaceId('')
     setWorkspaceError('')
     void ensurePersonalWorkspace(activeOrganization.id)
-      .then(workspace => {
+      .then(async workspace => {
+        const candidateTransport = createCloudRuntimeTransport({
+          workspaceId: workspace.id,
+          gatewayBase: runtimeGatewayBase,
+        })
+        const response = await candidateTransport.request('/health/ready', {
+          signal: controller.signal,
+        })
+        if (!response.ok) {
+          throw new Error('Your personal workspace exists, but its Nebula runtime is not ready.')
+        }
         if (!cancelled) setWorkspaceId(workspace.id)
       })
       .catch(error => {
         if (!cancelled) {
-          setWorkspaceError(error instanceof Error ? error.message : 'Personal workspace could not be resolved')
+          const message = error instanceof DOMException && error.name === 'AbortError'
+            ? 'Your personal workspace exists, but its Nebula runtime did not respond.'
+            : error instanceof Error
+              ? error.message
+              : 'Personal workspace could not be resolved'
+          setWorkspaceError(message)
         }
       })
+      .finally(() => window.clearTimeout(timeout))
     return () => {
       cancelled = true
+      controller.abort()
+      window.clearTimeout(timeout)
     }
   }, [activeOrganization.id, workspaceAttempt])
 
@@ -232,7 +252,7 @@ function WorkspaceResolutionError({
   return (
     <div className="relative z-[2] flex min-h-screen items-center justify-center px-5 text-white">
       <div className="w-full max-w-sm rounded-xl border border-white/[0.10] bg-[#111]/95 p-5 shadow-[0_24px_80px_rgba(0,0,0,0.65)] backdrop-blur-xl">
-        <p className="text-[14px] font-semibold text-white/90">Workspace unavailable</p>
+        <p className="text-[14px] font-semibold text-white/90">Operator unavailable</p>
         <p className="mt-2 text-[12px] leading-5 text-white/45">{message}</p>
         <button
           type="button"
