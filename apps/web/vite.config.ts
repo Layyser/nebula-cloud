@@ -5,7 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const configDir = fileURLToPath(new URL('.', import.meta.url))
-const runtimeSource = path.resolve(configDir, '../nebula-frontend/src')
+const runtimeSource = path.resolve(configDir, '../../../nebula-frontend/src')
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],

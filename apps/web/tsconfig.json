@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "useDefineForClassFields": true,
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["../../../nebula-frontend/src/*"],
+      "@nebula/runtime-ui": ["../../../nebula-frontend/src/runtime/index.ts"],
+      "@nebula/runtime-ui/transport": ["../../../nebula-frontend/src/runtime/transport.ts"],
+      "@nebula/runtime-ui/*": ["../../../nebula-frontend/src/*"]
+    }
+  },
+  "include": ["src"]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@nebula-cloud/contracts",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.10",
+    "typescript": "~6.0.2"
+  }
+}

@@ -1,35 +1,78 @@
 # Nebula Cloud
 
-Commercial organization shell for Nebula operators. This repository owns the
-public landing, organization experience, and the future control-plane backend.
-It consumes the organization-agnostic runtime workspace from
-`@nebula/runtime-ui`.
+Commercial organization shell and control plane for Nebula. This repository
+owns the public landing, authentication boundary, organizations, workspace
+provisioning, governance, usage, and billing. It does not contain the agent
+engine or container implementation.
 
-## Current template
+## Repository layout
 
-The initial application includes:
+```text
+nebula-cloud/
+|-- apps/
+|   |-- web/              commercial landing and organization Web UI
+|   `-- control-plane/    private Bun HTTP service
+|-- packages/
+|   |-- auth/             Better Auth boundary (implementation in CLOUD-03)
+|   |-- contracts/        shared cloud HTTP contracts
+|   `-- database/         PostgreSQL boundary (implementation in CLOUD-02)
+|-- pricing.md
+`-- package.json          Bun workspace orchestration
+```
 
-- The Nebula commercial landing
-- An organization dashboard shell
-- Operator listing and a mock deployed operator
-- Placeholder organization, governance, usage, and billing routes
-- The shared runtime workspace mounted for the demo operator
-- A cloud transport targeting `/api/workspaces/demo/runtime`
+The Web application continues to consume `@nebula/runtime-ui` from the adjacent
+`/home/jorge/nebula-frontend` checkout. Runtime chat, sessions, agents,
+capabilities, and tool presentation are shared; they are not copied into this
+repository.
 
-Authentication, persistence, provisioning, billing, and the runtime gateway
-are deliberately not implemented yet. Placeholder screens make those ownership
-boundaries explicit instead of simulating production behavior.
+## Current implementation
 
-## Run locally
+`apps/web` includes:
 
-The runtime UI is linked from the adjacent `nebula-frontend` repository:
+- The latest commercial Nebula landing from before the standalone/cloud split
+- Organization dashboard and Operator templates
+- Placeholder organization, governance, usage, and billing screens
+- The shared runtime workspace with the cloud transport
+
+`apps/control-plane` is deliberately small:
+
+- A separately buildable Bun process
+- Liveness, readiness, and versioned status endpoints
+- No fake login, organization, billing, provisioning, or gateway behavior
+
+`packages/auth` and `packages/database` only define dependency boundaries.
+Better Auth starts in CLOUD-03 and PostgreSQL starts in CLOUD-02.
+
+## Development
+
+Install all workspace dependencies from the repository root:
 
 ```bash
 bun install
+```
+
+Run the Web application:
+
+```bash
+cp apps/web/.env.example apps/web/.env
 bun run dev
 ```
 
-The development routes are:
+Run the control-plane scaffold separately:
+
+```bash
+cp apps/control-plane/.env.example apps/control-plane/.env
+bun run dev:control-plane
+```
+
+Validate the complete workspace:
+
+```bash
+bun test
+bun run build
+```
+
+The Web routes remain:
 
 ```text
 /                                  commercial landing
@@ -42,26 +85,17 @@ The development routes are:
 /app/billing                       billing placeholder
 ```
 
-The operator workspace expects a future control plane to proxy its runtime at
-`/api/workspaces/demo/runtime`. The browser must never receive the container's
-private address or runtime token.
+The control-plane scaffold listens on `127.0.0.1:7790` by default:
 
-## Backend breakpoint
+```text
+GET /health/live
+GET /health/ready
+GET /internal/v1/status
+```
 
-The future backend belongs in `apps/control-plane` or a separately deployed
-service within this repository. It will own:
+## Security boundary
 
-- Organizations, memberships, roles, and authentication
-- Operator records and lifecycle requests
-- Shared agent and capability artifacts
-- Billing, plans, quotas, usage aggregation, and audit history
-- Short-lived browser sessions and runtime gateway authorization
-- Worker scheduling records and private runtime addresses
-
-It must not duplicate the model loop, tools, sessions, or agent engine from
-Nebula Core.
-
-## Runtime routing
+The browser will eventually send authenticated requests to the control plane:
 
 ```text
 Browser
@@ -71,16 +105,25 @@ Browser
   -> nebula --serve
 ```
 
-Console traffic will use a separate worker-owned PTY endpoint:
+The browser must never receive worker service credentials, runtime bearer
+tokens, container addresses, Docker access, or host paths. The future gateway
+will retrieve private runtime material from `nebula-worker` and proxy authorized
+traffic server-side.
+
+Console traffic remains a separate worker-owned PTY route:
 
 ```text
 /api/workspaces/:workspaceId/console
 ```
 
-## Shared UI development
+## Ownership boundaries
 
-For now, `@nebula/runtime-ui` is a local file dependency. This keeps both
-applications independently buildable while the interface is evolving. Once
-the boundary stabilizes, publish versioned `@nebula/runtime-ui`,
-`@nebula/runtime-client`, and `@nebula/ui` packages rather than copying source
-or using a git submodule.
+- `nebula-cloud` owns commercial and organization business logic.
+- `nebula-frontend` owns reusable, organization-neutral runtime UI.
+- `agentic` owns the standalone Nebula binary and Runtime API.
+- `nebula-worker` owns containers, persistent workspace storage, resource
+  isolation, and Console PTYs.
+
+The control plane may request desired workspace state from the worker. It must
+not duplicate model execution, tools, sessions, agent configuration, or Docker
+lifecycle code.
