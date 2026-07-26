@@ -73,6 +73,7 @@ export function TerminalPage({ workspaceId }: { workspaceId: string }) {
     let disposed = false
     const fitTerminal = () => {
       if (disposed) return
+      if (container.clientWidth === 0 || container.clientHeight === 0) return
       try { fit.fit() } catch { /* hidden or unmounted */ }
     }
     fitTerminal()
