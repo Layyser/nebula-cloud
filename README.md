@@ -41,6 +41,7 @@ repository.
   workspace used by Chat
 - A host-provided Dashboard inside the shared runtime shell
 - Authenticated user and organization identity in the shared sidebar footer
+- Codex device-code connection in Settings for headless workspace runtimes
 
 `apps/control-plane` is deliberately small:
 
@@ -221,6 +222,12 @@ The browser never receives worker service credentials, runtime bearer tokens,
 container addresses, Docker access, or host paths. The gateway retrieves
 private runtime material from `nebula-worker`, replaces browser credentials
 with the runtime bearer token server-side, and streams the sanitized response.
+
+Provider authentication follows the same boundary. Cloud Settings starts and
+polls the organization-neutral Runtime API device flow through the authenticated
+gateway. The one-time user code may be shown in the browser, but the provider
+token is exchanged and persisted only by Nebula under the workspace's mounted
+`NEBULA_DIR/oauth`; it is not stored in the Cloud database.
 
 Console traffic uses a separate Cloud gateway and worker-owned PTY route:
 

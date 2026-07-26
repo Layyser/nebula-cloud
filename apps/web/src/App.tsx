@@ -8,8 +8,18 @@ import {
   type ReactNode,
 } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { LayoutDashboard, LogOut, Settings, Terminal, X } from 'lucide-react'
+import {
+  CheckCircle2,
+  Copy,
+  ExternalLink,
+  LayoutDashboard,
+  LogOut,
+  Settings,
+  Terminal,
+  X,
+} from 'lucide-react'
 import { NebulaBackground, RuntimeWorkspace, type RuntimeNavigationItem } from '@nebula/runtime-ui'
+import type { RuntimeTransport } from '@nebula/runtime-ui/transport'
 import { authClient } from './auth/authClient'
 import { AuthLoading } from './components/auth/AuthLoading'
 import { AuthPage } from './components/auth/AuthPage'
@@ -254,6 +264,7 @@ function AuthenticatedCloudApp({
           <SettingsWindow
             user={user}
             organization={activeOrganization}
+            transport={runtimeTransport}
             onClose={() => setSettingsOpen(false)}
           />
         )}
@@ -289,13 +300,26 @@ function WorkspaceResolutionError({
 function SettingsWindow({
   user,
   organization,
+  transport,
   onClose,
 }: {
   user: { name: string; email: string }
   organization: CloudOrganization
+  transport: RuntimeTransport
   onClose: () => void
 }) {
   const reduceMotion = useReducedMotion()
+  const [codexState, setCodexState] = useState<
+    'checking' | 'disconnected' | 'starting' | 'pending' | 'connected' | 'error'
+  >('checking')
+  const [codexError, setCodexError] = useState('')
+  const [copied, setCopied] = useState(false)
+  const [deviceFlow, setDeviceFlow] = useState<{
+    flowId: string
+    verificationUrl: string
+    userCode: string
+    intervalSeconds: number
+  } | null>(null)
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -304,6 +328,116 @@ function SettingsWindow({
     window.addEventListener('keydown', closeOnEscape)
     return () => window.removeEventListener('keydown', closeOnEscape)
   }, [onClose])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void transport.request('/auth/codex', { signal: controller.signal })
+      .then(async response => {
+        if (!response.ok) throw new Error('Could not read Codex connection status')
+        const payload = await response.json() as { authenticated?: boolean }
+        setCodexState(payload.authenticated ? 'connected' : 'disconnected')
+      })
+      .catch(error => {
+        if (controller.signal.aborted) return
+        setCodexError(error instanceof Error ? error.message : 'Codex status failed')
+        setCodexState('error')
+      })
+    return () => controller.abort()
+  }, [transport])
+
+  useEffect(() => {
+    if (!deviceFlow || codexState !== 'pending') return
+    let cancelled = false
+    let timeout = 0
+    const poll = async () => {
+      try {
+        const response = await transport.request(
+          `/auth/codex/device/${encodeURIComponent(deviceFlow.flowId)}`,
+        )
+        const payload = await response.json() as {
+          status?: string
+          message?: string | null
+        }
+        if (cancelled) return
+        if (payload.status === 'complete') {
+          setCodexState('connected')
+          setDeviceFlow(null)
+          return
+        }
+        if (payload.status !== 'pending') {
+          setCodexError(payload.message || 'Codex sign-in failed')
+          setCodexState('error')
+          setDeviceFlow(null)
+          return
+        }
+      } catch {
+        if (cancelled) return
+        setCodexError('Could not check Codex sign-in')
+        setCodexState('error')
+        setDeviceFlow(null)
+        return
+      }
+      timeout = window.setTimeout(
+        () => { void poll() },
+        Math.max(1000, deviceFlow.intervalSeconds * 1000),
+      )
+    }
+    timeout = window.setTimeout(
+      () => { void poll() },
+      Math.max(1000, deviceFlow.intervalSeconds * 1000),
+    )
+    return () => {
+      cancelled = true
+      window.clearTimeout(timeout)
+    }
+  }, [codexState, deviceFlow, transport])
+
+  const startCodexLogin = async () => {
+    setCodexError('')
+    setCopied(false)
+    setCodexState('starting')
+    try {
+      const response = await transport.request('/auth/codex/device', {
+        method: 'POST',
+      })
+      const payload = await response.json() as {
+        flow_id?: string
+        verification_url?: string
+        user_code?: string
+        interval_seconds?: number
+        error?: string
+      }
+      if (
+        !response.ok
+        || !payload.flow_id
+        || !payload.verification_url
+        || !payload.user_code
+      ) {
+        throw new Error(payload.error || 'Could not start Codex sign-in')
+      }
+      setDeviceFlow({
+        flowId: payload.flow_id,
+        verificationUrl: payload.verification_url,
+        userCode: payload.user_code,
+        intervalSeconds: payload.interval_seconds || 5,
+      })
+      setCodexState('pending')
+    } catch (error) {
+      setCodexError(error instanceof Error ? error.message : 'Codex sign-in failed')
+      setCodexState('error')
+    }
+  }
+
+  const copyDeviceCode = async () => {
+    if (!deviceFlow) return
+    try {
+      await navigator.clipboard.writeText(deviceFlow.userCode)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1600)
+    } catch {
+      setCodexError('Could not copy the one-time code')
+    }
+  }
 
   return (
     <motion.div
@@ -329,7 +463,7 @@ function SettingsWindow({
         <header className="flex h-14 items-center justify-between border-b border-white/[0.07] px-5">
           <div>
             <h2 id="cloud-settings-title" className="text-[14px] font-semibold text-white/90">Settings</h2>
-            <p className="text-[11px] text-white/35">Account and organization preferences</p>
+            <p className="text-[11px] text-white/35">Account, providers, and organization</p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close settings" className="flex h-8 w-8 items-center justify-center rounded-lg text-white/35 transition-colors hover:bg-white/[0.06] hover:text-white/80">
             <X size={15} />
@@ -339,6 +473,71 @@ function SettingsWindow({
           <SettingsField label="Name" value={user.name} />
           <SettingsField label="Email" value={user.email} />
           <SettingsField label="Organization" value={organization.name} />
+          <div className="border-t border-white/[0.07] pt-4">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/30">
+              Model providers
+            </p>
+            <div className="rounded-xl border border-white/[0.08] bg-black/20 p-3">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-[12px] font-medium text-white/75">Codex</p>
+                  <p className="mt-0.5 text-[10px] leading-4 text-white/35">
+                    Use your ChatGPT subscription inside this operator.
+                  </p>
+                </div>
+                {codexState === 'connected' ? (
+                  <span className="flex h-8 items-center gap-1.5 rounded-lg bg-emerald-400/[0.08] px-2.5 text-[11px] text-emerald-300/80">
+                    <CheckCircle2 size={13} />
+                    Connected
+                  </span>
+                ) : codexState !== 'pending' ? (
+                  <button
+                    type="button"
+                    disabled={codexState === 'checking' || codexState === 'starting'}
+                    onClick={() => { void startCodexLogin() }}
+                    className="flex h-8 items-center rounded-lg bg-white px-3 text-[11px] font-medium text-black transition hover:bg-white/90 disabled:cursor-wait disabled:opacity-55"
+                  >
+                    {codexState === 'starting' ? 'Starting…' : 'Connect'}
+                  </button>
+                ) : null}
+              </div>
+              {codexState === 'pending' && deviceFlow && (
+                <div className="mt-3 border-t border-white/[0.07] pt-3">
+                  <p className="text-[11px] leading-5 text-white/45">
+                    Open OpenAI and enter this one-time code:
+                  </p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => { void copyDeviceCode() }}
+                      className="flex h-9 flex-1 items-center justify-between rounded-lg border border-white/[0.09] bg-white/[0.035] px-3 font-mono text-[12px] tracking-[0.12em] text-white/75 transition hover:bg-white/[0.06]"
+                    >
+                      {deviceFlow.userCode}
+                      <span className="flex items-center gap-1 font-sans text-[10px] tracking-normal text-white/30">
+                        <Copy size={12} />
+                        {copied ? 'Copied' : 'Copy'}
+                      </span>
+                    </button>
+                    <a
+                      href={deviceFlow.verificationUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex h-9 items-center gap-1.5 rounded-lg bg-white px-3 text-[11px] font-medium text-black transition hover:bg-white/90"
+                    >
+                      Open OpenAI
+                      <ExternalLink size={12} />
+                    </a>
+                  </div>
+                  <p className="mt-2 text-[10px] text-white/25">
+                    Waiting for authorization. This code expires in 15 minutes.
+                  </p>
+                </div>
+              )}
+              {codexState === 'error' && codexError && (
+                <p className="mt-2 text-[10px] leading-4 text-red-300/65">{codexError}</p>
+              )}
+            </div>
+          </div>
           <p className="border-t border-white/[0.07] pt-4 text-[11px] leading-5 text-white/35">
             More account, organization, and operator preferences will appear here as the Cloud control plane grows.
           </p>
