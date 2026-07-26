@@ -50,17 +50,13 @@ export default function App() {
   const { pathname, navigate } = usePathname()
   const cloudRoute = pathname === '/login' || pathname.startsWith('/app')
 
-  if (!cloudRoute) {
-    return (
-      <PageBackground>
-        <LandingPage onLaunch={() => navigate('/app')} />
-      </PageBackground>
-    )
-  }
-
   return (
     <PageBackground>
-      <CloudSessionRoute pathname={pathname} navigate={navigate} />
+      {cloudRoute ? (
+        <CloudSessionRoute pathname={pathname} navigate={navigate} />
+      ) : (
+        <LandingPage onLaunch={() => navigate('/login')} />
+      )}
     </PageBackground>
   )
 }
@@ -185,6 +181,7 @@ function AuthenticatedCloudApp({
       id: 'terminal',
       label: 'Terminal',
       icon: <Terminal size={15} />,
+      keepMounted: true,
       onSelect: () => {},
       content: (
         <Suspense fallback={<div className="min-w-0 flex-1 bg-[#080808]" />}>

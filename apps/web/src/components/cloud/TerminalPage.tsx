@@ -186,7 +186,7 @@ export function TerminalPage({ workspaceId }: { workspaceId: string }) {
       <div className="min-h-0 flex-1 p-3">
         <div
           ref={containerRef}
-          className="h-full w-full overflow-hidden rounded-xl border border-white/[0.07] bg-[#080808] p-3 shadow-[0_20px_70px_rgba(0,0,0,0.28)]"
+          className="h-full w-full overflow-hidden bg-[#080808] p-3"
         />
       </div>
     </section>
