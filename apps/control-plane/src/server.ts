@@ -17,7 +17,10 @@ export interface ControlPlaneHandlerOptions {
   authHandler?: (request: Request) => Response | Promise<Response>
   resolveSession?: (
     request: Request,
-  ) => Promise<{ userId: string } | null>
+  ) => Promise<{
+    userId: string
+    activeOrganizationId?: string | null
+  } | null>
   ensurePersonalWorkspace?: (input: {
     userId: string
     organizationId: string
@@ -26,6 +29,13 @@ export interface ControlPlaneHandlerOptions {
     userId: string
     organizationId: string
   }) => EnsureWorkspaceRunningResponse
+  proxyRuntime?: (input: {
+    request: Request
+    workspaceId: string
+    runtimePath: string
+    userId: string
+    organizationId: string
+  }) => Promise<Response>
 }
 
 function json(value: unknown, status = 200): Response {
@@ -44,6 +54,7 @@ export function createControlPlaneHandler({
   resolveSession,
   ensurePersonalWorkspace,
   ensureWorkspaceRunning,
+  proxyRuntime,
 }: ControlPlaneHandlerOptions = {}): (request: Request) => Promise<Response> {
   return async request => {
     const url = new URL(request.url)
@@ -162,6 +173,64 @@ export function createControlPlaneHandler({
           code: 'workspace_provisioning_failed',
           retryable: true,
         } satisfies CloudErrorResponse, 500)
+      }
+    }
+
+    const runtimeRoute = url.pathname.match(
+      /^\/api\/workspaces\/([^/]+)\/runtime(?:\/(.*))?$/,
+    )
+    if (runtimeRoute) {
+      const session = resolveSession ? await resolveSession(request) : null
+      if (!session) {
+        return json({
+          error: 'authentication required',
+          code: 'authentication_required',
+        } satisfies CloudErrorResponse, 401)
+      }
+      if (!session.activeOrganizationId) {
+        return json({
+          error: 'an active organization is required',
+          code: 'active_organization_required',
+        } satisfies CloudErrorResponse, 403)
+      }
+      if (!proxyRuntime) {
+        return json({
+          error: 'runtime gateway is unavailable',
+          code: 'runtime_gateway_unavailable',
+          retryable: true,
+        } satisfies CloudErrorResponse, 503)
+      }
+
+      let workspaceId: string
+      try {
+        workspaceId = decodeURIComponent(runtimeRoute[1])
+      } catch {
+        return json({
+          error: 'workspaceId is invalid',
+          code: 'invalid_request',
+        } satisfies CloudErrorResponse, 400)
+      }
+      if (!workspaceId.trim()) {
+        return json({
+          error: 'workspaceId is required',
+          code: 'invalid_request',
+        } satisfies CloudErrorResponse, 400)
+      }
+
+      try {
+        return await proxyRuntime({
+          request,
+          workspaceId,
+          runtimePath: runtimeRoute[2] ? `/${runtimeRoute[2]}` : '/',
+          userId: session.userId,
+          organizationId: session.activeOrganizationId,
+        })
+      } catch {
+        return json({
+          error: 'runtime gateway failed',
+          code: 'runtime_gateway_failed',
+          retryable: true,
+        } satisfies CloudErrorResponse, 502)
       }
     }
 

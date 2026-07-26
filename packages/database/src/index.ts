@@ -143,6 +143,12 @@ export interface EnsureWorkspaceRunningResult {
   job: ProvisioningJob | null
 }
 
+export interface ResolveWorkspaceAccessOptions {
+  workspaceId: string
+  userId: string
+  organizationId: string
+}
+
 export interface ClaimProvisioningJobOptions {
   leaseOwner: string
   leaseDurationMs?: number
@@ -332,6 +338,39 @@ export function ensurePersonalWorkspace(
     if (!workspace) throw new Error('Personal workspace could not be resolved')
     return toPersonalWorkspace(workspace)
   }).immediate()
+}
+
+// Resolves only a personal workspace owned by the signed-in member in the
+// session's active organization. Returning null for every mismatch avoids
+// turning workspace IDs into an enumeration oracle.
+export function resolveWorkspaceAccess(
+  database: Database,
+  {
+    workspaceId,
+    userId,
+    organizationId,
+  }: ResolveWorkspaceAccessOptions,
+): PersonalWorkspace | null {
+  if (!workspaceId.trim() || !userId.trim() || !organizationId.trim()) return null
+  const row = database.query<WorkspaceRow, [string, string, string]>(`
+    SELECT
+      workspace.id,
+      workspace.member_id,
+      workspace.organization_id,
+      workspace.worker_workspace_id,
+      workspace.state,
+      workspace.created_at,
+      workspace.updated_at
+    FROM workspace
+    INNER JOIN member
+      ON member.id = workspace.member_id
+    WHERE workspace.id = ?
+      AND member.userId = ?
+      AND member.organizationId = ?
+      AND workspace.organization_id = member.organizationId
+    LIMIT 1
+  `).get(workspaceId, userId, organizationId)
+  return row ? toPersonalWorkspace(row) : null
 }
 
 export function ensureWorkspaceRunning(

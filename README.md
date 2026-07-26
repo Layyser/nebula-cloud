@@ -51,6 +51,8 @@ repository.
   `/api/workspaces/personal/ensure-running`
 - An authenticated Nebula Worker client and durable provisioning processor
   that drives queued personal workspaces to `ready`
+- An authenticated streaming Runtime API gateway that resolves private
+  container access server-side
 - No fake billing or production gateway behavior
 
 `packages/auth` configures Better Auth with Bun's built-in SQLite connection and
@@ -69,6 +71,8 @@ features exist. See [`docs/database.md`](docs/database.md) and
 [`docs/provisioning-jobs.md`](docs/provisioning-jobs.md). The worker connection,
 retry boundary, and local-host setup are documented in
 [`docs/worker-connection.md`](docs/worker-connection.md).
+The browser-to-runtime security and streaming boundary is documented in
+[`docs/runtime-gateway.md`](docs/runtime-gateway.md).
 
 ## Development
 
@@ -126,18 +130,19 @@ The Web routes remain:
 /app                               personal Operator and shared runtime UI
 ```
 
-In local development, Vite acts as a small gateway stand-in:
+In local development, Vite forwards the public Cloud route to the real control
+plane gateway:
 
 ```text
 /api/workspaces/:workspaceId/runtime/*
-  -> NEBULA_RUNTIME_ORIGIN
+  -> http://127.0.0.1:7790
+  -> private workspace Runtime API
 ```
 
-This preserves the production browser contract while allowing the Cloud shell
-to display sessions from a locally running Nebula operator. It reads
-`NEBULA_HTTP_TOKEN` when configured, otherwise `~/.nebula/http-token`. This
-development proxy does not implement tenancy or replace the authenticated
-control-plane gateway.
+Vite does not read a Nebula runtime token or connect to port 7777. Better Auth
+cookies reach the control plane, which verifies workspace ownership and active
+organization membership before retrieving private runtime access from the
+worker.
 
 The control-plane scaffold listens on `127.0.0.1:7790` by default:
 
@@ -149,6 +154,7 @@ ALL /api/auth/*                    Better Auth handler
 POST /api/workspaces/personal     Resolve the signed-in member's workspace
 POST /api/workspaces/personal/ensure-running
                                   Durably request a ready workspace
+ALL /api/workspaces/:id/runtime/* Authenticated Runtime API gateway
 ```
 
 Its default development database is
@@ -189,7 +195,7 @@ before a public launch. They are deliberately not simulated in the frontend.
 
 ## Security boundary
 
-The browser will eventually send authenticated requests to the control plane:
+The browser sends authenticated requests to the control plane:
 
 ```text
 Browser
@@ -199,10 +205,10 @@ Browser
   -> nebula --serve
 ```
 
-The browser must never receive worker service credentials, runtime bearer
-tokens, container addresses, Docker access, or host paths. The future gateway
-will retrieve private runtime material from `nebula-worker` and proxy authorized
-traffic server-side.
+The browser never receives worker service credentials, runtime bearer tokens,
+container addresses, Docker access, or host paths. The gateway retrieves
+private runtime material from `nebula-worker`, replaces browser credentials
+with the runtime bearer token server-side, and streams the sanitized response.
 
 Console traffic remains a separate worker-owned PTY route:
 

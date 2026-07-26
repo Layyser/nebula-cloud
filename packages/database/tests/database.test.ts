@@ -7,6 +7,7 @@ import {
   migrateCloudSchema,
   openCloudDatabase,
   ProvisioningJobLeaseLostError,
+  resolveWorkspaceAccess,
   WorkspaceMembershipNotFoundError,
 } from '../src'
 
@@ -151,6 +152,56 @@ test('requires membership and rejects cross-organization workspace ownership', (
       ) VALUES (?, ?, ?, 'pending', ?, ?)
     `).run('workspace-invalid', 'member-1', 'org-2', 1, 1))
       .toThrow('workspace membership does not belong to organization')
+  } finally {
+    database.close()
+  }
+})
+
+test('resolves runtime access only for the owning member and active organization', () => {
+  const database = openCloudDatabase({ path: ':memory:' })
+  try {
+    database.exec(`
+      CREATE TABLE user (id TEXT PRIMARY KEY);
+      CREATE TABLE organization (id TEXT PRIMARY KEY);
+      CREATE TABLE member (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL REFERENCES user(id),
+        organizationId TEXT NOT NULL REFERENCES organization(id)
+      );
+      INSERT INTO user (id) VALUES ('user-1'), ('user-2');
+      INSERT INTO organization (id) VALUES ('org-1'), ('org-2');
+      INSERT INTO member (id, userId, organizationId) VALUES
+        ('member-1', 'user-1', 'org-1'),
+        ('member-2', 'user-2', 'org-1'),
+        ('member-3', 'user-1', 'org-2');
+    `)
+    migrateCloudSchema(database)
+    const workspace = ensurePersonalWorkspace(database, {
+      userId: 'user-1',
+      organizationId: 'org-1',
+      createId: () => 'workspace-1',
+    })
+
+    expect(resolveWorkspaceAccess(database, {
+      workspaceId: workspace.id,
+      userId: 'user-1',
+      organizationId: 'org-1',
+    })?.id).toBe('workspace-1')
+    expect(resolveWorkspaceAccess(database, {
+      workspaceId: workspace.id,
+      userId: 'user-2',
+      organizationId: 'org-1',
+    })).toBeNull()
+    expect(resolveWorkspaceAccess(database, {
+      workspaceId: workspace.id,
+      userId: 'user-1',
+      organizationId: 'org-2',
+    })).toBeNull()
+    expect(resolveWorkspaceAccess(database, {
+      workspaceId: 'workspace-guessed',
+      userId: 'user-1',
+      organizationId: 'org-1',
+    })).toBeNull()
   } finally {
     database.close()
   }

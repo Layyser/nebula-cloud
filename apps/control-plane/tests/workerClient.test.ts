@@ -87,3 +87,35 @@ test('preserves stable retryability from worker failures', async () => {
   }
 })
 
+test('retrieves private runtime access without mutating the worker', async () => {
+  const requests: Request[] = []
+  const client = new NebulaWorkerClient({
+    baseURL: 'http://worker.test/',
+    token: 'service-token',
+    workspaceImage: 'nebula-workspace:test',
+    fetch: async (input, init) => {
+      requests.push(new Request(input, init))
+      return Response.json({
+        workspace_id: 'workspace-1',
+        network: 'private-network',
+        address: '172.31.0.7:7777',
+        access_token: 'private-runtime-token',
+      })
+    },
+  })
+
+  expect(await client.getRuntimeAccess({
+    workspaceId: 'workspace-1',
+  })).toEqual({
+    workspaceId: 'workspace-1',
+    network: 'private-network',
+    address: '172.31.0.7:7777',
+    accessToken: 'private-runtime-token',
+  })
+  expect(requests[0]?.method).toBe('GET')
+  expect(new URL(requests[0]!.url).pathname).toBe(
+    '/internal/v1/workspaces/workspace-1/runtime-access',
+  )
+  expect(requests[0]?.headers.get('authorization')).toBe('Bearer service-token')
+  expect(requests[0]?.headers.has('idempotency-key')).toBe(false)
+})

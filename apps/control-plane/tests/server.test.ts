@@ -195,3 +195,61 @@ test('does not expose ensure-running without a signed-in session', async () => {
   expect(response.status).toBe(401)
   expect((await response.json()).code).toBe('authentication_required')
 })
+
+test('requires a session and active organization for runtime gateway routes', async () => {
+  const signedOut = createControlPlaneHandler({
+    resolveSession: async () => null,
+  })
+  const signedOutResponse = await signedOut(new Request(
+    'http://control-plane.test/api/workspaces/workspace-1/runtime/health/ready',
+  ))
+  expect(signedOutResponse.status).toBe(401)
+  expect((await signedOutResponse.json()).code).toBe('authentication_required')
+
+  const noOrganization = createControlPlaneHandler({
+    resolveSession: async () => ({
+      userId: 'user-1',
+      activeOrganizationId: null,
+    }),
+  })
+  const noOrganizationResponse = await noOrganization(new Request(
+    'http://control-plane.test/api/workspaces/workspace-1/runtime/health/ready',
+  ))
+  expect(noOrganizationResponse.status).toBe(403)
+  expect((await noOrganizationResponse.json()).code).toBe(
+    'active_organization_required',
+  )
+})
+
+test('forwards an authenticated runtime route with its suffix and query intact', async () => {
+  const calls: unknown[] = []
+  const handler = createControlPlaneHandler({
+    resolveSession: async () => ({
+      userId: 'user-1',
+      activeOrganizationId: 'org-1',
+    }),
+    proxyRuntime: async input => {
+      calls.push({
+        workspaceId: input.workspaceId,
+        runtimePath: input.runtimePath,
+        userId: input.userId,
+        organizationId: input.organizationId,
+        search: new URL(input.request.url).search,
+      })
+      return new Response('proxied', { status: 202 })
+    },
+  })
+  const response = await handler(new Request(
+    'http://control-plane.test/api/workspaces/workspace%2D1/runtime/v1/events?after=3',
+  ))
+
+  expect(response.status).toBe(202)
+  expect(await response.text()).toBe('proxied')
+  expect(calls).toEqual([{
+    workspaceId: 'workspace-1',
+    runtimePath: '/v1/events',
+    userId: 'user-1',
+    organizationId: 'org-1',
+    search: '?after=3',
+  }])
+})

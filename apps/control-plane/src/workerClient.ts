@@ -23,9 +23,23 @@ interface WorkerMutationResponse {
   }
 }
 
+interface WorkerRuntimeAccessResponse {
+  workspace_id: string
+  network: string
+  address: string
+  access_token: string
+}
+
 export interface WorkerProvisioningResult {
   workspaceId: string
   observedState: string
+}
+
+export interface WorkerRuntimeAccess {
+  workspaceId: string
+  network: string
+  address: string
+  accessToken: string
 }
 
 export class WorkerClientError extends Error {
@@ -124,6 +138,40 @@ export class NebulaWorkerClient {
     }
   }
 
+  async getRuntimeAccess({
+    workspaceId,
+    signal,
+  }: {
+    workspaceId: string
+    signal?: AbortSignal
+  }): Promise<WorkerRuntimeAccess> {
+    const payload = await this.#request(
+      `/internal/v1/workspaces/${encodeURIComponent(workspaceId)}/runtime-access`,
+      {
+        method: 'GET',
+        signal,
+      },
+    ) as WorkerRuntimeAccessResponse
+    if (
+      payload.workspace_id !== workspaceId
+      || !payload.address?.trim()
+      || !payload.access_token?.trim()
+    ) {
+      throw new WorkerClientError({
+        message: 'Worker returned invalid runtime access material',
+        code: 'worker_invalid_runtime_access',
+        retryable: true,
+        status: 502,
+      })
+    }
+    return {
+      workspaceId: payload.workspace_id,
+      network: payload.network,
+      address: payload.address,
+      accessToken: payload.access_token,
+    }
+  }
+
   async #request(
     path: string,
     {
@@ -132,8 +180,8 @@ export class NebulaWorkerClient {
       body,
       signal,
     }: {
-      method: 'PUT' | 'POST'
-      idempotencyKey: string
+      method: 'GET' | 'PUT' | 'POST'
+      idempotencyKey?: string
       body?: unknown
       signal?: AbortSignal
     },
@@ -145,8 +193,8 @@ export class NebulaWorkerClient {
         signal,
         headers: {
           authorization: `Bearer ${this.#token}`,
-          'content-type': 'application/json',
-          'idempotency-key': idempotencyKey,
+          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+          ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}),
           'x-nebula-actor-id': 'nebula-cloud-control-plane',
         },
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -163,6 +211,7 @@ export class NebulaWorkerClient {
 
     const payload = await response.json().catch(() => null) as
       | WorkerMutationResponse
+      | WorkerRuntimeAccessResponse
       | WorkerErrorResponse
       | null
     if (!response.ok) {

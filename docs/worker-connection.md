@@ -62,6 +62,5 @@ project quotas, assign the persistent tree to the container UID, and manage
 Docker. Its API remains bound to loopback and requires a bearer token. The
 Cloud control plane may remain an unprivileged user service.
 
-This connection provisions the container, but it does not yet make the Cloud
-browser talk to its private Runtime API. That authenticated reverse proxy is
-the next gateway phase.
+The authenticated reverse proxy now consumes this connection. See
+[`runtime-gateway.md`](runtime-gateway.md).

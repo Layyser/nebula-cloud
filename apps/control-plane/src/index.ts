@@ -3,10 +3,12 @@ import { initializePersistence } from './persistence'
 import {
   ensurePersonalWorkspace,
   ensureWorkspaceRunning,
+  resolveWorkspaceAccess,
 } from '@nebula-cloud/database'
 import { randomUUID } from 'node:crypto'
 import { NebulaWorkerClient } from './workerClient'
 import { ProvisioningProcessor } from './provisioningProcessor'
+import { RuntimeGateway } from './runtimeGateway'
 
 const hostname = process.env.NEBULA_CLOUD_BIND?.trim() || '127.0.0.1'
 const port = Number.parseInt(process.env.NEBULA_CLOUD_PORT || '7790', 10)
@@ -43,15 +45,26 @@ if (Boolean(workerURL) !== Boolean(workerToken)) {
   throw new Error('NEBULA_WORKER_URL and NEBULA_WORKER_TOKEN must be configured together')
 }
 
-const provisioningProcessor = workerURL
+const workerClient = workerURL
+  ? new NebulaWorkerClient({
+      baseURL: workerURL,
+      token: workerToken,
+      workspaceImage,
+    })
+  : null
+
+const provisioningProcessor = workerClient
   ? new ProvisioningProcessor({
       database,
-      worker: new NebulaWorkerClient({
-        baseURL: workerURL,
-        token: workerToken,
-        workspaceImage,
-      }),
+      worker: workerClient,
       processorId: `control-plane-${randomUUID()}`,
+    })
+  : null
+
+const runtimeGateway = workerClient
+  ? new RuntimeGateway({
+      worker: workerClient,
+      resolveWorkspace: input => resolveWorkspaceAccess(database, input),
     })
   : null
 
@@ -65,7 +78,12 @@ const server = Bun.serve({
       const session = await auth.api.getSession({
         headers: request.headers,
       })
-      return session ? { userId: session.user.id } : null
+      return session
+        ? {
+            userId: session.user.id,
+            activeOrganizationId: session.session.activeOrganizationId,
+          }
+        : null
     },
     ensurePersonalWorkspace: ({ userId, organizationId }) => {
       const workspace = ensurePersonalWorkspace(database, {
@@ -107,6 +125,9 @@ const server = Bun.serve({
           : null,
       }
     },
+    proxyRuntime: runtimeGateway
+      ? input => runtimeGateway.proxy(input)
+      : undefined,
   }),
 })
 provisioningProcessor?.start()
