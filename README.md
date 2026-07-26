@@ -49,7 +49,9 @@ repository.
 - Authenticated personal-workspace resolution under `/api/workspaces/personal`
 - Durable ensure-running jobs under
   `/api/workspaces/personal/ensure-running`
-- No fake billing, worker execution, or production gateway behavior
+- An authenticated Nebula Worker client and durable provisioning processor
+  that drives queued personal workspaces to `ready`
+- No fake billing or production gateway behavior
 
 `packages/auth` configures Better Auth with Bun's built-in SQLite connection and
 the organization plugin. Better Auth owns its user, session, account,
@@ -64,7 +66,9 @@ membership. Durable provisioning jobs deduplicate ensure-running requests and
 support leases, retries, and restart recovery without Redis. Runtime instances,
 credentials, usage, and audit tables remain deferred until their owning
 features exist. See [`docs/database.md`](docs/database.md) and
-[`docs/provisioning-jobs.md`](docs/provisioning-jobs.md).
+[`docs/provisioning-jobs.md`](docs/provisioning-jobs.md). The worker connection,
+retry boundary, and local-host setup are documented in
+[`docs/worker-connection.md`](docs/worker-connection.md).
 
 ## Development
 
@@ -87,6 +91,17 @@ Run the control plane in a second terminal:
 cp apps/control-plane/.env.example apps/control-plane/.env
 bun run dev:control-plane
 ```
+
+To enable real provisioning, configure the ignored control-plane `.env`:
+
+```text
+NEBULA_WORKER_URL=http://127.0.0.1:7780
+NEBULA_WORKER_TOKEN=<same private service token as nebula-worker>
+NEBULA_WORKSPACE_IMAGE=nebula-workspace:dev
+```
+
+If the URL and token are absent, the control plane remains usable for
+authentication and workspace metadata but does not consume provisioning jobs.
 
 For local development, add `NEBULA_BOOTSTRAP_NAME`,
 `NEBULA_BOOTSTRAP_EMAIL`, and `NEBULA_BOOTSTRAP_PASSWORD` to the ignored
@@ -160,6 +175,12 @@ the Web application asks the control plane for the authenticated membership's
 personal workspace. The database creates it once and returns the same stable ID
 thereafter. The shared Runtime UI is not mounted until that resolution
 succeeds.
+
+CLOUD-05 persists idempotent ensure-running jobs. CLOUD-06 runs a lease-based
+processor in the control plane, authenticates every desired-state request to
+`nebula-worker`, uses stable per-job worker idempotency keys, retries transient
+failures with bounded exponential backoff, and atomically records the final
+workspace state. The browser never receives the worker token.
 
 Creating an invitation currently records it in SQLite but does not send email.
 Transactional email, invitation acceptance screens, password recovery, email

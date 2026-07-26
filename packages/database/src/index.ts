@@ -157,6 +157,7 @@ export interface FinishProvisioningJobOptions {
   retryDelayMs?: number
   errorCode?: string
   errorMessage?: string
+  workerWorkspaceId?: string
   now?: () => number
 }
 
@@ -470,6 +471,7 @@ export function finishProvisioningJob(
     retryDelayMs = 0,
     errorCode,
     errorMessage,
+    workerWorkspaceId,
     now = Date.now,
   }: FinishProvisioningJobOptions,
 ): ProvisioningJob {
@@ -493,6 +495,7 @@ export function finishProvisioningJob(
   const updateWorkspace = database.prepare(`
     UPDATE workspace
     SET state = ?,
+        worker_workspace_id = COALESCE(?, worker_workspace_id),
         updated_at = ?
     WHERE id = ?
   `)
@@ -529,9 +532,14 @@ export function finishProvisioningJob(
     if (result.changes !== 1) throw new ProvisioningJobLeaseLostError()
 
     if (outcome === 'succeeded') {
-      updateWorkspace.run('ready', timestamp, current.workspace_id)
+      updateWorkspace.run(
+        'ready',
+        workerWorkspaceId ?? current.workspace_id,
+        timestamp,
+        current.workspace_id,
+      )
     } else if (!retryable) {
-      updateWorkspace.run('failed', timestamp, current.workspace_id)
+      updateWorkspace.run('failed', null, timestamp, current.workspace_id)
     }
 
     const updated = findById.get(jobId)
