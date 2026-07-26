@@ -114,6 +114,23 @@ NEBULA_WORKSPACE_IMAGE=nebula-workspace:dev
 If the URL and token are absent, the control plane remains usable for
 authentication and workspace metadata but does not consume provisioning jobs.
 
+### Local worker service
+
+The local `nebula-worker` is installed as an enabled systemd service. It starts
+automatically when the WSL systemd instance starts, then reconciles workspace
+containers whose desired state is `running`.
+
+Check its status or control automatic startup with:
+
+```bash
+systemctl status nebula-worker
+sudo systemctl disable nebula-worker
+sudo systemctl enable nebula-worker
+```
+
+Disabling the service prevents it from starting automatically; it does not
+delete persistent workspace data.
+
 For local development, add `NEBULA_BOOTSTRAP_NAME`,
 `NEBULA_BOOTSTRAP_EMAIL`, and `NEBULA_BOOTSTRAP_PASSWORD` to the ignored
 control-plane `.env`, then create or verify that account with:
