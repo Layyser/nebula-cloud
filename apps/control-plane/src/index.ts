@@ -9,6 +9,13 @@ import { randomUUID } from 'node:crypto'
 import { NebulaWorkerClient } from './workerClient'
 import { ProvisioningProcessor } from './provisioningProcessor'
 import { RuntimeGateway } from './runtimeGateway'
+import {
+  attachConsoleBrowser,
+  closeConsoleBridge,
+  ConsoleGateway,
+  forwardConsoleInput,
+  type ConsoleBridgeData,
+} from './consoleGateway'
 
 const hostname = process.env.NEBULA_CLOUD_BIND?.trim() || '127.0.0.1'
 const port = Number.parseInt(process.env.NEBULA_CLOUD_PORT || '7790', 10)
@@ -68,67 +75,158 @@ const runtimeGateway = workerClient
     })
   : null
 
+const consoleGateway = workerClient
+  ? new ConsoleGateway({
+      workerURL,
+      workerToken,
+      resolveWorkspace: input => resolveWorkspaceAccess(database, input),
+    })
+  : null
+
+const controlPlaneHandler = createControlPlaneHandler({
+  version,
+  authHandler: auth.handler,
+  resolveSession: async request => {
+    const session = await auth.api.getSession({
+      headers: request.headers,
+    })
+    return session
+      ? {
+          userId: session.user.id,
+          activeOrganizationId: session.session.activeOrganizationId,
+        }
+      : null
+  },
+  ensurePersonalWorkspace: ({ userId, organizationId }) => {
+    const workspace = ensurePersonalWorkspace(database, {
+      userId,
+      organizationId,
+    })
+    return {
+      id: workspace.id,
+      organizationId: workspace.organizationId,
+      state: workspace.state,
+      createdAt: workspace.createdAt,
+      updatedAt: workspace.updatedAt,
+    }
+  },
+  ensureWorkspaceRunning: ({ userId, organizationId }) => {
+    const result = ensureWorkspaceRunning(database, {
+      userId,
+      organizationId,
+    })
+    return {
+      workspace: {
+        id: result.workspace.id,
+        organizationId: result.workspace.organizationId,
+        state: result.workspace.state,
+        createdAt: result.workspace.createdAt,
+        updatedAt: result.workspace.updatedAt,
+      },
+      job: result.job
+        ? {
+            id: result.job.id,
+            workspaceId: result.job.workspaceId,
+            operation: result.job.operation,
+            status: result.job.status,
+            attempt: result.job.attempt,
+            availableAt: result.job.availableAt,
+            createdAt: result.job.createdAt,
+            updatedAt: result.job.updatedAt,
+          }
+        : null,
+    }
+  },
+  proxyRuntime: runtimeGateway
+    ? input => runtimeGateway.proxy(input)
+    : undefined,
+})
+
 const server = Bun.serve({
   hostname,
   port,
-  fetch: createControlPlaneHandler({
-    version,
-    authHandler: auth.handler,
-    resolveSession: async request => {
-      const session = await auth.api.getSession({
-        headers: request.headers,
-      })
-      return session
-        ? {
-            userId: session.user.id,
-            activeOrganizationId: session.session.activeOrganizationId,
-          }
-        : null
+  async fetch(request, bunServer) {
+    const url = new URL(request.url)
+    const consoleRoute = url.pathname.match(
+      /^\/api\/workspaces\/([^/]+)\/console$/,
+    )
+    if (!consoleRoute) return await controlPlaneHandler(request)
+    if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
+      return Response.json({
+        error: 'WebSocket upgrade required',
+        code: 'websocket_upgrade_required',
+      }, { status: 426 })
+    }
+    const origin = request.headers.get('origin')
+    if (!origin || !trustedOrigins.includes(origin)) {
+      return Response.json({
+        error: 'Console origin is not allowed',
+        code: 'origin_not_allowed',
+      }, { status: 403 })
+    }
+    const session = await auth.api.getSession({ headers: request.headers })
+    if (!session) {
+      return Response.json({
+        error: 'authentication required',
+        code: 'authentication_required',
+      }, { status: 401 })
+    }
+    const organizationId = session.session.activeOrganizationId
+    if (!organizationId) {
+      return Response.json({
+        error: 'an active organization is required',
+        code: 'active_organization_required',
+      }, { status: 403 })
+    }
+    if (!consoleGateway) {
+      return Response.json({
+        error: 'Console gateway is unavailable',
+        code: 'console_gateway_unavailable',
+        retryable: true,
+      }, { status: 503 })
+    }
+
+    let workspaceId: string
+    try {
+      workspaceId = decodeURIComponent(consoleRoute[1])
+    } catch {
+      return Response.json({
+        error: 'workspaceId is invalid',
+        code: 'invalid_request',
+      }, { status: 400 })
+    }
+    const prepared = await consoleGateway.prepare({
+      workspaceId,
+      userId: session.user.id,
+      organizationId,
+      actorId: session.user.id,
+      rows: url.searchParams.get('rows'),
+      columns: url.searchParams.get('columns'),
+    })
+    if (prepared instanceof Response) return prepared
+    if (bunServer.upgrade(request, { data: prepared })) return
+    closeConsoleBridge(prepared, 1011, 'Browser upgrade failed')
+    return Response.json({
+      error: 'Console upgrade failed',
+      code: 'console_upgrade_failed',
+      retryable: true,
+    }, { status: 500 })
+  },
+  websocket: {
+    data: {} as ConsoleBridgeData,
+    maxPayloadLength: 64 * 1024,
+    idleTimeout: 255,
+    perMessageDeflate: false,
+    open(socket) {
+      attachConsoleBrowser(socket.data, socket)
     },
-    ensurePersonalWorkspace: ({ userId, organizationId }) => {
-      const workspace = ensurePersonalWorkspace(database, {
-        userId,
-        organizationId,
-      })
-      return {
-        id: workspace.id,
-        organizationId: workspace.organizationId,
-        state: workspace.state,
-        createdAt: workspace.createdAt,
-        updatedAt: workspace.updatedAt,
-      }
+    message(socket, payload) {
+      forwardConsoleInput(socket.data, payload)
     },
-    ensureWorkspaceRunning: ({ userId, organizationId }) => {
-      const result = ensureWorkspaceRunning(database, {
-        userId,
-        organizationId,
-      })
-      return {
-        workspace: {
-          id: result.workspace.id,
-          organizationId: result.workspace.organizationId,
-          state: result.workspace.state,
-          createdAt: result.workspace.createdAt,
-          updatedAt: result.workspace.updatedAt,
-        },
-        job: result.job
-          ? {
-              id: result.job.id,
-              workspaceId: result.job.workspaceId,
-              operation: result.job.operation,
-              status: result.job.status,
-              attempt: result.job.attempt,
-              availableAt: result.job.availableAt,
-              createdAt: result.job.createdAt,
-              updatedAt: result.job.updatedAt,
-            }
-          : null,
-      }
+    close(socket) {
+      closeConsoleBridge(socket.data, 1000, 'Browser disconnected')
     },
-    proxyRuntime: runtimeGateway
-      ? input => runtimeGateway.proxy(input)
-      : undefined,
-  }),
+  },
 })
 provisioningProcessor?.start()
 

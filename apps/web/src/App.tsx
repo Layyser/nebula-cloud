@@ -1,6 +1,14 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { LayoutDashboard, LogOut, Settings, X } from 'lucide-react'
+import { LayoutDashboard, LogOut, Settings, Terminal, X } from 'lucide-react'
 import { NebulaBackground, RuntimeWorkspace, type RuntimeNavigationItem } from '@nebula/runtime-ui'
 import { authClient } from './auth/authClient'
 import { AuthLoading } from './components/auth/AuthLoading'
@@ -15,6 +23,10 @@ import { createCloudRuntimeTransport } from './runtime/cloudRuntimeTransport'
 import { ensurePersonalWorkspace } from './runtime/personalWorkspace'
 
 const runtimeGatewayBase = import.meta.env.VITE_NEBULA_RUNTIME_GATEWAY_BASE || '/api/workspaces'
+const TerminalPage = lazy(async () => {
+  const module = await import('./components/cloud/TerminalPage')
+  return { default: module.TerminalPage }
+})
 
 function usePathname() {
   const [pathname, setPathname] = useState(window.location.pathname)
@@ -170,6 +182,17 @@ function AuthenticatedCloudApp({
 
   const runtimeNavigation = useMemo<RuntimeNavigationItem[]>(() => [
     {
+      id: 'terminal',
+      label: 'Terminal',
+      icon: <Terminal size={15} />,
+      onSelect: () => {},
+      content: (
+        <Suspense fallback={<div className="min-w-0 flex-1 bg-[#080808]" />}>
+          <TerminalPage workspaceId={workspaceId} />
+        </Suspense>
+      ),
+    },
+    {
       id: 'dashboard',
       label: 'Dashboard',
       icon: <LayoutDashboard size={15} />,
@@ -180,7 +203,7 @@ function AuthenticatedCloudApp({
         </div>
       ),
     },
-  ], [user.name])
+  ], [user.name, workspaceId])
 
   const signOut = useCallback(async () => {
     if (signingOut) return

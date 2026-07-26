@@ -37,6 +37,8 @@ repository.
 - The shared runtime workspace as the authenticated application root
 - The exact standalone New Session, Agents, Capabilities, Search, and
   workspace-grouped Sessions UI
+- A Cloud-only Terminal view backed by xterm.js and the same persistent
+  workspace used by Chat
 - A host-provided Dashboard inside the shared runtime shell
 - Authenticated user and organization identity in the shared sidebar footer
 
@@ -53,6 +55,8 @@ repository.
   that drives queued personal workspaces to `ready`
 - An authenticated streaming Runtime API gateway that resolves private
   container access server-side
+- An authenticated Console WebSocket gateway that resolves and bridges the
+  member's private worker PTY server-side
 - No fake billing or production gateway behavior
 
 `packages/auth` configures Better Auth with Bun's built-in SQLite connection and
@@ -73,6 +77,8 @@ retry boundary, and local-host setup are documented in
 [`docs/worker-connection.md`](docs/worker-connection.md).
 The browser-to-runtime security and streaming boundary is documented in
 [`docs/runtime-gateway.md`](docs/runtime-gateway.md).
+The browser-to-PTY security and WebSocket boundary is documented in
+[`docs/console-gateway.md`](docs/console-gateway.md).
 
 ## Development
 
@@ -144,6 +150,11 @@ cookies reach the control plane, which verifies workspace ownership and active
 organization membership before retrieving private runtime access from the
 worker.
 
+Terminal WebSockets connect directly to the local control plane on port `7790`
+during development; production uses the page's same origin. The deployment
+reverse proxy must forward Console WebSocket upgrades. The browser still sends
+only its Better Auth cookie and never receives worker credentials.
+
 The control-plane scaffold listens on `127.0.0.1:7790` by default:
 
 ```text
@@ -155,6 +166,7 @@ POST /api/workspaces/personal     Resolve the signed-in member's workspace
 POST /api/workspaces/personal/ensure-running
                                   Durably request a ready workspace
 ALL /api/workspaces/:id/runtime/* Authenticated Runtime API gateway
+GET /api/workspaces/:id/console   Authenticated Console WebSocket gateway
 ```
 
 Its default development database is
@@ -210,10 +222,14 @@ container addresses, Docker access, or host paths. The gateway retrieves
 private runtime material from `nebula-worker`, replaces browser credentials
 with the runtime bearer token server-side, and streams the sanitized response.
 
-Console traffic remains a separate worker-owned PTY route:
+Console traffic uses a separate Cloud gateway and worker-owned PTY route:
 
 ```text
-/api/workspaces/:workspaceId/console
+Browser
+  -> /api/workspaces/:workspaceId/console
+  -> authenticated cloud WebSocket gateway
+  -> private worker Console endpoint
+  -> Docker exec PTY
 ```
 
 ## Ownership boundaries
