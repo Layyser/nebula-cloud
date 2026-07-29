@@ -196,6 +196,55 @@ test('does not expose ensure-running without a signed-in session', async () => {
   expect((await response.json()).code).toBe('authentication_required')
 })
 
+test('restarts only the authenticated active-organization workspace', async () => {
+  const calls: unknown[] = []
+  const handler = createControlPlaneHandler({
+    resolveSession: async () => ({
+      userId: 'user-1',
+      activeOrganizationId: 'org-1',
+    }),
+    restartWorkspace: async input => {
+      calls.push(input)
+      return {
+        workspaceId: input.workspaceId,
+        state: 'ready',
+      }
+    },
+  })
+  const response = await handler(new Request(
+    'http://control-plane.test/api/workspaces/workspace%2D1/restart',
+    { method: 'POST' },
+  ))
+
+  expect(response.status).toBe(200)
+  expect(await response.json()).toEqual({
+    workspaceId: 'workspace-1',
+    state: 'ready',
+  })
+  expect(calls).toEqual([{
+    workspaceId: 'workspace-1',
+    userId: 'user-1',
+    organizationId: 'org-1',
+  }])
+})
+
+test('hides workspaces the authenticated member cannot restart', async () => {
+  const handler = createControlPlaneHandler({
+    resolveSession: async () => ({
+      userId: 'user-1',
+      activeOrganizationId: 'org-1',
+    }),
+    restartWorkspace: async () => null,
+  })
+  const response = await handler(new Request(
+    'http://control-plane.test/api/workspaces/another-workspace/restart',
+    { method: 'POST' },
+  ))
+
+  expect(response.status).toBe(404)
+  expect((await response.json()).code).toBe('workspace_not_found')
+})
+
 test('requires a session and active organization for runtime gateway routes', async () => {
   const signedOut = createControlPlaneHandler({
     resolveSession: async () => null,

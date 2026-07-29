@@ -14,6 +14,7 @@ import {
   ExternalLink,
   LayoutDashboard,
   LogOut,
+  RotateCw,
   Settings,
   Terminal,
   X,
@@ -30,7 +31,7 @@ import {
   type CloudOrganization,
 } from './components/organization/OrganizationGate'
 import { createCloudRuntimeTransport } from './runtime/cloudRuntimeTransport'
-import { ensurePersonalWorkspace } from './runtime/personalWorkspace'
+import { ensurePersonalWorkspace, restartWorkspace } from './runtime/personalWorkspace'
 
 const runtimeGatewayBase = import.meta.env.VITE_NEBULA_RUNTIME_GATEWAY_BASE || '/api/workspaces'
 const TerminalPage = lazy(async () => {
@@ -266,8 +267,12 @@ function AuthenticatedCloudApp({
           <SettingsWindow
             user={user}
             organization={activeOrganization}
+            workspaceId={workspaceId}
             transport={runtimeTransport}
             onProviderConnected={() => {
+              setRuntimeCatalogRevision(current => current + 1)
+            }}
+            onOperatorRestarted={() => {
               setRuntimeCatalogRevision(current => current + 1)
             }}
             onClose={() => setSettingsOpen(false)}
@@ -305,14 +310,18 @@ function WorkspaceResolutionError({
 function SettingsWindow({
   user,
   organization,
+  workspaceId,
   transport,
   onProviderConnected,
+  onOperatorRestarted,
   onClose,
 }: {
   user: { name: string; email: string }
   organization: CloudOrganization
+  workspaceId: string
   transport: RuntimeTransport
   onProviderConnected: () => void
+  onOperatorRestarted: () => void
   onClose: () => void
 }) {
   const reduceMotion = useReducedMotion()
@@ -321,6 +330,10 @@ function SettingsWindow({
   >('checking')
   const [codexError, setCodexError] = useState('')
   const [copied, setCopied] = useState(false)
+  const [restartState, setRestartState] = useState<
+    'idle' | 'confirming' | 'restarting' | 'restarted' | 'error'
+  >('idle')
+  const [restartError, setRestartError] = useState('')
   const [deviceFlow, setDeviceFlow] = useState<{
     flowId: string
     verificationUrl: string
@@ -447,6 +460,21 @@ function SettingsWindow({
     }
   }
 
+  const restartOperator = async () => {
+    if (restartState === 'restarting') return
+    setRestartError('')
+    setRestartState('restarting')
+    try {
+      await restartWorkspace(workspaceId)
+      setRestartState('restarted')
+      onOperatorRestarted()
+      window.setTimeout(() => setRestartState('idle'), 2500)
+    } catch (error) {
+      setRestartError(error instanceof Error ? error.message : 'Operator restart failed')
+      setRestartState('error')
+    }
+  }
+
   return (
     <motion.div
       className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-5 backdrop-blur-sm"
@@ -543,6 +571,65 @@ function SettingsWindow({
               )}
               {codexState === 'error' && codexError && (
                 <p className="mt-2 text-[10px] leading-4 text-red-300/65">{codexError}</p>
+              )}
+            </div>
+          </div>
+          <div className="border-t border-white/[0.07] pt-4">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/30">
+              Operator
+            </p>
+            <div className="rounded-xl border border-white/[0.08] bg-black/20 p-3">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-[12px] font-medium text-white/75">Restart operator</p>
+                  <p className="mt-0.5 text-[10px] leading-4 text-white/35">
+                    Restarts Nebula and the terminal without deleting your files.
+                  </p>
+                </div>
+                {restartState === 'confirming' ? null : (
+                  <button
+                    type="button"
+                    disabled={restartState === 'restarting'}
+                    onClick={() => setRestartState('confirming')}
+                    className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-white/[0.09] bg-white/[0.035] px-3 text-[11px] font-medium text-white/65 transition hover:bg-white/[0.07] hover:text-white/85 disabled:cursor-wait disabled:opacity-55"
+                  >
+                    <RotateCw
+                      size={12}
+                      className={restartState === 'restarting' ? 'animate-spin' : ''}
+                    />
+                    {restartState === 'restarting'
+                      ? 'Restarting…'
+                      : restartState === 'restarted'
+                        ? 'Restarted'
+                        : 'Restart'}
+                  </button>
+                )}
+              </div>
+              {restartState === 'confirming' && (
+                <div className="mt-3 flex items-center justify-between gap-3 border-t border-white/[0.07] pt-3">
+                  <p className="text-[10px] leading-4 text-white/40">
+                    Active commands and terminal connections will stop.
+                  </p>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setRestartState('idle')}
+                      className="flex h-8 items-center rounded-lg px-3 text-[11px] font-medium text-white/45 transition hover:bg-white/[0.05] hover:text-white/70"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { void restartOperator() }}
+                      className="flex h-8 items-center rounded-lg bg-white px-3 text-[11px] font-medium text-black transition hover:bg-white/90"
+                    >
+                      Restart
+                    </button>
+                  </div>
+                </div>
+              )}
+              {restartState === 'error' && restartError && (
+                <p className="mt-2 text-[10px] leading-4 text-red-300/65">{restartError}</p>
               )}
             </div>
           </div>

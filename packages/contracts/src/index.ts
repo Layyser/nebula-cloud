@@ -57,3 +57,8 @@ export interface ProvisioningJobSummary {
 export interface EnsureWorkspaceRunningResponse extends PersonalWorkspaceResponse {
   job: ProvisioningJobSummary | null
 }
+
+export interface RestartWorkspaceResponse {
+  workspaceId: string
+  state: 'ready'
+}

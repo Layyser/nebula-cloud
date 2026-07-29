@@ -172,6 +172,43 @@ export class NebulaWorkerClient {
     }
   }
 
+  async restartWorkspace({
+    workspaceId,
+    operationId,
+    signal,
+  }: {
+    workspaceId: string
+    operationId: string
+    signal?: AbortSignal
+  }): Promise<WorkerProvisioningResult> {
+    const payload = await this.#request(
+      `/internal/v1/workspaces/${encodeURIComponent(workspaceId)}/restart`,
+      {
+        method: 'POST',
+        idempotencyKey: operationId,
+        signal,
+        body: {
+          timeout_seconds: 30,
+        },
+      },
+    ) as WorkerMutationResponse
+    if (
+      payload.workspace?.id !== workspaceId
+      || payload.workspace.observed_state !== 'ready'
+    ) {
+      throw new WorkerClientError({
+        message: 'Worker did not report the restarted workspace ready',
+        code: 'worker_workspace_not_ready',
+        retryable: true,
+        status: 503,
+      })
+    }
+    return {
+      workspaceId: payload.workspace.id,
+      observedState: payload.workspace.observed_state,
+    }
+  }
+
   async #request(
     path: string,
     {

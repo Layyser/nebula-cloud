@@ -6,6 +6,7 @@ import {
   type EnsureWorkspaceRunningResponse,
   type HealthResponse,
   type PersonalWorkspaceResponse,
+  type RestartWorkspaceResponse,
 } from '@nebula-cloud/contracts'
 import { WorkspaceMembershipNotFoundError } from '@nebula-cloud/database'
 
@@ -29,6 +30,11 @@ export interface ControlPlaneHandlerOptions {
     userId: string
     organizationId: string
   }) => EnsureWorkspaceRunningResponse
+  restartWorkspace?: (input: {
+    workspaceId: string
+    userId: string
+    organizationId: string
+  }) => Promise<RestartWorkspaceResponse | null>
   proxyRuntime?: (input: {
     request: Request
     workspaceId: string
@@ -54,6 +60,7 @@ export function createControlPlaneHandler({
   resolveSession,
   ensurePersonalWorkspace,
   ensureWorkspaceRunning,
+  restartWorkspace,
   proxyRuntime,
 }: ControlPlaneHandlerOptions = {}): (request: Request) => Promise<Response> {
   return async request => {
@@ -173,6 +180,69 @@ export function createControlPlaneHandler({
           code: 'workspace_provisioning_failed',
           retryable: true,
         } satisfies CloudErrorResponse, 500)
+      }
+    }
+
+    const restartRoute = url.pathname.match(
+      /^\/api\/workspaces\/([^/]+)\/restart$/,
+    )
+    if (request.method === 'POST' && restartRoute) {
+      const session = resolveSession ? await resolveSession(request) : null
+      if (!session) {
+        return json({
+          error: 'authentication required',
+          code: 'authentication_required',
+        } satisfies CloudErrorResponse, 401)
+      }
+      if (!session.activeOrganizationId) {
+        return json({
+          error: 'an active organization is required',
+          code: 'active_organization_required',
+        } satisfies CloudErrorResponse, 403)
+      }
+      if (!restartWorkspace) {
+        return json({
+          error: 'workspace restart is unavailable',
+          code: 'workspace_restart_unavailable',
+          retryable: true,
+        } satisfies CloudErrorResponse, 503)
+      }
+
+      let workspaceId: string
+      try {
+        workspaceId = decodeURIComponent(restartRoute[1])
+      } catch {
+        return json({
+          error: 'workspaceId is invalid',
+          code: 'invalid_request',
+        } satisfies CloudErrorResponse, 400)
+      }
+      if (!workspaceId.trim()) {
+        return json({
+          error: 'workspaceId is required',
+          code: 'invalid_request',
+        } satisfies CloudErrorResponse, 400)
+      }
+
+      try {
+        const restarted = await restartWorkspace({
+          workspaceId,
+          userId: session.userId,
+          organizationId: session.activeOrganizationId,
+        })
+        if (!restarted) {
+          return json({
+            error: 'workspace not found',
+            code: 'workspace_not_found',
+          } satisfies CloudErrorResponse, 404)
+        }
+        return json(restarted)
+      } catch {
+        return json({
+          error: 'workspace could not be restarted',
+          code: 'workspace_restart_failed',
+          retryable: true,
+        } satisfies CloudErrorResponse, 502)
       }
     }
 

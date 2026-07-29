@@ -119,3 +119,36 @@ test('retrieves private runtime access without mutating the worker', async () =>
   expect(requests[0]?.headers.get('authorization')).toBe('Bearer service-token')
   expect(requests[0]?.headers.has('idempotency-key')).toBe(false)
 })
+
+test('restarts a workspace with a durable operation key', async () => {
+  const requests: Request[] = []
+  const client = new NebulaWorkerClient({
+    baseURL: 'http://worker.test',
+    token: 'service-token',
+    workspaceImage: 'nebula-workspace:test',
+    fetch: async (input, init) => {
+      requests.push(new Request(input, init))
+      return Response.json({
+        workspace: {
+          id: 'workspace-1',
+          observed_state: 'ready',
+        },
+      })
+    },
+  })
+
+  expect(await client.restartWorkspace({
+    workspaceId: 'workspace-1',
+    operationId: 'restart-1',
+  })).toEqual({
+    workspaceId: 'workspace-1',
+    observedState: 'ready',
+  })
+  expect(requests).toHaveLength(1)
+  expect(requests[0]?.method).toBe('POST')
+  expect(new URL(requests[0]!.url).pathname).toBe(
+    '/internal/v1/workspaces/workspace-1/restart',
+  )
+  expect(requests[0]?.headers.get('idempotency-key')).toBe('restart-1')
+  expect(await requests[0]?.json()).toEqual({ timeout_seconds: 30 })
+})

@@ -137,6 +137,27 @@ const controlPlaneHandler = createControlPlaneHandler({
         : null,
     }
   },
+  restartWorkspace: workerClient
+    ? async ({ workspaceId, userId, organizationId }) => {
+        const workspace = resolveWorkspaceAccess(database, {
+          workspaceId,
+          userId,
+          organizationId,
+        })
+        if (!workspace) return null
+        if (!workspace.workerWorkspaceId) {
+          throw new Error('Workspace has not been assigned to a worker')
+        }
+        const restarted = await workerClient.restartWorkspace({
+          workspaceId: workspace.workerWorkspaceId,
+          operationId: `cloud-restart-${randomUUID()}`,
+        })
+        return {
+          workspaceId,
+          state: restarted.observedState as 'ready',
+        }
+      }
+    : undefined,
   proxyRuntime: runtimeGateway
     ? input => runtimeGateway.proxy(input)
     : undefined,

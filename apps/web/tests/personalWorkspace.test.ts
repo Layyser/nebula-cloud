@@ -1,5 +1,8 @@
 import { afterEach, expect, test } from 'bun:test'
-import { ensurePersonalWorkspace } from '../src/runtime/personalWorkspace'
+import {
+  ensurePersonalWorkspace,
+  restartWorkspace,
+} from '../src/runtime/personalWorkspace'
 
 const originalFetch = globalThis.fetch
 
@@ -40,4 +43,25 @@ test('surfaces the control-plane workspace error', async () => {
 
   expect(ensurePersonalWorkspace('org-missing'))
     .rejects.toThrow('organization membership required')
+})
+
+test('requests an authenticated operator restart', async () => {
+  let capturedInput: RequestInfo | URL | null = null
+  let capturedInit: RequestInit | undefined
+  globalThis.fetch = async (input, init) => {
+    capturedInput = input
+    capturedInit = init
+    return Response.json({
+      workspaceId: 'workspace with spaces',
+      state: 'ready',
+    })
+  }
+
+  await restartWorkspace('workspace with spaces')
+
+  expect(capturedInput).toBe('/api/workspaces/workspace%20with%20spaces/restart')
+  expect(capturedInit).toEqual({
+    method: 'POST',
+    credentials: 'include',
+  })
 })
