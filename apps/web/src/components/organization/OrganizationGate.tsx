@@ -1,8 +1,8 @@
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { ArrowRight, Building2, LoaderCircle, Plus } from 'lucide-react'
-import { NebulaMark } from '@nebula/runtime-ui'
 import { authClient } from '../../auth/authClient'
 import { AuthLoading } from '../auth/AuthLoading'
+import { CloudBrand } from '../auth/CloudBrand'
 
 export interface CloudOrganization {
   id: string
@@ -12,13 +12,14 @@ export interface CloudOrganization {
 }
 
 interface OrganizationGateProps {
+  onBack: () => void
   children: (
     activeOrganization: CloudOrganization,
     organizations: CloudOrganization[],
   ) => ReactNode
 }
 
-export function OrganizationGate({ children }: OrganizationGateProps) {
+export function OrganizationGate({ children, onBack }: OrganizationGateProps) {
   const organizationsQuery = authClient.useListOrganizations()
   const activeQuery = authClient.useActiveOrganization()
   const organizations = (organizationsQuery.data || []) as CloudOrganization[]
@@ -35,6 +36,7 @@ export function OrganizationGate({ children }: OrganizationGateProps) {
   return (
     <OrganizationSetup
       organizations={organizations}
+      onBack={onBack}
       onChanged={async () => {
         await organizationsQuery.refetch()
         await activeQuery.refetch()
@@ -46,9 +48,11 @@ export function OrganizationGate({ children }: OrganizationGateProps) {
 function OrganizationSetup({
   organizations,
   onChanged,
+  onBack,
 }: {
   organizations: CloudOrganization[]
   onChanged: () => Promise<void>
+  onBack: () => void
 }) {
   const [name, setName] = useState('')
   const [slug, setSlug] = useState('')
@@ -97,10 +101,7 @@ function OrganizationSetup({
   return (
     <div className="relative z-[2] flex min-h-screen items-center justify-center px-5 py-12 text-white">
       <div className="w-full max-w-[520px] rounded-2xl border border-white/[0.09] bg-[#0d0e0f]/92 p-6 shadow-[0_32px_100px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:p-8">
-        <div className="flex items-center gap-2.5">
-          <NebulaMark size={24} />
-          <span className="nebula-wordmark text-sm font-semibold">Nebula</span>
-        </div>
+        <CloudBrand onSelect={onBack} />
         <h1 className="mt-7 text-3xl font-medium tracking-[-0.04em]">Choose your organization</h1>
         <p className="mt-2 text-sm leading-6 text-white/45">
           Your organization owns memberships, shared capabilities, governance, and billing.

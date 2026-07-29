@@ -1,5 +1,6 @@
 import type {
   CloudErrorResponse,
+  EnsureWorkspaceRunningResponse,
   PersonalWorkspaceResponse,
   RestartWorkspaceResponse,
 } from '@nebula-cloud/contracts'
@@ -39,6 +40,37 @@ export async function ensurePersonalWorkspace(
     throw new Error('Control plane returned an invalid personal workspace')
   }
   return payload.workspace
+}
+
+export async function ensureWorkspaceRunning(
+  organizationId: string,
+  {
+    fetch: request = globalThis.fetch,
+    onSessionExpired = notifySessionExpired,
+  }: CloudRequestOptions = {},
+): Promise<EnsureWorkspaceRunningResponse> {
+  const response = observeAuthenticationResponse(await request(
+    '/api/workspaces/personal/ensure-running',
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ organizationId }),
+    },
+  ), onSessionExpired)
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => null) as CloudErrorResponse | null
+    throw new Error(error?.error || `Workspace startup request failed (${response.status})`)
+  }
+
+  const payload = await response.json() as EnsureWorkspaceRunningResponse
+  if (!payload.workspace?.id || !payload.workspace.state) {
+    throw new Error('Control plane returned an invalid workspace startup response')
+  }
+  return payload
 }
 
 export async function restartWorkspace(

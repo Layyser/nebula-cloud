@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from 'bun:test'
 import {
   ensurePersonalWorkspace,
+  ensureWorkspaceRunning,
   restartWorkspace,
 } from '../src/runtime/personalWorkspace'
 
@@ -43,6 +44,42 @@ test('surfaces the control-plane workspace error', async () => {
 
   expect(ensurePersonalWorkspace('org-missing'))
     .rejects.toThrow('organization membership required')
+})
+
+test('schedules workspace provisioning for the authenticated organization', async () => {
+  let capturedInput: RequestInfo | URL | null = null
+  let capturedInit: RequestInit | undefined
+  const result = await ensureWorkspaceRunning('org-1', {
+    fetch: async (input, init) => {
+      capturedInput = input
+      capturedInit = init
+      return Response.json({
+        workspace: {
+          id: 'workspace-1',
+          organizationId: 'org-1',
+          state: 'provisioning',
+          createdAt: 1,
+          updatedAt: 2,
+        },
+        job: {
+          id: 'job-1',
+          workspaceId: 'workspace-1',
+          operation: 'ensure_running',
+          status: 'queued',
+          attempt: 0,
+          availableAt: 2,
+          createdAt: 2,
+          updatedAt: 2,
+        },
+      })
+    },
+  })
+
+  expect(capturedInput).toBe('/api/workspaces/personal/ensure-running')
+  expect(capturedInit?.method).toBe('POST')
+  expect(JSON.parse(String(capturedInit?.body))).toEqual({ organizationId: 'org-1' })
+  expect(result.workspace.state).toBe('provisioning')
+  expect(result.job?.id).toBe('job-1')
 })
 
 test('requests an authenticated operator restart', async () => {

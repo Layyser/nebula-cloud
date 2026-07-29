@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { ArrowRight, LoaderCircle } from 'lucide-react'
-import { NebulaMark } from '@nebula/runtime-ui'
 import { authClient } from '../../auth/authClient'
+import { CloudBrand } from './CloudBrand'
 
 interface AuthPageProps {
   onAuthenticated: () => void
@@ -41,22 +41,9 @@ export function AuthPage({ onAuthenticated, onBack, notice }: AuthPageProps) {
 
   return (
     <div className="relative z-[2] flex min-h-screen items-center justify-center px-5 py-8 text-white">
-      <div className="min-h-[612px] w-full max-w-[420px]">
+      <div className="h-[531px] w-full max-w-[420px]">
         <div className="w-full rounded-2xl border border-white/[0.09] bg-[#0d0e0f]/90 p-6 shadow-[0_32px_100px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:p-8">
-          <div className="flex h-6 items-center gap-2.5">
-            <button
-              type="button"
-              onClick={onBack}
-              className="flex h-6 cursor-pointer items-center gap-2.5 text-sm font-semibold leading-none text-white/80 transition hover:text-white"
-            >
-              <NebulaMark size={24} />
-              <span className="nebula-wordmark leading-none">Nebula</span>
-            </button>
-            <span className="h-4 w-px bg-white/[0.12]" />
-            <span className="flex h-6 items-center text-[10px] font-medium uppercase leading-none tracking-[0.18em] text-white/30">
-              Cloud
-            </span>
-          </div>
+          <CloudBrand onSelect={onBack} />
         <h1 className="mt-3 text-3xl font-medium tracking-[-0.04em]">
           {mode === 'sign-in' ? 'Welcome back' : 'Create your workspace'}
         </h1>

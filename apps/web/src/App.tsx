@@ -36,13 +36,23 @@ import {
 import { AuthLoading } from './components/auth/AuthLoading'
 import { AuthPage } from './components/auth/AuthPage'
 import { Dashboard } from './components/cloud/Dashboard'
+import { WorkspaceStartup } from './components/cloud/WorkspaceStartup'
 import { LandingPage } from './components/landing/LandingPage'
 import {
   OrganizationGate,
   type CloudOrganization,
 } from './components/organization/OrganizationGate'
 import { createCloudRuntimeTransport } from './runtime/cloudRuntimeTransport'
-import { ensurePersonalWorkspace, restartWorkspace } from './runtime/personalWorkspace'
+import {
+  ensurePersonalWorkspace,
+  ensureWorkspaceRunning,
+  restartWorkspace,
+} from './runtime/personalWorkspace'
+import {
+  startPersonalWorkspace,
+  WorkspaceStartupError,
+  type WorkspaceStartupProgress,
+} from './runtime/workspaceStartup'
 
 const runtimeGatewayBase = import.meta.env.VITE_NEBULA_RUNTIME_GATEWAY_BASE || '/api/workspaces'
 const TerminalPage = lazy(async () => {
@@ -163,7 +173,7 @@ function CloudSessionRoute({
   const session = sessionQuery.data
 
   return (
-    <OrganizationGate>
+    <OrganizationGate onBack={() => navigate('/')}>
       {activeOrganization => (
         <AuthenticatedCloudApp
           navigate={navigate}
@@ -188,44 +198,52 @@ function AuthenticatedCloudApp({
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [runtimeCatalogRevision, setRuntimeCatalogRevision] = useState(0)
   const [workspaceId, setWorkspaceId] = useState('')
-  const [workspaceError, setWorkspaceError] = useState('')
+  const [workspaceProgress, setWorkspaceProgress] = useState<WorkspaceStartupProgress>({
+    stage: 'resolving',
+  })
+  const [workspaceError, setWorkspaceError] = useState<WorkspaceStartupError | null>(null)
   const [workspaceAttempt, setWorkspaceAttempt] = useState(0)
 
   useEffect(() => {
     let cancelled = false
     const controller = new AbortController()
-    const timeout = window.setTimeout(() => controller.abort(), 4000)
     setWorkspaceId('')
-    setWorkspaceError('')
-    void ensurePersonalWorkspace(activeOrganization.id)
-      .then(async workspace => {
+    setWorkspaceError(null)
+    setWorkspaceProgress({ stage: 'resolving' })
+    void startPersonalWorkspace({
+      organizationId: activeOrganization.id,
+      resolveWorkspace: ensurePersonalWorkspace,
+      ensureRunning: ensureWorkspaceRunning,
+      signal: controller.signal,
+      onProgress: progress => {
+        if (!cancelled) setWorkspaceProgress(progress)
+      },
+      runtimeReady: async (candidateWorkspaceId, signal) => {
         const candidateTransport = createCloudRuntimeTransport({
-          workspaceId: workspace.id,
+          workspaceId: candidateWorkspaceId,
           gatewayBase: runtimeGatewayBase,
         })
         const response = await candidateTransport.request('/health/ready', {
-          signal: controller.signal,
+          signal,
         })
-        if (!response.ok) {
-          throw new Error('Your personal workspace exists, but its Nebula runtime is not ready.')
-        }
-        if (!cancelled) setWorkspaceId(workspace.id)
+        return response.ok
+      },
+    })
+      .then(resolvedWorkspaceId => {
+        if (!cancelled) setWorkspaceId(resolvedWorkspaceId)
       })
       .catch(error => {
-        if (!cancelled) {
-          const message = error instanceof DOMException && error.name === 'AbortError'
-            ? 'Your personal workspace exists, but its Nebula runtime did not respond.'
-            : error instanceof Error
-              ? error.message
-              : 'Personal workspace could not be resolved'
-          setWorkspaceError(message)
-        }
+        if (cancelled || (error instanceof DOMException && error.name === 'AbortError')) return
+        setWorkspaceError(error instanceof WorkspaceStartupError
+          ? error
+          : new WorkspaceStartupError(
+              'resolving',
+              error instanceof Error ? error.message : 'Your operator could not be started.',
+            ))
       })
-      .finally(() => window.clearTimeout(timeout))
     return () => {
       cancelled = true
       controller.abort()
-      window.clearTimeout(timeout)
     }
   }, [activeOrganization.id, workspaceAttempt])
 
@@ -274,13 +292,13 @@ function AuthenticatedCloudApp({
   if (workspaceError) {
     return (
       <WorkspaceResolutionError
-        message={workspaceError}
+        error={workspaceError}
         onRetry={() => setWorkspaceAttempt(current => current + 1)}
       />
     )
   }
   if (!workspaceId) {
-    return <AuthLoading label="Resolving your workspace" />
+    return <WorkspaceStartup progress={workspaceProgress} />
   }
 
   return (
@@ -330,17 +348,22 @@ function AuthenticatedCloudApp({
 }
 
 function WorkspaceResolutionError({
-  message,
+  error,
   onRetry,
 }: {
-  message: string
+  error: WorkspaceStartupError
   onRetry: () => void
 }) {
+  const title = error.stage === 'resolving'
+    ? 'Workspace unavailable'
+    : error.stage === 'provisioning'
+      ? 'Provisioning paused'
+      : 'Nebula unavailable'
   return (
     <div className="relative z-[2] flex min-h-screen items-center justify-center px-5 text-white">
       <div className="w-full max-w-sm rounded-xl border border-white/[0.10] bg-[#111]/95 p-5 shadow-[0_24px_80px_rgba(0,0,0,0.65)] backdrop-blur-xl">
-        <p className="text-[14px] font-semibold text-white/90">Operator unavailable</p>
-        <p className="mt-2 text-[12px] leading-5 text-white/45">{message}</p>
+        <p className="text-[14px] font-semibold text-white/90">{title}</p>
+        <p className="mt-2 text-[12px] leading-5 text-white/45">{error.message}</p>
         <button
           type="button"
           onClick={onRetry}
