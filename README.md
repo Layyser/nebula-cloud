@@ -164,8 +164,9 @@ plane gateway:
 ```
 
 Vite does not read a Nebula runtime token or connect to port 7777. Better Auth
-cookies reach the control plane, which verifies workspace ownership and active
-organization membership before retrieving private runtime access from the
+cookies reach the control plane, which verifies live organization membership
+plus workspace ownership or an explicit organization-admin role before
+retrieving private runtime access from the
 worker.
 
 Terminal WebSockets connect directly to the local control plane on port `7790`

@@ -15,12 +15,24 @@ Every request requires:
 
 1. A valid Better Auth session.
 2. A selected active organization.
-3. A current membership matching that organization.
-4. The personal workspace owned by that exact member.
+3. A current database membership matching that user and organization.
+4. The workspace owner, or an organization `admin`/`owner` role.
 5. A workspace in `ready` state with a worker workspace identifier.
 
-Missing, foreign, removed, cross-organization, and guessed workspace IDs all
-resolve as `workspace_not_found` without contacting the worker.
+Membership and role are resolved for every request rather than copied into a
+long-lived gateway session. Removing a member therefore revokes both Runtime
+and Console access immediately. Missing, foreign, removed, unauthorized,
+cross-organization, and guessed workspace IDs all resolve as
+`workspace_not_found` without contacting the worker, avoiding a workspace-ID
+enumeration oracle.
+
+Administrative access is deliberately limited to Better Auth's `admin` and
+`owner` organization roles. A regular member cannot access another member's
+workspace, even within the same organization.
+
+An absent, expired, or invalid Better Auth session token returns `401` before
+workspace resolution, worker access, or private credential lookup. The same
+precondition protects the Console WebSocket upgrade path.
 
 ## Credential boundary
 

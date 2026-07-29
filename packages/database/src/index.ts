@@ -340,9 +340,11 @@ export function ensurePersonalWorkspace(
   }).immediate()
 }
 
-// Resolves only a personal workspace owned by the signed-in member in the
-// session's active organization. Returning null for every mismatch avoids
-// turning workspace IDs into an enumeration oracle.
+// Resolves a workspace only when the signed-in user still has a live
+// membership in the session's active organization and either owns the
+// workspace or has an organization role allowed to administer it. Returning
+// null for every denial avoids turning workspace IDs into an enumeration
+// oracle.
 export function resolveWorkspaceAccess(
   database: Database,
   {
@@ -362,12 +364,18 @@ export function resolveWorkspaceAccess(
       workspace.created_at,
       workspace.updated_at
     FROM workspace
-    INNER JOIN member
-      ON member.id = workspace.member_id
+    INNER JOIN member AS workspace_member
+      ON workspace_member.id = workspace.member_id
+    INNER JOIN member AS actor_member
+      ON actor_member.organizationId = workspace.organization_id
     WHERE workspace.id = ?
-      AND member.userId = ?
-      AND member.organizationId = ?
-      AND workspace.organization_id = member.organizationId
+      AND actor_member.userId = ?
+      AND actor_member.organizationId = ?
+      AND workspace.organization_id = workspace_member.organizationId
+      AND (
+        actor_member.id = workspace.member_id
+        OR actor_member.role IN ('owner', 'admin')
+      )
     LIMIT 1
   `).get(workspaceId, userId, organizationId)
   return row ? toPersonalWorkspace(row) : null

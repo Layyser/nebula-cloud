@@ -15,7 +15,8 @@ function provisioningDatabase() {
     CREATE TABLE member (
       id TEXT PRIMARY KEY,
       userId TEXT NOT NULL REFERENCES user(id),
-      organizationId TEXT NOT NULL REFERENCES organization(id)
+      organizationId TEXT NOT NULL REFERENCES organization(id),
+      role TEXT NOT NULL DEFAULT 'member'
     );
     INSERT INTO user (id) VALUES ('user-1');
     INSERT INTO organization (id) VALUES ('org-1');
@@ -102,4 +103,3 @@ test('requeues retryable worker failures without losing the job', async () => {
     database.close()
   }
 })
-

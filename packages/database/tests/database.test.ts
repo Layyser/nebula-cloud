@@ -20,7 +20,8 @@ test('applies the minimal application schema idempotently', () => {
       CREATE TABLE member (
         id TEXT PRIMARY KEY,
         userId TEXT NOT NULL REFERENCES user(id),
-        organizationId TEXT NOT NULL REFERENCES organization(id)
+        organizationId TEXT NOT NULL REFERENCES organization(id),
+        role TEXT NOT NULL DEFAULT 'member'
       );
     `)
     migrateCloudSchema(database)
@@ -49,7 +50,8 @@ test('enforces one workspace per organization membership', () => {
       CREATE TABLE member (
         id TEXT PRIMARY KEY,
         userId TEXT NOT NULL REFERENCES user(id),
-        organizationId TEXT NOT NULL REFERENCES organization(id)
+        organizationId TEXT NOT NULL REFERENCES organization(id),
+        role TEXT NOT NULL DEFAULT 'member'
       );
     `)
     migrateCloudSchema(database)
@@ -84,7 +86,8 @@ test('resolves the same personal workspace idempotently', () => {
       CREATE TABLE member (
         id TEXT PRIMARY KEY,
         userId TEXT NOT NULL REFERENCES user(id),
-        organizationId TEXT NOT NULL REFERENCES organization(id)
+        organizationId TEXT NOT NULL REFERENCES organization(id),
+        role TEXT NOT NULL DEFAULT 'member'
       );
       INSERT INTO user (id) VALUES ('user-1');
       INSERT INTO organization (id) VALUES ('org-1');
@@ -132,7 +135,8 @@ test('requires membership and rejects cross-organization workspace ownership', (
       CREATE TABLE member (
         id TEXT PRIMARY KEY,
         userId TEXT NOT NULL REFERENCES user(id),
-        organizationId TEXT NOT NULL REFERENCES organization(id)
+        organizationId TEXT NOT NULL REFERENCES organization(id),
+        role TEXT NOT NULL DEFAULT 'member'
       );
       INSERT INTO user (id) VALUES ('user-1');
       INSERT INTO organization (id) VALUES ('org-1'), ('org-2');
@@ -157,7 +161,7 @@ test('requires membership and rejects cross-organization workspace ownership', (
   }
 })
 
-test('resolves runtime access only for the owning member and active organization', () => {
+test('requires live ownership or an administrative role for workspace access', () => {
   const database = openCloudDatabase({ path: ':memory:' })
   try {
     database.exec(`
@@ -166,14 +170,18 @@ test('resolves runtime access only for the owning member and active organization
       CREATE TABLE member (
         id TEXT PRIMARY KEY,
         userId TEXT NOT NULL REFERENCES user(id),
-        organizationId TEXT NOT NULL REFERENCES organization(id)
+        organizationId TEXT NOT NULL REFERENCES organization(id),
+        role TEXT NOT NULL DEFAULT 'member'
       );
-      INSERT INTO user (id) VALUES ('user-1'), ('user-2');
+      INSERT INTO user (id)
+        VALUES ('user-1'), ('user-2'), ('user-admin'), ('user-owner');
       INSERT INTO organization (id) VALUES ('org-1'), ('org-2');
-      INSERT INTO member (id, userId, organizationId) VALUES
-        ('member-1', 'user-1', 'org-1'),
-        ('member-2', 'user-2', 'org-1'),
-        ('member-3', 'user-1', 'org-2');
+      INSERT INTO member (id, userId, organizationId, role) VALUES
+        ('member-1', 'user-1', 'org-1', 'member'),
+        ('member-2', 'user-2', 'org-1', 'member'),
+        ('member-3', 'user-1', 'org-2', 'member'),
+        ('member-admin', 'user-admin', 'org-1', 'admin'),
+        ('member-owner', 'user-owner', 'org-1', 'owner');
     `)
     migrateCloudSchema(database)
     const workspace = ensurePersonalWorkspace(database, {
@@ -198,8 +206,25 @@ test('resolves runtime access only for the owning member and active organization
       organizationId: 'org-2',
     })).toBeNull()
     expect(resolveWorkspaceAccess(database, {
+      workspaceId: workspace.id,
+      userId: 'user-admin',
+      organizationId: 'org-1',
+    })?.id).toBe('workspace-1')
+    expect(resolveWorkspaceAccess(database, {
+      workspaceId: workspace.id,
+      userId: 'user-owner',
+      organizationId: 'org-1',
+    })?.id).toBe('workspace-1')
+    expect(resolveWorkspaceAccess(database, {
       workspaceId: 'workspace-guessed',
       userId: 'user-1',
+      organizationId: 'org-1',
+    })).toBeNull()
+
+    database.prepare('DELETE FROM member WHERE id = ?').run('member-admin')
+    expect(resolveWorkspaceAccess(database, {
+      workspaceId: workspace.id,
+      userId: 'user-admin',
       organizationId: 'org-1',
     })).toBeNull()
   } finally {
@@ -216,7 +241,8 @@ test('durably deduplicates, leases, retries, and completes ensure-running jobs',
       CREATE TABLE member (
         id TEXT PRIMARY KEY,
         userId TEXT NOT NULL REFERENCES user(id),
-        organizationId TEXT NOT NULL REFERENCES organization(id)
+        organizationId TEXT NOT NULL REFERENCES organization(id),
+        role TEXT NOT NULL DEFAULT 'member'
       );
       INSERT INTO user (id) VALUES ('user-1');
       INSERT INTO organization (id) VALUES ('org-1');

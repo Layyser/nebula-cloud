@@ -16,6 +16,7 @@ import {
   forwardConsoleInput,
   type ConsoleBridgeData,
 } from './consoleGateway'
+import { prepareConsoleUpgrade } from './consoleUpgrade'
 
 const hostname = process.env.NEBULA_CLOUD_BIND?.trim() || '127.0.0.1'
 const port = Number.parseInt(process.env.NEBULA_CLOUD_PORT || '7790', 10)
@@ -172,57 +173,22 @@ const server = Bun.serve({
       /^\/api\/workspaces\/([^/]+)\/console$/,
     )
     if (!consoleRoute) return await controlPlaneHandler(request)
-    if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
-      return Response.json({
-        error: 'WebSocket upgrade required',
-        code: 'websocket_upgrade_required',
-      }, { status: 426 })
-    }
-    const origin = request.headers.get('origin')
-    if (!origin || !trustedOrigins.includes(origin)) {
-      return Response.json({
-        error: 'Console origin is not allowed',
-        code: 'origin_not_allowed',
-      }, { status: 403 })
-    }
-    const session = await auth.api.getSession({ headers: request.headers })
-    if (!session) {
-      return Response.json({
-        error: 'authentication required',
-        code: 'authentication_required',
-      }, { status: 401 })
-    }
-    const organizationId = session.session.activeOrganizationId
-    if (!organizationId) {
-      return Response.json({
-        error: 'an active organization is required',
-        code: 'active_organization_required',
-      }, { status: 403 })
-    }
-    if (!consoleGateway) {
-      return Response.json({
-        error: 'Console gateway is unavailable',
-        code: 'console_gateway_unavailable',
-        retryable: true,
-      }, { status: 503 })
-    }
-
-    let workspaceId: string
-    try {
-      workspaceId = decodeURIComponent(consoleRoute[1])
-    } catch {
-      return Response.json({
-        error: 'workspaceId is invalid',
-        code: 'invalid_request',
-      }, { status: 400 })
-    }
-    const prepared = await consoleGateway.prepare({
-      workspaceId,
-      userId: session.user.id,
-      organizationId,
-      actorId: session.user.id,
-      rows: url.searchParams.get('rows'),
-      columns: url.searchParams.get('columns'),
+    const prepared = await prepareConsoleUpgrade({
+      request,
+      encodedWorkspaceId: consoleRoute[1],
+      trustedOrigins,
+      resolveSession: async consoleRequest => {
+        const session = await auth.api.getSession({
+          headers: consoleRequest.headers,
+        })
+        return session
+          ? {
+              userId: session.user.id,
+              activeOrganizationId: session.session.activeOrganizationId,
+            }
+          : null
+      },
+      consoleGateway,
     })
     if (prepared instanceof Response) return prepared
     if (bunServer.upgrade(request, { data: prepared })) return

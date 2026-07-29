@@ -7,7 +7,7 @@ worker address or service credential:
 Browser xterm.js
   -> GET /api/workspaces/:workspaceId/console (WebSocket)
   -> Better Auth session, trusted Origin, active organization
-  -> exact member-owned ready workspace lookup
+  -> live owner or organization-admin ready workspace lookup
   -> private nebula-worker Console WebSocket
   -> Docker exec PTY as nebula in /home/nebula/workspace
 ```
@@ -17,11 +17,12 @@ an opaque actor identifier. Browser binary frames are forwarded to PTY stdin,
 worker binary frames are forwarded to the browser, and JSON text frames carry
 terminal resize controls. Terminal contents are never logged.
 
-The gateway rejects unauthenticated sessions, untrusted origins, missing active
-organizations, foreign or guessed workspace IDs, non-ready workspaces, and
-invalid terminal dimensions before exposing a browser socket. The browser never
-receives a container address, worker token, runtime token, Docker socket, or host
-path.
+The gateway rejects unauthenticated sessions, untrusted origins, missing or
+removed memberships, missing active organizations, unauthorized, foreign, or
+guessed workspace IDs, non-ready workspaces, and invalid terminal dimensions
+before exposing a browser socket. Only the workspace owner or a current
+organization `admin`/`owner` may connect. The browser never receives a container
+address, worker token, runtime token, Docker socket, or host path.
 
 ## Development
 

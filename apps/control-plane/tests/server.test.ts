@@ -270,6 +270,34 @@ test('requires a session and active organization for runtime gateway routes', as
   )
 })
 
+test('rejects an invalid session token before Runtime workspace access', async () => {
+  let proxyCalls = 0
+  const handler = createControlPlaneHandler({
+    resolveSession: async request => {
+      expect(request.headers.get('cookie')).toBe(
+        'better-auth.session_token=invalid-token',
+      )
+      return null
+    },
+    proxyRuntime: async () => {
+      proxyCalls += 1
+      throw new Error('must not proxy Runtime access')
+    },
+  })
+  const response = await handler(new Request(
+    'http://control-plane.test/api/workspaces/workspace-1/runtime/health/ready',
+    {
+      headers: {
+        cookie: 'better-auth.session_token=invalid-token',
+      },
+    },
+  ))
+
+  expect(response.status).toBe(401)
+  expect((await response.json()).code).toBe('authentication_required')
+  expect(proxyCalls).toBe(0)
+})
+
 test('forwards an authenticated runtime route with its suffix and query intact', async () => {
   const calls: unknown[] = []
   const handler = createControlPlaneHandler({
