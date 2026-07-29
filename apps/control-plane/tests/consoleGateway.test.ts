@@ -45,6 +45,14 @@ function readyWorkspace(): PersonalWorkspace {
   }
 }
 
+test('rejects a weak Console worker signing secret', () => {
+  expect(() => new ConsoleGateway({
+    workerURL: 'http://worker.test:7780',
+    workerToken: 'too-short',
+    resolveWorkspace: () => readyWorkspace(),
+  })).toThrow('at least 32 characters')
+})
+
 test('opens the worker Console with private authentication and bridges bytes', async () => {
   const upstream = new FakeWebSocket()
   let connection: {
@@ -53,8 +61,10 @@ test('opens the worker Console with private authentication and bridges bytes', a
   } | null = null
   const gateway = new ConsoleGateway({
     workerURL: 'http://worker.test:7780',
-    workerToken: 'worker-service-token',
+    workerToken: 'worker-service-token-0123456789abcdef',
     resolveWorkspace: () => readyWorkspace(),
+    now: () => Date.UTC(2026, 6, 29, 12, 0, 0),
+    nonce: () => '0123456789abcdef',
     connect: (url, options) => {
       connection = { url, options }
       queueMicrotask(() => upstream.open())
@@ -81,8 +91,8 @@ test('opens the worker Console with private authentication and bridges bytes', a
   )
   expect(connectedURL.searchParams.get('rows')).toBe('42')
   expect(connectedURL.searchParams.get('columns')).toBe('132')
-  expect(new Headers(connection!.options.headers).get('authorization')).toBe(
-    'Bearer worker-service-token',
+  expect(new Headers(connection!.options.headers).get('authorization')).toStartWith(
+    'Nebula-HMAC v1.',
   )
   expect(new Headers(connection!.options.headers).get('x-nebula-actor-id')).toBe(
     'user-1',
@@ -116,7 +126,7 @@ test('rejects foreign workspaces and invalid dimensions before connecting', asyn
   let connections = 0
   const gateway = new ConsoleGateway({
     workerURL: 'http://worker.test:7780',
-    workerToken: 'worker-service-token',
+    workerToken: 'worker-service-token-0123456789abcdef',
     resolveWorkspace: () => null,
     connect: () => {
       connections += 1

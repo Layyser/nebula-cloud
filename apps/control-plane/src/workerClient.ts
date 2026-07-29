@@ -1,3 +1,5 @@
+import { workerAuthorizationHeader } from './workerAuth'
+
 export type WorkerFetch = (
   input: RequestInfo | URL,
   init?: RequestInit,
@@ -8,6 +10,8 @@ export interface WorkerClientOptions {
   token: string
   workspaceImage: string
   fetch?: WorkerFetch
+  now?: () => number
+  nonce?: () => string
 }
 
 interface WorkerErrorResponse {
@@ -71,19 +75,27 @@ export class NebulaWorkerClient {
   readonly #token: string
   readonly #workspaceImage: string
   readonly #fetch: WorkerFetch
+  readonly #now: () => number
+  readonly #nonce: () => string
 
   constructor({
     baseURL,
     token,
     workspaceImage,
     fetch = (input, init) => globalThis.fetch(input, init),
+    now = Date.now,
+    nonce,
   }: WorkerClientOptions) {
     this.#baseURL = baseURL.replace(/\/$/, '')
     this.#token = token.trim()
     this.#workspaceImage = workspaceImage.trim()
     this.#fetch = fetch
+    this.#now = now
+    this.#nonce = nonce ?? (() => crypto.randomUUID().replaceAll('-', ''))
     if (!this.#baseURL) throw new Error('Worker base URL is required')
-    if (!this.#token) throw new Error('Worker service token is required')
+    if (this.#token.length < 32) {
+      throw new Error('Worker service signing secret must contain at least 32 characters')
+    }
     if (!this.#workspaceImage) throw new Error('Workspace image is required')
   }
 
@@ -223,13 +235,20 @@ export class NebulaWorkerClient {
       signal?: AbortSignal
     },
   ): Promise<unknown> {
+    const authorization = workerAuthorizationHeader({
+      secret: this.#token,
+      method,
+      path,
+      now: this.#now,
+      nonce: this.#nonce,
+    })
     let response: Response
     try {
       response = await this.#fetch(`${this.#baseURL}${path}`, {
         method,
         signal,
         headers: {
-          authorization: `Bearer ${this.#token}`,
+          authorization,
           ...(body === undefined ? {} : { 'content-type': 'application/json' }),
           ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}),
           'x-nebula-actor-id': 'nebula-cloud-control-plane',

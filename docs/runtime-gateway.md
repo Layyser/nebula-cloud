@@ -50,6 +50,13 @@ gateway injects the worker-issued runtime bearer token. Runtime cookies,
 authentication challenges, server headers, private CORS headers, and transfer
 hop headers are not returned to the browser.
 
+Cloud never transmits the long-lived worker signing secret. Each worker HTTP or
+Console WebSocket request receives a 60-second HMAC credential bound to its
+method and path. The private runtime address and generation-scoped runtime token
+exist only in the control-plane request and are never serialized into a browser
+response. Replacing a runtime rotates its token; the previous generation is no
+longer reachable.
+
 ## Streaming and cancellation
 
 The gateway does not buffer Runtime API bodies. It forwards each upstream

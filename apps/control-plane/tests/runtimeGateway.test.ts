@@ -91,9 +91,12 @@ test('streams runtime responses while keeping private credentials server-side', 
   expect(response.headers.get('set-cookie')).toBeNull()
   expect(response.headers.get('x-runtime-header')).toBe('preserved')
   expect(response.headers.get('cache-control')).toBe('no-store')
-  expect(await response.text()).toBe(
+  const browserBody = await response.text()
+  expect(browserBody).toBe(
     'data: {"type":"delta"}\n\ndata: [DONE]\n\n',
   )
+  expect(browserBody).not.toContain('private-runtime-token')
+  expect(browserBody).not.toContain('172.31.0.7')
 })
 
 test('rejects guessed, foreign, and non-ready workspaces before worker access', async () => {

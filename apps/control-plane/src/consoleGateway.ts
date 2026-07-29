@@ -1,4 +1,5 @@
 import type { PersonalWorkspace } from '@nebula-cloud/database'
+import { workerAuthorizationHeader } from './workerAuth'
 
 const defaultRows = 24
 const defaultColumns = 80
@@ -36,6 +37,8 @@ export interface ConsoleGatewayOptions {
     url: string,
     options: { headers: HeadersInit },
   ) => WebSocket
+  now?: () => number
+  nonce?: () => string
 }
 
 export interface PrepareConsoleInput {
@@ -161,19 +164,27 @@ export class ConsoleGateway {
   readonly #workerToken: string
   readonly #resolveWorkspace: ConsoleGatewayOptions['resolveWorkspace']
   readonly #connect: NonNullable<ConsoleGatewayOptions['connect']>
+  readonly #now: () => number
+  readonly #nonce: () => string
 
   constructor({
     workerURL,
     workerToken,
     resolveWorkspace,
     connect = defaultConnect,
+    now = Date.now,
+    nonce,
   }: ConsoleGatewayOptions) {
     this.#workerURL = workerURL.replace(/\/$/, '')
     this.#workerToken = workerToken.trim()
     this.#resolveWorkspace = resolveWorkspace
     this.#connect = connect
+    this.#now = now
+    this.#nonce = nonce ?? (() => crypto.randomUUID().replaceAll('-', ''))
     if (!this.#workerURL) throw new Error('Worker URL is required')
-    if (!this.#workerToken) throw new Error('Worker service token is required')
+    if (this.#workerToken.length < 32) {
+      throw new Error('Worker service signing secret must contain at least 32 characters')
+    }
   }
 
   async prepare(input: PrepareConsoleInput): Promise<ConsoleBridgeData | Response> {
@@ -206,6 +217,7 @@ export class ConsoleGateway {
 
     let upstream: WebSocket
     try {
+      const path = `/internal/v1/workspaces/${encodeURIComponent(workspace.workerWorkspaceId)}/console`
       upstream = await connectUpstream(
         this.#connect,
         webSocketWorkerURL(
@@ -215,7 +227,13 @@ export class ConsoleGateway {
           columns,
         ),
         {
-          authorization: `Bearer ${this.#workerToken}`,
+          authorization: workerAuthorizationHeader({
+            secret: this.#workerToken,
+            method: 'GET',
+            path,
+            now: this.#now,
+            nonce: this.#nonce,
+          }),
           'x-nebula-actor-id': input.actorId.slice(0, 256),
         },
       )

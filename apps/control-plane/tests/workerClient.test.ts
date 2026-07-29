@@ -4,12 +4,22 @@ import {
   WorkerClientError,
 } from '../src/workerClient'
 
+test('rejects a weak worker signing secret', () => {
+  expect(() => new NebulaWorkerClient({
+    baseURL: 'http://worker.test',
+    token: 'too-short',
+    workspaceImage: 'nebula-workspace:test',
+  })).toThrow('at least 32 characters')
+})
+
 test('creates and ensures a workspace with durable worker idempotency keys', async () => {
   const requests: Request[] = []
   const client = new NebulaWorkerClient({
     baseURL: 'http://worker.test',
-    token: 'service-token',
+    token: 'service-token-0123456789abcdef0123456789',
     workspaceImage: 'nebula-workspace:test',
+    now: () => Date.UTC(2026, 6, 29, 12, 0, 0),
+    nonce: () => '0123456789abcdef',
     fetch: async (input, init) => {
       const request = new Request(input, init)
       requests.push(request)
@@ -41,13 +51,13 @@ test('creates and ensures a workspace with durable worker idempotency keys', asy
       method: 'PUT',
       path: '/internal/v1/workspaces/workspace-1',
       key: 'job-1:create',
-      authorization: 'Bearer service-token',
+      authorization: expect.stringContaining('Nebula-HMAC v1.'),
     },
     {
       method: 'POST',
       path: '/internal/v1/workspaces/workspace-1/ensure-running',
       key: 'job-1:ensure-running',
-      authorization: 'Bearer service-token',
+      authorization: expect.stringContaining('Nebula-HMAC v1.'),
     },
   ])
   expect(await requests[0]?.json()).toEqual({
@@ -62,7 +72,7 @@ test('creates and ensures a workspace with durable worker idempotency keys', asy
 test('preserves stable retryability from worker failures', async () => {
   const client = new NebulaWorkerClient({
     baseURL: 'http://worker.test',
-    token: 'service-token',
+    token: 'service-token-0123456789abcdef0123456789',
     workspaceImage: 'nebula-workspace:test',
     fetch: async () => Response.json({
       error: 'worker is warming up',
@@ -91,7 +101,7 @@ test('retrieves private runtime access without mutating the worker', async () =>
   const requests: Request[] = []
   const client = new NebulaWorkerClient({
     baseURL: 'http://worker.test/',
-    token: 'service-token',
+    token: 'service-token-0123456789abcdef0123456789',
     workspaceImage: 'nebula-workspace:test',
     fetch: async (input, init) => {
       requests.push(new Request(input, init))
@@ -116,7 +126,9 @@ test('retrieves private runtime access without mutating the worker', async () =>
   expect(new URL(requests[0]!.url).pathname).toBe(
     '/internal/v1/workspaces/workspace-1/runtime-access',
   )
-  expect(requests[0]?.headers.get('authorization')).toBe('Bearer service-token')
+  expect(requests[0]?.headers.get('authorization')).toStartWith(
+    'Nebula-HMAC v1.',
+  )
   expect(requests[0]?.headers.has('idempotency-key')).toBe(false)
 })
 
@@ -124,7 +136,7 @@ test('restarts a workspace with a durable operation key', async () => {
   const requests: Request[] = []
   const client = new NebulaWorkerClient({
     baseURL: 'http://worker.test',
-    token: 'service-token',
+    token: 'service-token-0123456789abcdef0123456789',
     workspaceImage: 'nebula-workspace:test',
     fetch: async (input, init) => {
       requests.push(new Request(input, init))
