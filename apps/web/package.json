@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@nebula-cloud/contracts": "workspace:*",
-    "@nebula/runtime-ui": "file:../../../nebula-frontend",
+    "@nebula/runtime-ui": "file:../../vendor/nebula-runtime-ui-0.1.3.tgz",
     "@tailwindcss/vite": "^4.2.4",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",

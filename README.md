@@ -16,14 +16,16 @@ nebula-cloud/
 |   |-- auth/             Better Auth configuration and migrations
 |   |-- contracts/        shared cloud HTTP contracts
 |   `-- database/         SQLite connection and Nebula migrations
+|-- vendor/               pinned organization-neutral Runtime UI package
 |-- pricing.md
 `-- package.json          Bun workspace orchestration
 ```
 
-The Web application continues to consume `@nebula/runtime-ui` from the adjacent
-`/home/jorge/nebula-frontend` checkout. Runtime chat, sessions, agents,
-capabilities, and tool presentation are shared; they are not copied into this
-repository.
+The Web application consumes a checksummed, versioned `@nebula/runtime-ui`
+package produced by `nebula-frontend`. Runtime chat, sessions, agents,
+capabilities, and tool presentation are shared; Cloud does not import a sibling
+checkout or maintain copied source. The vendored package keeps private-repository
+builds reproducible until it is replaced by a package-registry release.
 
 ## Current implementation
 
@@ -268,3 +270,8 @@ Browser
 The control plane may request desired workspace state from the worker. It must
 not duplicate model execution, tools, sessions, agent configuration, or Docker
 lifecycle code.
+
+The supported Web composition currently mounts one interactive RuntimeWorkspace
+per page. Multi-operator pages are deferred future work and will require
+instance-scoped transport context in `@nebula/runtime-ui`; this does not limit
+how many members or operators the control plane can manage.
