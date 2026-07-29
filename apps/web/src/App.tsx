@@ -139,6 +139,7 @@ function AuthenticatedCloudApp({
 }) {
   const [signingOut, setSigningOut] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [runtimeCatalogRevision, setRuntimeCatalogRevision] = useState(0)
   const [workspaceId, setWorkspaceId] = useState('')
   const [workspaceError, setWorkspaceError] = useState('')
   const [workspaceAttempt, setWorkspaceAttempt] = useState(0)
@@ -239,6 +240,7 @@ function AuthenticatedCloudApp({
     <>
       <RuntimeWorkspace
         transport={runtimeTransport}
+        catalogRevision={runtimeCatalogRevision}
         brandLabel="Nebula"
         identityLabel={`${user.name} · ${activeOrganization.name}`}
         identityInitial={user.name.slice(0, 1).toUpperCase() || 'N'}
@@ -265,6 +267,9 @@ function AuthenticatedCloudApp({
             user={user}
             organization={activeOrganization}
             transport={runtimeTransport}
+            onProviderConnected={() => {
+              setRuntimeCatalogRevision(current => current + 1)
+            }}
             onClose={() => setSettingsOpen(false)}
           />
         )}
@@ -301,11 +306,13 @@ function SettingsWindow({
   user,
   organization,
   transport,
+  onProviderConnected,
   onClose,
 }: {
   user: { name: string; email: string }
   organization: CloudOrganization
   transport: RuntimeTransport
+  onProviderConnected: () => void
   onClose: () => void
 }) {
   const reduceMotion = useReducedMotion()
@@ -362,6 +369,7 @@ function SettingsWindow({
         if (payload.status === 'complete') {
           setCodexState('connected')
           setDeviceFlow(null)
+          onProviderConnected()
           return
         }
         if (payload.status !== 'pending') {
@@ -390,7 +398,7 @@ function SettingsWindow({
       cancelled = true
       window.clearTimeout(timeout)
     }
-  }, [codexState, deviceFlow, transport])
+  }, [codexState, deviceFlow, onProviderConnected, transport])
 
   const startCodexLogin = async () => {
     setCodexError('')
