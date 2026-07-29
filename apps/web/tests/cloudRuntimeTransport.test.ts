@@ -44,3 +44,17 @@ test('supports a separately hosted control-plane gateway', async () => {
 test('rejects an empty workspace identifier', () => {
   expect(() => createCloudRuntimeTransport({ workspaceId: '  ' })).toThrow('workspaceId is required')
 })
+
+test('notifies the application when the Cloud session expires', async () => {
+  let expirations = 0
+  const transport = createCloudRuntimeTransport({
+    workspaceId: 'workspace-1',
+    fetch: async () => new Response(null, { status: 401 }),
+    onSessionExpired: () => { expirations += 1 },
+  })
+
+  const response = await transport.request('/sessions')
+
+  expect(response.status).toBe(401)
+  expect(expirations).toBe(1)
+})

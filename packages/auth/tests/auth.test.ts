@@ -95,6 +95,11 @@ test('supports an email session and organization lifecycle', async () => {
       },
     ))
     expect(createOrganization.status).toBe(200)
+    const createdOrganization = await createOrganization.json() as {
+      id: string
+      slug: string
+    }
+    expect(createdOrganization.slug).toBe('nebula')
 
     const organizations = await auth.handler(new Request(
       'http://localhost:7790/api/auth/organization/list',
@@ -102,6 +107,60 @@ test('supports an email session and organization lifecycle', async () => {
     ))
     expect(organizations.status).toBe(200)
     expect((await organizations.json())[0].slug).toBe('nebula')
+
+    const selectOrganization = await auth.handler(new Request(
+      'http://localhost:7790/api/auth/organization/set-active',
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          cookie: cookie!,
+          origin: 'http://localhost:5173',
+        },
+        body: JSON.stringify({
+          organizationId: createdOrganization.id,
+        }),
+      },
+    ))
+    expect(selectOrganization.status).toBe(200)
+    const activeSession = await auth.api.getSession({
+      headers: new Headers({ cookie: cookie! }),
+    })
+    expect(activeSession?.session.activeOrganizationId).toBe(
+      createdOrganization.id,
+    )
+
+    const signOut = await auth.handler(new Request(
+      'http://localhost:7790/api/auth/sign-out',
+      {
+        method: 'POST',
+        headers: {
+          cookie: cookie!,
+          origin: 'http://localhost:5173',
+        },
+      },
+    ))
+    expect(signOut.status).toBe(200)
+    expect(await auth.api.getSession({
+      headers: new Headers({ cookie: cookie! }),
+    })).toBeNull()
+
+    const signIn = await auth.handler(new Request(
+      'http://localhost:7790/api/auth/sign-in/email',
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          origin: 'http://localhost:5173',
+        },
+        body: JSON.stringify({
+          email: 'george@example.test',
+          password: 'secure-password',
+        }),
+      },
+    ))
+    expect(signIn.status).toBe(200)
+    expect(signIn.headers.get('set-cookie')).toContain('better-auth.session_token')
   } finally {
     database.close()
   }

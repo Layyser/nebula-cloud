@@ -3,18 +3,31 @@ import type {
   PersonalWorkspaceResponse,
   RestartWorkspaceResponse,
 } from '@nebula-cloud/contracts'
+import {
+  notifySessionExpired,
+  observeAuthenticationResponse,
+} from '../auth/sessionLifecycle'
+
+interface CloudRequestOptions {
+  fetch?: typeof globalThis.fetch
+  onSessionExpired?: () => void
+}
 
 export async function ensurePersonalWorkspace(
   organizationId: string,
+  {
+    fetch: request = globalThis.fetch,
+    onSessionExpired = notifySessionExpired,
+  }: CloudRequestOptions = {},
 ): Promise<PersonalWorkspaceResponse['workspace']> {
-  const response = await fetch('/api/workspaces/personal', {
+  const response = observeAuthenticationResponse(await request('/api/workspaces/personal', {
     method: 'POST',
     credentials: 'include',
     headers: {
       'content-type': 'application/json',
     },
     body: JSON.stringify({ organizationId }),
-  })
+  }), onSessionExpired)
 
   if (!response.ok) {
     const error = await response.json().catch(() => null) as CloudErrorResponse | null
@@ -30,14 +43,18 @@ export async function ensurePersonalWorkspace(
 
 export async function restartWorkspace(
   workspaceId: string,
+  {
+    fetch: request = globalThis.fetch,
+    onSessionExpired = notifySessionExpired,
+  }: CloudRequestOptions = {},
 ): Promise<RestartWorkspaceResponse> {
-  const response = await fetch(
+  const response = observeAuthenticationResponse(await request(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/restart`,
     {
       method: 'POST',
       credentials: 'include',
     },
-  )
+  ), onSessionExpired)
 
   if (!response.ok) {
     const error = await response.json().catch(() => null) as CloudErrorResponse | null

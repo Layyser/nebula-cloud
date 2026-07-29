@@ -65,3 +65,16 @@ test('requests an authenticated operator restart', async () => {
     credentials: 'include',
   })
 })
+
+test('notifies the application when workspace resolution loses authentication', async () => {
+  let expirations = 0
+  await expect(ensurePersonalWorkspace('org-1', {
+    fetch: async () => Response.json({
+      error: 'authentication required',
+      code: 'authentication_required',
+    }, { status: 401 }),
+    onSessionExpired: () => { expirations += 1 },
+  })).rejects.toThrow('authentication required')
+
+  expect(expirations).toBe(1)
+})

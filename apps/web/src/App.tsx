@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -22,6 +23,16 @@ import {
 import { NebulaBackground, RuntimeWorkspace, type RuntimeNavigationItem } from '@nebula/runtime-ui'
 import type { RuntimeTransport } from '@nebula/runtime-ui/transport'
 import { authClient } from './auth/authClient'
+import {
+  authenticationRedirect,
+  isAuthenticationCallback,
+} from './auth/authRouting'
+import {
+  clearSessionExpired,
+  consumeSessionExpired,
+  rememberSessionExpired,
+  sessionExpiredEvent,
+} from './auth/sessionLifecycle'
 import { AuthLoading } from './components/auth/AuthLoading'
 import { AuthPage } from './components/auth/AuthPage'
 import { Dashboard } from './components/cloud/Dashboard'
@@ -59,7 +70,9 @@ function usePathname() {
 
 export default function App() {
   const { pathname, navigate } = usePathname()
-  const cloudRoute = pathname === '/login' || pathname.startsWith('/app')
+  const cloudRoute = pathname === '/login'
+    || pathname.startsWith('/app')
+    || isAuthenticationCallback(pathname)
 
   return (
     <PageBackground>
@@ -91,23 +104,56 @@ function CloudSessionRoute({
   navigate: (path: string) => void
 }) {
   const sessionQuery = authClient.useSession()
+  const hadSession = useRef(false)
+  const [sessionExpired, setSessionExpired] = useState(
+    () => consumeSessionExpired(),
+  )
+
+  useEffect(() => {
+    const handleSessionExpired = () => {
+      setSessionExpired(true)
+      void sessionQuery.refetch().catch(() => navigate('/login'))
+    }
+    window.addEventListener(sessionExpiredEvent, handleSessionExpired)
+    return () => {
+      window.removeEventListener(sessionExpiredEvent, handleSessionExpired)
+    }
+  }, [navigate, sessionQuery])
 
   useEffect(() => {
     if (sessionQuery.isPending) return
-    if (!sessionQuery.data && pathname !== '/login') navigate('/login')
-    if (sessionQuery.data && pathname === '/login') navigate('/app')
+    if (sessionQuery.data) {
+      hadSession.current = true
+    } else if (hadSession.current && pathname !== '/login') {
+      rememberSessionExpired()
+      setSessionExpired(true)
+    }
+    const redirect = authenticationRedirect({
+      pathname,
+      pending: sessionQuery.isPending,
+      authenticated: Boolean(sessionQuery.data),
+    })
+    if (redirect) navigate(redirect)
   }, [navigate, pathname, sessionQuery.data, sessionQuery.isPending])
 
   if (sessionQuery.isPending) {
     return <AuthLoading />
   }
   if (!sessionQuery.data) {
+    if (isAuthenticationCallback(pathname)) {
+      return <AuthLoading label="Completing sign in" />
+    }
     return (
       <AuthPage
         onBack={() => navigate('/')}
         onAuthenticated={() => {
+          clearSessionExpired()
+          setSessionExpired(false)
           void sessionQuery.refetch().then(() => navigate('/app'))
         }}
+        notice={sessionExpired
+          ? 'Your session expired. Sign in again to continue.'
+          : undefined}
       />
     )
   }

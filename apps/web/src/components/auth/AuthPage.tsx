@@ -6,9 +6,10 @@ import { authClient } from '../../auth/authClient'
 interface AuthPageProps {
   onAuthenticated: () => void
   onBack: () => void
+  notice?: string
 }
 
-export function AuthPage({ onAuthenticated, onBack }: AuthPageProps) {
+export function AuthPage({ onAuthenticated, onBack, notice }: AuthPageProps) {
   const [mode, setMode] = useState<'sign-in' | 'sign-up'>('sign-in')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -93,6 +94,11 @@ export function AuthPage({ onAuthenticated, onBack }: AuthPageProps) {
         </div>
 
         <form onSubmit={submit} className="mt-6 space-y-4">
+          {notice && (
+            <p role="status" className="rounded-xl border border-amber-300/15 bg-amber-300/[0.06] px-3 py-2.5 text-xs leading-5 text-amber-100/70">
+              {notice}
+            </p>
+          )}
           {mode === 'sign-up' && (
             <Field
               label="Name"
