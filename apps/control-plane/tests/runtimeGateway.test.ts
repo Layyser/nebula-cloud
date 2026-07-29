@@ -216,3 +216,200 @@ test('propagates browser cancellation to the private runtime request', async () 
   expect(upstreamSignal?.aborted).toBe(true)
   expect(response.status).toBe(499)
 })
+
+test('forwards token, tool, and completion events in arrival order', async () => {
+  const encoder = new TextEncoder()
+  let streamController!: ReadableStreamDefaultController<Uint8Array>
+  const gateway = new RuntimeGateway({
+    resolveWorkspace: () => workspace(),
+    worker: {
+      getRuntimeAccess: async () => ({
+        workspaceId: 'worker-workspace-1',
+        network: 'private-network',
+        address: '172.31.0.7:7777',
+        accessToken: 'private-runtime-token',
+      }),
+    },
+    fetch: async () => new Response(new ReadableStream({
+      start(controller) {
+        streamController = controller
+      },
+    }), {
+      headers: {
+        'content-type': 'text/event-stream',
+        'x-accel-buffering': 'no',
+      },
+    }),
+  })
+  const response = await gateway.proxy({
+    request: new Request(
+      'http://cloud.test/api/workspaces/workspace-1/runtime/chat/active',
+      { method: 'POST', body: '{"message":"inspect"}' },
+    ),
+    workspaceId: 'workspace-1',
+    runtimePath: '/chat/active',
+    userId: 'user-1',
+    organizationId: 'org-1',
+  })
+  const reader = response.body!.getReader()
+  const firstRead = reader.read()
+  streamController.enqueue(encoder.encode(
+    'data: {"type":"text","content":"Checking"}\n\n',
+  ))
+  expect(new TextDecoder().decode((await firstRead).value)).toBe(
+    'data: {"type":"text","content":"Checking"}\n\n',
+  )
+
+  streamController.enqueue(encoder.encode(
+    'data: {"type":"tool","name":"read_file"}\n\n',
+  ))
+  streamController.enqueue(encoder.encode(
+    'data: {"type":"tool_result","name":"read_file","result":{"ok":true}}\n\n',
+  ))
+  streamController.enqueue(encoder.encode('data: [DONE]\n\n'))
+  streamController.close()
+
+  let remainder = ''
+  for (;;) {
+    const chunk = await reader.read()
+    if (chunk.done) break
+    remainder += new TextDecoder().decode(chunk.value)
+  }
+  expect(remainder).toBe(
+    'data: {"type":"tool","name":"read_file"}\n\n'
+    + 'data: {"type":"tool_result","name":"read_file","result":{"ok":true}}\n\n'
+    + 'data: [DONE]\n\n',
+  )
+  expect(response.headers.get('content-type')).toContain('text/event-stream')
+  expect(response.headers.get('x-accel-buffering')).toBe('no')
+})
+
+test('forwards cancellation and reconnection requests without changing their contract', async () => {
+  const requests: Request[] = []
+  const gateway = new RuntimeGateway({
+    resolveWorkspace: () => workspace(),
+    worker: {
+      getRuntimeAccess: async () => ({
+        workspaceId: 'worker-workspace-1',
+        network: 'private-network',
+        address: '172.31.0.7:7777',
+        accessToken: 'private-runtime-token',
+      }),
+    },
+    fetch: async (input, init) => {
+      requests.push(new Request(input, init))
+      return Response.json({ ok: true, status: 'cancelling' })
+    },
+  })
+
+  const cancel = await gateway.proxy({
+    request: new Request(
+      'http://cloud.test/api/workspaces/workspace-1/runtime/chat/active/cancel',
+      { method: 'POST' },
+    ),
+    workspaceId: 'workspace-1',
+    runtimePath: '/chat/active/cancel',
+    userId: 'user-1',
+    organizationId: 'org-1',
+  })
+  expect(cancel.status).toBe(200)
+  expect(await cancel.json()).toEqual({ ok: true, status: 'cancelling' })
+
+  await gateway.proxy({
+    request: new Request(
+      'http://cloud.test/api/workspaces/workspace-1/runtime/chat/active/stream?after=4',
+      { headers: { 'last-event-id': '4' } },
+    ),
+    workspaceId: 'workspace-1',
+    runtimePath: '/chat/active/stream',
+    userId: 'user-1',
+    organizationId: 'org-1',
+  })
+
+  expect(requests).toHaveLength(2)
+  expect(requests[0].method).toBe('POST')
+  expect(requests[0].url).toBe(
+    'http://172.31.0.7:7777/chat/active/cancel',
+  )
+  expect(requests[1].url).toBe(
+    'http://172.31.0.7:7777/chat/active/stream?after=4',
+  )
+  expect(requests[1].headers.get('last-event-id')).toBe('4')
+})
+
+test('cancelling the browser response aborts and closes the upstream stream', async () => {
+  let upstreamSignal: AbortSignal | null | undefined
+  let upstreamCancelled = false
+  const gateway = new RuntimeGateway({
+    resolveWorkspace: () => workspace(),
+    worker: {
+      getRuntimeAccess: async () => ({
+        workspaceId: 'worker-workspace-1',
+        network: 'private-network',
+        address: '172.31.0.7:7777',
+        accessToken: 'private-runtime-token',
+      }),
+    },
+    fetch: async (_input, init) => {
+      upstreamSignal = init?.signal
+      return new Response(new ReadableStream({
+        cancel() {
+          upstreamCancelled = true
+        },
+      }))
+    },
+  })
+  const response = await gateway.proxy({
+    request: new Request(
+      'http://cloud.test/api/workspaces/workspace-1/runtime/chat/slow',
+    ),
+    workspaceId: 'workspace-1',
+    runtimePath: '/chat/slow',
+    userId: 'user-1',
+    organizationId: 'org-1',
+  })
+
+  await response.body!.cancel('left chat')
+
+  expect(upstreamCancelled).toBe(true)
+  expect(upstreamSignal?.aborted).toBe(true)
+})
+
+test('surfaces runtime termination after already streamed events', async () => {
+  const encoder = new TextEncoder()
+  let streamController!: ReadableStreamDefaultController<Uint8Array>
+  const gateway = new RuntimeGateway({
+    resolveWorkspace: () => workspace(),
+    worker: {
+      getRuntimeAccess: async () => ({
+        workspaceId: 'worker-workspace-1',
+        network: 'private-network',
+        address: '172.31.0.7:7777',
+        accessToken: 'private-runtime-token',
+      }),
+    },
+    fetch: async () => new Response(new ReadableStream({
+      start(controller) {
+        streamController = controller
+        controller.enqueue(encoder.encode(
+          'data: {"type":"text","content":"partial"}\n\n',
+        ))
+      },
+    })),
+  })
+  const response = await gateway.proxy({
+    request: new Request(
+      'http://cloud.test/api/workspaces/workspace-1/runtime/chat/active/stream',
+    ),
+    workspaceId: 'workspace-1',
+    runtimePath: '/chat/active/stream',
+    userId: 'user-1',
+    organizationId: 'org-1',
+  })
+  const reader = response.body!.getReader()
+
+  const first = await reader.read()
+  expect(new TextDecoder().decode(first.value)).toContain('partial')
+  streamController.error(new Error('runtime terminated'))
+  expect(reader.read()).rejects.toThrow('runtime terminated')
+})

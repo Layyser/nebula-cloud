@@ -123,6 +123,45 @@ function browserResponseHeaders(upstream: Response): Headers {
   return headers
 }
 
+function forwardRuntimeBody(
+  body: ReadableStream<Uint8Array>,
+  abortUpstream: (reason?: unknown) => void,
+  cleanup: () => void,
+): ReadableStream<Uint8Array> {
+  const reader = body.getReader()
+  let finished = false
+  const finish = () => {
+    if (finished) return
+    finished = true
+    cleanup()
+  }
+
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const chunk = await reader.read()
+        if (chunk.done) {
+          finish()
+          controller.close()
+          return
+        }
+        controller.enqueue(chunk.value)
+      } catch (error) {
+        finish()
+        controller.error(error)
+      }
+    },
+    async cancel(reason) {
+      try {
+        await reader.cancel(reason)
+      } finally {
+        abortUpstream(reason)
+        finish()
+      }
+    },
+  })
+}
+
 export class RuntimeGateway {
   readonly #worker: RuntimeAccessProvider
   readonly #resolveWorkspace: RuntimeGatewayOptions['resolveWorkspace']
@@ -162,14 +201,27 @@ export class RuntimeGateway {
       )
     }
 
+    const upstreamController = new AbortController()
+    const abortUpstream = () => {
+      if (!upstreamController.signal.aborted) {
+        upstreamController.abort(request.signal.reason)
+      }
+    }
+    request.signal.addEventListener('abort', abortUpstream, { once: true })
+    const cleanup = () => {
+      request.signal.removeEventListener('abort', abortUpstream)
+    }
+    if (request.signal.aborted) abortUpstream()
+
     let access: WorkerRuntimeAccess
     try {
       access = await this.#worker.getRuntimeAccess({
         workspaceId: workspace.workerWorkspaceId,
-        signal: request.signal,
+        signal: upstreamController.signal,
       })
     } catch (error) {
-      if (request.signal.aborted) {
+      cleanup()
+      if (upstreamController.signal.aborted) {
         return gatewayError(499, 'client_closed_request', 'request was cancelled')
       }
       const retryable = error instanceof WorkerClientError
@@ -191,6 +243,7 @@ export class RuntimeGateway {
         new URL(request.url).search,
       )
     } catch {
+      cleanup()
       return gatewayError(
         502,
         'runtime_address_invalid',
@@ -208,10 +261,11 @@ export class RuntimeGateway {
           ? undefined
           : request.body,
         redirect: 'manual',
-        signal: request.signal,
+        signal: upstreamController.signal,
       })
     } catch {
-      if (request.signal.aborted) {
+      cleanup()
+      if (upstreamController.signal.aborted) {
         return gatewayError(499, 'client_closed_request', 'request was cancelled')
       }
       return gatewayError(
@@ -222,7 +276,20 @@ export class RuntimeGateway {
       )
     }
 
-    return new Response(upstream.body, {
+    const body = upstream.body
+      ? forwardRuntimeBody(
+          upstream.body,
+          reason => {
+            if (!upstreamController.signal.aborted) {
+              upstreamController.abort(reason)
+            }
+          },
+          cleanup,
+        )
+      : null
+    if (!body) cleanup()
+
+    return new Response(body, {
       status: upstream.status,
       statusText: upstream.statusText,
       headers: browserResponseHeaders(upstream),

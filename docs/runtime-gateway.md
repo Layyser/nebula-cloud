@@ -40,13 +40,18 @@ hop headers are not returned to the browser.
 
 ## Streaming and cancellation
 
-The gateway does not buffer Runtime API bodies. It passes request bodies
-upstream and returns the upstream `ReadableStream` directly, preserving SSE
-token and tool-event timing. The browser request signal is also used for the
-worker lookup and runtime fetch, so cancellation and client disconnects abort
-upstream work.
+The gateway does not buffer Runtime API bodies. It forwards each upstream
+`ReadableStream` chunk as it arrives, preserving SSE token, tool, tool-result,
+status, and completion ordering. There is no gateway wall-clock timeout, so
+long-running turns and tools remain connected.
 
-The local end-to-end proof received the first `/runs/events` SSE snapshot
-through the authenticated Cloud URL before the long-lived stream closed.
-GATEWAY-02 retains the broader validation matrix for active turns,
-reconnection, runtime termination, and long-running tool requests.
+A gateway-owned abort signal spans worker lookup and the private runtime fetch.
+Browser request cancellation aborts both stages. Once response headers have
+been returned, cancelling the browser response also cancels the upstream body
+and aborts its fetch explicitly, rather than depending on runtime-specific
+stream garbage collection.
+
+Reconnect requests to `/chat/:name/stream`, their query string, and
+`Last-Event-ID` header pass through unchanged. Runtime termination after a
+partial response becomes a downstream stream error; it is not converted into a
+misleading successful completion.
