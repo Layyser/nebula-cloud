@@ -106,3 +106,43 @@ test('supports an email session and organization lifecycle', async () => {
     database.close()
   }
 })
+
+test('rejects an expired Better Auth session', async () => {
+  const database = new Database(':memory:', { strict: true })
+  try {
+    const auth = createCloudAuth({
+      database,
+      secret: 'test-secret-that-is-at-least-32-characters',
+      baseURL: 'http://localhost:7790',
+      trustedOrigins: ['http://localhost:5173'],
+    })
+    await migrateCloudAuthSchema(auth)
+
+    const signUp = await auth.handler(new Request(
+      'http://localhost:7790/api/auth/sign-up/email',
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          origin: 'http://localhost:5173',
+        },
+        body: JSON.stringify({
+          name: 'Expired User',
+          email: 'expired@example.test',
+          password: 'secure-password',
+        }),
+      },
+    ))
+    expect(signUp.status).toBe(200)
+    const cookie = signUp.headers.get('set-cookie')?.split(';', 1)[0]
+    expect(cookie).toBeTruthy()
+
+    database.prepare('UPDATE session SET expiresAt = 0').run()
+    const session = await auth.api.getSession({
+      headers: new Headers({ cookie: cookie! }),
+    })
+    expect(session).toBeNull()
+  } finally {
+    database.close()
+  }
+})

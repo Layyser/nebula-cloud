@@ -57,6 +57,15 @@ exist only in the control-plane request and are never serialized into a browser
 response. Replacing a runtime rotates its token; the previous generation is no
 longer reachable.
 
+## Isolation verification
+
+The automated isolation suite runs the Runtime HTTP and Console WebSocket
+authorization paths against the real SQLite membership resolver. It verifies
+that ordinary members cannot reach another member's workspace, organizations
+cannot cross boundaries, removed members lose access immediately, and guessed
+workspace identifiers never trigger Worker or runtime connections. Better Auth
+also has a persisted expired-session regression test.
+
 ## Streaming and cancellation
 
 The gateway does not buffer Runtime API bodies. It forwards each upstream
