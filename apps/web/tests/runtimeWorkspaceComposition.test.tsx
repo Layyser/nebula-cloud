@@ -40,6 +40,10 @@ test('Vite leaves the source Runtime UI to its GLSL-aware transform pipeline', (
   expect(viteConfig).toMatchObject({
     optimizeDeps: {
       exclude: ['@nebula/runtime-ui'],
+      include: [
+        '@nebula/runtime-ui > react-markdown',
+        '@nebula/runtime-ui > react-syntax-highlighter',
+      ],
     },
   })
 })
