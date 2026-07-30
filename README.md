@@ -91,19 +91,19 @@ Install all workspace dependencies from the repository root:
 bun install
 ```
 
-Run the Web application:
+Create the local environment files, then run the Web application and control
+plane together:
 
 ```bash
 cp apps/web/.env.example apps/web/.env
-bun run dev:web
-```
-
-Run the control plane in a second terminal:
-
-```bash
 cp apps/control-plane/.env.example apps/control-plane/.env
-bun run dev:control-plane
+bun run dev
 ```
+
+`bun run dev:web` and `bun run dev:control-plane` remain available when the
+processes need to be debugged independently. Do not run the development control
+plane while `nebula-cloud-control-plane.service` is active because both use
+port `7790`.
 
 To enable real provisioning, configure the ignored control-plane `.env`:
 

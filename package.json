@@ -8,7 +8,7 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "bun run dev:web",
+    "dev": "bun run --parallel dev:web dev:control-plane",
     "dev:web": "bun run --cwd apps/web dev",
     "dev:control-plane": "bun run --cwd apps/control-plane dev",
     "build": "bun run typecheck && bun run build:web && bun run build:control-plane",
