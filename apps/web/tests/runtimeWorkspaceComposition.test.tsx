@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { isValidElement } from 'react'
 import { RuntimeWorkspace } from '@nebula/runtime-ui'
 import { createCloudRuntimeTransport } from '../src/runtime/cloudRuntimeTransport'
+import viteConfig from '../vite.config'
 
 test('composes the packaged RuntimeWorkspace with the Cloud transport', () => {
   const transport = createCloudRuntimeTransport({
@@ -26,11 +27,19 @@ test('composes the packaged RuntimeWorkspace with the Cloud transport', () => {
 
 test('the vendored Runtime UI archive matches its recorded checksum', () => {
   const archive = readFileSync(new URL(
-    '../../../vendor/nebula-runtime-ui-0.1.3.tgz',
+    '../../../vendor/nebula-runtime-ui-0.1.4.tgz',
     import.meta.url,
   ))
   const checksum = createHash('sha256').update(archive).digest('hex')
   expect(checksum).toBe(
-    'fde21b3681fe4f0ec8dac3331d60d9bf29c708320110b3f24658517c8dc4979f',
+    '5fc6619f2600b5206b802780619df999d2e14a725f8659f6acb03d616fde088e',
   )
+})
+
+test('Vite leaves the source Runtime UI to its GLSL-aware transform pipeline', () => {
+  expect(viteConfig).toMatchObject({
+    optimizeDeps: {
+      exclude: ['@nebula/runtime-ui'],
+    },
+  })
 })

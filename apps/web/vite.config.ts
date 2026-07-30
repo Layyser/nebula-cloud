@@ -4,6 +4,12 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  optimizeDeps: {
+    // The shared UI is intentionally distributed as source and imports GLSL
+    // through Vite's `?raw` transform. Rolldown's dependency optimizer cannot
+    // pre-bundle those assets, so let the normal Vite pipeline transform it.
+    exclude: ['@nebula/runtime-ui'],
+  },
   server: {
     proxy: {
       '/api/auth': {
