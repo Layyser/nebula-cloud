@@ -12,6 +12,11 @@ import { WorkspaceMembershipNotFoundError } from '@nebula-cloud/database'
 
 const service = 'nebula-cloud-control-plane' as const
 
+// Workspace replacement may legitimately run for up to two minutes. Bun's
+// ten-second default would close the request while the worker was converging
+// and incorrectly surface a 502 after an otherwise successful restart.
+export const CONTROL_PLANE_IDLE_TIMEOUT_SECONDS = 255
+
 export interface ControlPlaneHandlerOptions {
   version?: string
   isReady?: () => boolean

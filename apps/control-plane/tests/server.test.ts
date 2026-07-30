@@ -1,6 +1,13 @@
 import { expect, test } from 'bun:test'
-import { createControlPlaneHandler } from '../src/server'
+import {
+  CONTROL_PLANE_IDLE_TIMEOUT_SECONDS,
+  createControlPlaneHandler,
+} from '../src/server'
 import { WorkspaceMembershipNotFoundError } from '@nebula-cloud/database'
+
+test('allows lifecycle requests to outlive the worker timeout', () => {
+  expect(CONTROL_PLANE_IDLE_TIMEOUT_SECONDS).toBeGreaterThan(120)
+})
 
 test('reports liveness and version without product capabilities', async () => {
   const handler = createControlPlaneHandler({ version: 'test' })

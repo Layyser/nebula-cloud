@@ -1,4 +1,7 @@
-import { createControlPlaneHandler } from './server'
+import {
+  CONTROL_PLANE_IDLE_TIMEOUT_SECONDS,
+  createControlPlaneHandler,
+} from './server'
 import { initializePersistence } from './persistence'
 import {
   ensurePersonalWorkspace,
@@ -167,6 +170,7 @@ const controlPlaneHandler = createControlPlaneHandler({
 const server = Bun.serve({
   hostname,
   port,
+  idleTimeout: CONTROL_PLANE_IDLE_TIMEOUT_SECONDS,
   async fetch(request, bunServer) {
     const url = new URL(request.url)
     const consoleRoute = url.pathname.match(
