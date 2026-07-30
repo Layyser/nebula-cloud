@@ -3,6 +3,7 @@ import { ArrowRight, Building2, LoaderCircle, Plus } from 'lucide-react'
 import { authClient } from '../../auth/authClient'
 import { AuthLoading } from '../auth/AuthLoading'
 import { CloudBrand } from '../auth/CloudBrand'
+import { ActionButton, IconFrame, SurfacePanel, TextField } from '../ui/CloudUI'
 
 export interface CloudOrganization {
   id: string
@@ -45,7 +46,7 @@ export function OrganizationGate({ children, onBack }: OrganizationGateProps) {
   )
 }
 
-function OrganizationSetup({
+export function OrganizationSetup({
   organizations,
   onChanged,
   onBack,
@@ -99,30 +100,30 @@ function OrganizationSetup({
   }
 
   return (
-    <div className="relative z-[2] flex min-h-screen items-center justify-center px-5 py-12 text-white">
-      <div className="w-full max-w-[520px] rounded-2xl border border-white/[0.09] bg-[#0d0e0f]/92 p-6 shadow-[0_32px_100px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:p-8">
+    <div className="cloud-state">
+      <SurfacePanel className="cloud-organization">
         <CloudBrand onSelect={onBack} />
-        <h1 className="mt-7 text-3xl font-medium tracking-[-0.04em]">Choose your organization</h1>
-        <p className="mt-2 text-sm leading-6 text-white/45">
+        <h1 className="cloud-organization__title">Choose your organization</h1>
+        <p className="cloud-organization__copy">
           Your organization owns memberships, shared capabilities, governance, and billing.
         </p>
 
         {organizations.length > 0 && (
-          <div className="mt-6 space-y-2">
+          <div className="cloud-organization__list">
             {organizations.map(organization => (
               <button
                 key={organization.id}
                 type="button"
                 disabled={Boolean(busy)}
                 onClick={() => selectOrganization(organization.id)}
-                className="group flex w-full items-center gap-3 rounded-xl border border-white/[0.08] bg-white/[0.025] p-3 text-left transition hover:border-white/[0.14] hover:bg-white/[0.055] disabled:opacity-50"
+                className="cloud-organization__option group"
               >
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.07] bg-white/[0.045] text-white/55">
+                <IconFrame size="lg">
                   <Building2 size={16} />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium text-white/80">{organization.name}</span>
-                  <span className="block truncate text-xs text-white/30">{organization.slug}</span>
+                </IconFrame>
+                <span className="cloud-organization__identity">
+                  <strong>{organization.name}</strong>
+                  <small>{organization.slug}</small>
                 </span>
                 {busy === organization.id
                   ? <LoaderCircle size={15} className="animate-spin text-white/35" />
@@ -132,22 +133,21 @@ function OrganizationSetup({
           </div>
         )}
 
-        <div className="my-6 flex items-center gap-3 text-[10px] uppercase tracking-[0.15em] text-white/20">
-          <span className="h-px flex-1 bg-white/[0.07]" />
+        <div className="cloud-organization__divider">
+          <span />
           {organizations.length ? 'or create another' : 'create your first organization'}
-          <span className="h-px flex-1 bg-white/[0.07]" />
+          <span />
         </div>
 
-        <form onSubmit={createOrganization} className="space-y-3">
-          <input
+        <form onSubmit={createOrganization} className="cloud-organization__form">
+          <TextField
             value={name}
             onChange={event => setName(event.target.value)}
             required
             placeholder="Organization name"
-            className="h-11 w-full rounded-xl border border-white/[0.09] bg-black/25 px-3.5 text-sm text-white outline-none transition placeholder:text-white/20 focus:border-white/[0.18]"
           />
-          <div className="flex h-11 items-center rounded-xl border border-white/[0.09] bg-black/25 px-3.5 text-sm focus-within:border-white/[0.18]">
-            <span className="mr-1 text-white/22">nebula.cloud/</span>
+          <div className="ui-field cloud-slug-field">
+            <span>nebula.cloud/</span>
             <input
               value={effectiveSlug}
               onChange={event => {
@@ -160,18 +160,19 @@ function OrganizationSetup({
             />
           </div>
 
-          {error && <p role="alert" className="text-xs leading-5 text-red-200/80">{error}</p>}
+          {error && <p role="alert" className="ui-notice ui-notice--error">{error}</p>}
 
-          <button
+          <ActionButton
             type="submit"
             disabled={Boolean(busy) || !name.trim() || !effectiveSlug}
-            className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-white text-sm font-semibold text-black transition hover:bg-white/88 disabled:cursor-not-allowed disabled:opacity-55"
+            tone="primary"
+            className="w-full"
           >
             {busy === 'create' ? <LoaderCircle size={15} className="animate-spin" /> : <Plus size={15} />}
             Create organization
-          </button>
+          </ActionButton>
         </form>
-      </div>
+      </SurfacePanel>
     </div>
   )
 }

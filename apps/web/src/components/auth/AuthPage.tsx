@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { ArrowRight, LoaderCircle } from 'lucide-react'
 import { authClient } from '../../auth/authClient'
+import { ActionButton, FieldLabel, SurfacePanel, TextField } from '../ui/CloudUI'
 import { CloudBrand } from './CloudBrand'
 
 interface AuthPageProps {
@@ -40,93 +41,58 @@ export function AuthPage({ onAuthenticated, onBack, notice }: AuthPageProps) {
   }
 
   return (
-    <div className="relative z-[2] flex min-h-screen items-center justify-center px-5 py-8 text-white">
-      <div className="h-[531px] w-full max-w-[420px]">
-        <div className="w-full rounded-2xl border border-white/[0.09] bg-[#0d0e0f]/90 p-6 shadow-[0_32px_100px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:p-8">
+    <div className="cloud-state cloud-state--auth">
+      <div className="cloud-auth-anchor">
+        <SurfacePanel className="cloud-auth-panel">
           <CloudBrand onSelect={onBack} />
-        <h1 className="mt-3 text-3xl font-medium tracking-[-0.04em]">
-          {mode === 'sign-in' ? 'Welcome back' : 'Create your workspace'}
-        </h1>
-        <p className="mt-2 text-sm leading-6 text-white/45">
-          {mode === 'sign-in'
-            ? 'Sign in to your organization and personal Linux workspace.'
-            : 'Create your account. You can create or join an organization next.'}
-        </p>
+          <h1 className="cloud-auth-panel__title">
+            {mode === 'sign-in' ? 'Welcome back' : 'Create your workspace'}
+          </h1>
+          <p className="cloud-auth-panel__copy">
+            {mode === 'sign-in'
+              ? 'Sign in to your organization and personal Linux workspace.'
+              : 'Create your account. You can create or join an organization next.'}
+          </p>
 
-        <div className="relative mt-6 grid grid-cols-2 rounded-xl border border-white/[0.08] bg-black/20 p-0.5 text-sm">
-          <span
-            aria-hidden="true"
-            className={`absolute inset-y-0.5 left-0.5 w-[calc(50%-2px)] rounded-[10px] bg-white/[0.1] shadow-sm transition-transform duration-300 ease-out ${
-              mode === 'sign-up' ? 'translate-x-full' : 'translate-x-0'
-            }`}
-          />
-          <button
-            type="button"
-            onClick={() => { setMode('sign-in'); setError('') }}
-            className={`relative z-10 h-9 rounded-[10px] transition-colors duration-300 ${
-              mode === 'sign-in' ? 'text-white' : 'text-white/40 hover:text-white/70'
-            }`}
-          >
-            Sign in
-          </button>
-          <button
-            type="button"
-            onClick={() => { setMode('sign-up'); setError('') }}
-            className={`relative z-10 h-9 rounded-[10px] transition-colors duration-300 ${
-              mode === 'sign-up' ? 'text-white' : 'text-white/40 hover:text-white/70'
-            }`}
-          >
-            Create account
-          </button>
-        </div>
+          <div className="ui-segmented">
+            <span aria-hidden="true" className={mode === 'sign-up' ? 'is-right' : ''} />
+            <button type="button" aria-pressed={mode === 'sign-in'} onClick={() => { setMode('sign-in'); setError('') }}>
+              Sign in
+            </button>
+            <button type="button" aria-pressed={mode === 'sign-up'} onClick={() => { setMode('sign-up'); setError('') }}>
+              Create account
+            </button>
+          </div>
 
-        <form onSubmit={submit} className="mt-6 space-y-4">
+          <form onSubmit={submit} className="cloud-auth-form">
           {notice && (
-            <p role="status" className="rounded-xl border border-amber-300/15 bg-amber-300/[0.06] px-3 py-2.5 text-xs leading-5 text-amber-100/70">
+            <p role="status" className="ui-notice ui-notice--warning">
               {notice}
             </p>
           )}
           {mode === 'sign-up' && (
-            <Field
-              label="Name"
-              type="text"
-              value={name}
-              onChange={setName}
-              autoComplete="name"
-              placeholder="George"
-              required
-            />
+            <FieldLabel label="Name">
+              <TextField type="text" value={name} onChange={event => setName(event.target.value)} autoComplete="name" placeholder="George" required />
+            </FieldLabel>
           )}
-          <Field
-            label="Email"
-            type="email"
-            value={email}
-            onChange={setEmail}
-            autoComplete="email"
-            placeholder="you@company.com"
-            required
-          />
-          <Field
-            label="Password"
-            type="password"
-            value={password}
-            onChange={setPassword}
-            autoComplete={mode === 'sign-in' ? 'current-password' : 'new-password'}
-            placeholder="At least 8 characters"
-            minLength={8}
-            required
-          />
+          <FieldLabel label="Email">
+            <TextField type="email" value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" placeholder="you@company.com" required />
+          </FieldLabel>
+          <FieldLabel label="Password">
+            <TextField type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete={mode === 'sign-in' ? 'current-password' : 'new-password'} placeholder="At least 8 characters" minLength={8} required />
+          </FieldLabel>
 
           {error && (
-            <p role="alert" className="rounded-xl border border-red-400/15 bg-red-400/[0.07] px-3 py-2.5 text-xs leading-5 text-red-200/80">
+            <p role="alert" className="ui-notice ui-notice--error">
               {error}
             </p>
           )}
 
-          <button
+          <ActionButton
             type="submit"
             disabled={submitting}
-            className="group flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-white text-sm font-semibold text-black transition hover:bg-white/88 disabled:cursor-not-allowed disabled:opacity-55"
+            tone="primary"
+            className="group w-full"
           >
             {submitting ? (
               <LoaderCircle size={15} className="animate-spin" />
@@ -136,52 +102,14 @@ export function AuthPage({ onAuthenticated, onBack, notice }: AuthPageProps) {
                 <ArrowRight size={15} className="transition-transform group-hover:translate-x-0.5" />
               </>
             )}
-          </button>
-        </form>
+          </ActionButton>
+          </form>
 
-        <p className="mt-5 text-center text-[11px] leading-5 text-white/25">
-          Terms and privacy pages will be added before public launch.
-        </p>
-        </div>
+          <p className="cloud-auth-panel__legal">
+            Review the draft <a href="/legal/terms">terms</a> and <a href="/legal/privacy">privacy</a> surfaces.
+          </p>
+        </SurfacePanel>
       </div>
     </div>
-  )
-}
-
-interface FieldProps {
-  label: string
-  type: string
-  value: string
-  onChange: (value: string) => void
-  autoComplete: string
-  placeholder: string
-  required?: boolean
-  minLength?: number
-}
-
-function Field({
-  label,
-  type,
-  value,
-  onChange,
-  autoComplete,
-  placeholder,
-  required,
-  minLength,
-}: FieldProps) {
-  return (
-    <label className="block">
-      <span className="mb-1.5 block text-xs font-medium text-white/55">{label}</span>
-      <input
-        type={type}
-        value={value}
-        onChange={event => onChange(event.target.value)}
-        autoComplete={autoComplete}
-        placeholder={placeholder}
-        required={required}
-        minLength={minLength}
-        className="h-11 w-full rounded-xl border border-white/[0.09] bg-black/25 px-3.5 text-sm text-white outline-none transition placeholder:text-white/20 focus:border-white/[0.18] focus:bg-black/35"
-      />
-    </label>
   )
 }

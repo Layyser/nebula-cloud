@@ -37,11 +37,15 @@ import { AuthLoading } from './components/auth/AuthLoading'
 import { AuthPage } from './components/auth/AuthPage'
 import { Dashboard } from './components/cloud/Dashboard'
 import { WorkspaceStartup } from './components/cloud/WorkspaceStartup'
+import { DocsPage } from './components/docs/DocsPage'
 import { LandingPage } from './components/landing/LandingPage'
+import { LegalPage } from './components/legal/LegalPage'
 import {
   OrganizationGate,
   type CloudOrganization,
 } from './components/organization/OrganizationGate'
+import { ActionButton, BrandLockup, SurfacePanel } from './components/ui/CloudUI'
+import { resolvePublicSurface } from './publicRoutes'
 import { createCloudRuntimeTransport } from './runtime/cloudRuntimeTransport'
 import {
   ensurePersonalWorkspace,
@@ -70,9 +74,22 @@ function usePathname() {
   }, [])
 
   const navigate = useCallback((path: string) => {
-    if (window.location.pathname !== path) window.history.pushState(null, '', path)
-    setPathname(path)
-    window.scrollTo({ top: 0, behavior: 'instant' })
+    const target = new URL(path, window.location.origin)
+    const sameDocument = window.location.pathname === target.pathname
+    if (`${window.location.pathname}${window.location.hash}` !== `${target.pathname}${target.hash}`) {
+      window.history.pushState(null, '', `${target.pathname}${target.hash}`)
+    }
+    setPathname(target.pathname)
+    if (target.hash) {
+      window.requestAnimationFrame(() => {
+        document.getElementById(target.hash.slice(1))?.scrollIntoView({
+          behavior: sameDocument ? 'smooth' : 'instant',
+          block: 'start',
+        })
+      })
+    } else {
+      window.scrollTo({ top: 0, behavior: 'instant' })
+    }
   }, [])
 
   return { pathname, navigate }
@@ -80,22 +97,28 @@ function usePathname() {
 
 export default function App() {
   const { pathname, navigate } = usePathname()
+  const publicSurface = resolvePublicSurface(pathname)
   const cloudRoute = pathname === '/login'
     || pathname.startsWith('/app')
     || isAuthenticationCallback(pathname)
 
-  return (
-    <PageBackground>
-      {cloudRoute ? (
+  if (cloudRoute) {
+    return (
+      <CloudBackground>
         <CloudSessionRoute pathname={pathname} navigate={navigate} />
-      ) : (
-        <LandingPage onLaunch={() => navigate('/login')} />
-      )}
-    </PageBackground>
-  )
+      </CloudBackground>
+    )
+  }
+  if (publicSurface === 'docs') {
+    return <DocsPage pathname={pathname} onNavigate={navigate} />
+  }
+  if (publicSurface === 'legal') {
+    return <LegalPage pathname={pathname} onNavigate={navigate} />
+  }
+  return <LandingPage onNavigate={navigate} />
 }
 
-function PageBackground({ children }: { children: ReactNode }) {
+function CloudBackground({ children }: { children: ReactNode }) {
   return (
     <>
       <NebulaBackground fade={0} variant="classic" palette="graphite" resolutionScale={0.5} />
@@ -347,7 +370,7 @@ function AuthenticatedCloudApp({
   )
 }
 
-function WorkspaceResolutionError({
+export function WorkspaceResolutionError({
   error,
   onRetry,
 }: {
@@ -360,18 +383,15 @@ function WorkspaceResolutionError({
       ? 'Provisioning paused'
       : 'Nebula unavailable'
   return (
-    <div className="relative z-[2] flex min-h-screen items-center justify-center px-5 text-white">
-      <div className="w-full max-w-sm rounded-xl border border-white/[0.10] bg-[#111]/95 p-5 shadow-[0_24px_80px_rgba(0,0,0,0.65)] backdrop-blur-xl">
-        <p className="text-[14px] font-semibold text-white/90">{title}</p>
-        <p className="mt-2 text-[12px] leading-5 text-white/45">{error.message}</p>
-        <button
-          type="button"
-          onClick={onRetry}
-          className="mt-5 flex h-9 items-center justify-center rounded-xl bg-white px-4 text-[12px] font-medium text-black transition hover:bg-white/90"
-        >
+    <div className="cloud-state">
+      <SurfacePanel className="cloud-state__panel">
+        <BrandLockup surface="cloud" />
+        <p className="cloud-state__title">{title}</p>
+        <p className="cloud-state__copy">{error.message}</p>
+        <ActionButton tone="primary" size="md" onClick={onRetry} className="mt-5">
           Try again
-        </button>
-      </div>
+        </ActionButton>
+      </SurfacePanel>
     </div>
   )
 }

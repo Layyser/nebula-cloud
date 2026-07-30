@@ -1,25 +1,9 @@
-import { NebulaMark } from '@nebula/runtime-ui'
+import { BrandLockup } from '../ui/CloudUI'
 
 export function CloudBrand({
   onSelect,
 }: {
   onSelect: () => void
 }) {
-  return (
-    <div className="flex h-6 items-center gap-2.5">
-      <button
-        type="button"
-        onClick={onSelect}
-        aria-label="Return to the Nebula landing page"
-        className="flex h-6 cursor-pointer items-center gap-2.5 text-sm font-semibold leading-none text-white/80 transition hover:text-white"
-      >
-        <NebulaMark size={24} />
-        <span className="nebula-wordmark leading-none">Nebula</span>
-      </button>
-      <span className="h-4 w-px bg-white/[0.12]" />
-      <span className="flex h-6 items-center text-[10px] font-medium uppercase leading-none tracking-[0.18em] text-white/30">
-        Cloud
-      </span>
-    </div>
-  )
+  return <BrandLockup surface="cloud" onSelect={onSelect} />
 }
