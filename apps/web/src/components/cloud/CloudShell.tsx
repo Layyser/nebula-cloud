@@ -64,7 +64,7 @@ export function CloudShell({
 
         <div className="relative mt-auto border-t border-white/[0.06] px-1 py-3">
           {accountOpen && (
-            <div className="absolute bottom-[calc(100%-3px)] left-1 right-1 overflow-hidden rounded-xl border border-white/[0.09] bg-[#151616] p-1 shadow-[0_18px_50px_rgba(0,0,0,0.45)]">
+            <div className="absolute bottom-[calc(100%-3px)] left-1 right-1 overflow-hidden rounded-xl bg-[#151616] p-1 shadow-[0_18px_50px_rgba(0,0,0,0.45)]">
               <p className="px-2.5 pb-1 pt-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-white/22">Organizations</p>
               {organizations.map(organization => (
                 <button
@@ -99,7 +99,7 @@ export function CloudShell({
             onClick={() => setAccountOpen(open => !open)}
             className="flex w-full items-center gap-2.5 rounded-xl px-2 py-2 text-left transition hover:bg-white/[0.045]"
           >
-            <span className="flex h-7 w-7 items-center justify-center rounded-full border border-violet-300/20 bg-violet-500/60 text-[10px] font-semibold">{initial}</span>
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-violet-500/60 text-[10px] font-semibold">{initial}</span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[12px] text-white/75">{user.name}</span>
               <span className="block truncate text-[10px] text-white/32">{activeOrganization.name}</span>

@@ -1,8 +1,8 @@
 # Vendored runtime UI
 
-`nebula-runtime-ui-0.1.4.tgz` is the immutable package consumed by the Cloud
-Web application. It is built from Nebula-frontend commit
-`fc3cb118a1cb2e910b3b716655e4460cb70961f1`.
+`nebula-runtime-ui-0.1.10.tgz` is the immutable package consumed by the Cloud
+Web application. It is built from the current Nebula-frontend working tree,
+based on commit `fc3cb118a1cb2e910b3b716655e4460cb70961f1`.
 
 The archive exists because Nebula-frontend is currently a private GitHub
 repository and Bun's Git dependency resolver requires API access to download a

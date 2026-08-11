@@ -85,7 +85,7 @@ export function OrganizationPage({ organization }: { organization: CloudOrganiza
           <h1 className="text-3xl font-medium tracking-[-0.04em] text-white/90">{organization.name}</h1>
           <p className="mt-2 text-sm text-white/38">Members, roles, and invitations are managed by Better Auth.</p>
         </div>
-        <div className="flex items-center gap-2 rounded-xl border border-white/[0.07] bg-white/[0.02] px-3 py-2 text-xs text-white/40">
+        <div className="flex items-center gap-2 rounded-xl bg-white/[0.035] px-3 py-2 text-xs text-white/40">
           <ShieldCheck size={14} className="text-emerald-300/60" />
           Organization access active
         </div>
@@ -109,7 +109,7 @@ export function OrganizationPage({ organization }: { organization: CloudOrganiza
           ) : (
             members.map(member => (
               <div key={member.id} className="flex items-center gap-3 border-b border-white/[0.05] px-5 py-3.5 last:border-0">
-                <span className="flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.07] bg-white/[0.04] text-xs font-semibold text-white/60">
+                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/[0.04] text-xs font-semibold text-white/60">
                   {member.user.name.slice(0, 1).toUpperCase() || <UserRound size={14} />}
                 </span>
                 <span className="min-w-0 flex-1">
@@ -125,7 +125,7 @@ export function OrganizationPage({ organization }: { organization: CloudOrganiza
         </section>
 
         <aside className="space-y-5">
-          <section className="rounded-2xl border border-white/[0.07] bg-white/[0.018] p-5">
+          <section className="rounded-2xl bg-white/[0.025] p-5">
             <div className="flex items-center gap-2">
               <Mail size={15} className="text-white/30" />
               <h2 className="text-sm font-medium text-white/75">Invite a member</h2>
@@ -137,7 +137,7 @@ export function OrganizationPage({ organization }: { organization: CloudOrganiza
                 onChange={event => setEmail(event.target.value)}
                 required
                 placeholder="person@company.com"
-                className="h-10 w-full rounded-xl border border-white/[0.08] bg-black/20 px-3 text-sm text-white outline-none transition placeholder:text-white/20 focus:border-white/[0.17]"
+                className="h-10 w-full rounded-xl bg-[var(--color-surface-field)] px-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:bg-[var(--color-surface-field-focus)]"
               />
               <div className="grid grid-cols-2 rounded-xl border border-white/[0.08] bg-black/20 p-0.5 text-xs">
                 {(['member', 'admin'] as const).map(option => (
@@ -165,7 +165,7 @@ export function OrganizationPage({ organization }: { organization: CloudOrganiza
           </section>
 
           {invitations.length > 0 && (
-            <section className="rounded-2xl border border-white/[0.07] bg-white/[0.018] p-5">
+            <section className="rounded-2xl bg-white/[0.025] p-5">
               <h2 className="text-sm font-medium text-white/75">Pending invitations</h2>
               <div className="mt-3 space-y-3">
                 {invitations.map(invitation => (

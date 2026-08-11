@@ -21,7 +21,13 @@ function consoleURL(workspaceId: string, rows: number, columns: number): string 
   return url.toString()
 }
 
-export function TerminalPage({ workspaceId }: { workspaceId: string }) {
+export function TerminalPage({
+  workspaceId,
+  previewOutput,
+}: {
+  workspaceId: string
+  previewOutput?: string[]
+}) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [attempt, setAttempt] = useState(0)
   const [status, setStatus] = useState<TerminalStatus>('connecting')
@@ -78,6 +84,21 @@ export function TerminalPage({ workspaceId }: { workspaceId: string }) {
     }
     fitTerminal()
 
+    const observer = new ResizeObserver(() => {
+      window.requestAnimationFrame(fitTerminal)
+    })
+    observer.observe(container)
+
+    if (previewOutput) {
+      setStatus('connected')
+      terminal.write(previewOutput.join('\r\n'))
+      return () => {
+        disposed = true
+        observer.disconnect()
+        terminal.dispose()
+      }
+    }
+
     socket = new WebSocket(consoleURL(
       workspaceId,
       Math.max(1, terminal.rows),
@@ -125,11 +146,6 @@ export function TerminalPage({ workspaceId }: { workspaceId: string }) {
       }
     })
     const resize = terminal.onResize(sendResize)
-    const observer = new ResizeObserver(() => {
-      window.requestAnimationFrame(fitTerminal)
-    })
-    observer.observe(container)
-
     return () => {
       disposed = true
       observer.disconnect()
@@ -138,7 +154,7 @@ export function TerminalPage({ workspaceId }: { workspaceId: string }) {
       socket?.close(1000, 'Terminal view closed')
       terminal.dispose()
     }
-  }, [attempt, workspaceId])
+  }, [attempt, previewOutput, workspaceId])
 
   const connected = status === 'connected'
 

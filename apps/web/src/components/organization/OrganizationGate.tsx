@@ -45,7 +45,7 @@ export function OrganizationGate({ children, onBack }: OrganizationGateProps) {
   )
 }
 
-function OrganizationSetup({
+export function OrganizationSetup({
   organizations,
   onChanged,
   onBack,
@@ -100,7 +100,7 @@ function OrganizationSetup({
 
   return (
     <div className="relative z-[2] flex min-h-screen items-center justify-center px-5 py-12 text-white">
-      <div className="w-full max-w-[520px] rounded-2xl border border-white/[0.09] bg-[#0d0e0f]/92 p-6 shadow-[0_32px_100px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:p-8">
+      <div className="w-full max-w-[520px] rounded-2xl bg-[var(--color-surface-auth)] p-6 shadow-[0_32px_100px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:p-8">
         <CloudBrand onSelect={onBack} />
         <h1 className="mt-7 text-3xl font-medium tracking-[-0.04em]">Choose your organization</h1>
         <p className="mt-2 text-sm leading-6 text-white/45">
@@ -115,9 +115,9 @@ function OrganizationSetup({
                 type="button"
                 disabled={Boolean(busy)}
                 onClick={() => selectOrganization(organization.id)}
-                className="group flex w-full items-center gap-3 rounded-xl border border-white/[0.08] bg-white/[0.025] p-3 text-left transition hover:border-white/[0.14] hover:bg-white/[0.055] disabled:opacity-50"
+                className="group flex w-full items-center gap-3 rounded-xl bg-white/[0.035] p-3 text-left transition hover:bg-white/[0.065] disabled:opacity-50"
               >
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.07] bg-white/[0.045] text-white/55">
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/[0.055] text-white/55">
                   <Building2 size={16} />
                 </span>
                 <span className="min-w-0 flex-1">
@@ -144,9 +144,9 @@ function OrganizationSetup({
             onChange={event => setName(event.target.value)}
             required
             placeholder="Organization name"
-            className="h-11 w-full rounded-xl border border-white/[0.09] bg-black/25 px-3.5 text-sm text-white outline-none transition placeholder:text-white/20 focus:border-white/[0.18]"
+            className="h-11 w-full rounded-xl bg-[var(--color-surface-field)] px-3.5 text-sm text-white outline-none transition placeholder:text-white/35 focus:bg-[var(--color-surface-field-focus)]"
           />
-          <div className="flex h-11 items-center rounded-xl border border-white/[0.09] bg-black/25 px-3.5 text-sm focus-within:border-white/[0.18]">
+          <div className="flex h-11 items-center rounded-xl bg-[var(--color-surface-field)] px-3.5 text-sm transition focus-within:bg-[var(--color-surface-field-focus)]">
             <span className="mr-1 text-white/22">nebula.cloud/</span>
             <input
               value={effectiveSlug}
@@ -165,7 +165,7 @@ function OrganizationSetup({
           <button
             type="submit"
             disabled={Boolean(busy) || !name.trim() || !effectiveSlug}
-            className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-white text-sm font-semibold text-black transition hover:bg-white/88 disabled:cursor-not-allowed disabled:opacity-55"
+            className="flex h-11 w-full items-center justify-center gap-2 rounded-full bg-white text-sm font-semibold text-black transition hover:bg-white/88 disabled:cursor-not-allowed disabled:opacity-55"
           >
             {busy === 'create' ? <LoaderCircle size={15} className="animate-spin" /> : <Plus size={15} />}
             Create organization

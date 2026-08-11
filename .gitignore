@@ -8,3 +8,5 @@ dist
 *.sqlite-shm
 *.sqlite-wal
 apps/control-plane/data/
+.nebula/
+*:Zone.Identifier

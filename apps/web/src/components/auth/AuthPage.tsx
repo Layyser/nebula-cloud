@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { ArrowRight, LoaderCircle } from 'lucide-react'
 import { authClient } from '../../auth/authClient'
 import { CloudBrand } from './CloudBrand'
+import { SegmentedControl } from '../ui/SegmentedControl'
 
 interface AuthPageProps {
   onAuthenticated: () => void
@@ -42,7 +43,7 @@ export function AuthPage({ onAuthenticated, onBack, notice }: AuthPageProps) {
   return (
     <div className="relative z-[2] flex min-h-screen items-center justify-center px-5 py-8 text-white">
       <div className="h-[531px] w-full max-w-[420px]">
-        <div className="w-full rounded-2xl border border-white/[0.09] bg-[#0d0e0f]/90 p-6 shadow-[0_32px_100px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:p-8">
+        <div className="w-full rounded-2xl bg-[var(--color-surface-auth)] p-6 shadow-[0_32px_100px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:p-8">
           <CloudBrand onSelect={onBack} />
         <h1 className="mt-3 text-3xl font-medium tracking-[-0.04em]">
           {mode === 'sign-in' ? 'Welcome back' : 'Create your workspace'}
@@ -53,36 +54,18 @@ export function AuthPage({ onAuthenticated, onBack, notice }: AuthPageProps) {
             : 'Create your account. You can create or join an organization next.'}
         </p>
 
-        <div className="relative mt-6 grid grid-cols-2 rounded-xl border border-white/[0.08] bg-black/20 p-0.5 text-sm">
-          <span
-            aria-hidden="true"
-            className={`absolute inset-y-0.5 left-0.5 w-[calc(50%-2px)] rounded-[10px] bg-white/[0.1] shadow-sm transition-transform duration-300 ease-out ${
-              mode === 'sign-up' ? 'translate-x-full' : 'translate-x-0'
-            }`}
-          />
-          <button
-            type="button"
-            onClick={() => { setMode('sign-in'); setError('') }}
-            className={`relative z-10 h-9 rounded-[10px] transition-colors duration-300 ${
-              mode === 'sign-in' ? 'text-white' : 'text-white/40 hover:text-white/70'
-            }`}
-          >
-            Sign in
-          </button>
-          <button
-            type="button"
-            onClick={() => { setMode('sign-up'); setError('') }}
-            className={`relative z-10 h-9 rounded-[10px] transition-colors duration-300 ${
-              mode === 'sign-up' ? 'text-white' : 'text-white/40 hover:text-white/70'
-            }`}
-          >
-            Create account
-          </button>
-        </div>
+        <SegmentedControl
+          ariaLabel="Authentication mode"
+          value={mode}
+          options={[{ value: 'sign-in', label: 'Sign in' }, { value: 'sign-up', label: 'Create account' }]}
+          onValueChange={nextMode => { setMode(nextMode); setError('') }}
+          tone="dark"
+          className="mt-6 w-full"
+        />
 
         <form onSubmit={submit} className="mt-6 space-y-4">
           {notice && (
-            <p role="status" className="rounded-xl border border-amber-300/15 bg-amber-300/[0.06] px-3 py-2.5 text-xs leading-5 text-amber-100/70">
+            <p role="status" className="rounded-xl bg-amber-300/[0.06] px-3 py-2.5 text-xs leading-5 text-amber-100/70">
               {notice}
             </p>
           )}
@@ -118,7 +101,7 @@ export function AuthPage({ onAuthenticated, onBack, notice }: AuthPageProps) {
           />
 
           {error && (
-            <p role="alert" className="rounded-xl border border-red-400/15 bg-red-400/[0.07] px-3 py-2.5 text-xs leading-5 text-red-200/80">
+            <p role="alert" className="rounded-xl bg-red-400/[0.07] px-3 py-2.5 text-xs leading-5 text-red-200/80">
               {error}
             </p>
           )}
@@ -126,14 +109,14 @@ export function AuthPage({ onAuthenticated, onBack, notice }: AuthPageProps) {
           <button
             type="submit"
             disabled={submitting}
-            className="group flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-white text-sm font-semibold text-black transition hover:bg-white/88 disabled:cursor-not-allowed disabled:opacity-55"
+            className="group !mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-full bg-white text-sm font-semibold text-black transition hover:bg-white/88 disabled:cursor-not-allowed disabled:opacity-55"
           >
             {submitting ? (
               <LoaderCircle size={15} className="animate-spin" />
             ) : (
               <>
                 {mode === 'sign-in' ? 'Sign in' : 'Continue'}
-                <ArrowRight size={15} className="transition-transform group-hover:translate-x-0.5" />
+                <ArrowRight size={15} className="transition-transform group-hover:translate-x-1" />
               </>
             )}
           </button>
@@ -180,7 +163,7 @@ function Field({
         placeholder={placeholder}
         required={required}
         minLength={minLength}
-        className="h-11 w-full rounded-xl border border-white/[0.09] bg-black/25 px-3.5 text-sm text-white outline-none transition placeholder:text-white/20 focus:border-white/[0.18] focus:bg-black/35"
+        className="h-11 w-full rounded-xl bg-[var(--color-surface-field)] px-3.5 text-sm text-white outline-none transition placeholder:text-white/35 focus:bg-[var(--color-surface-field-focus)]"
       />
     </label>
   )

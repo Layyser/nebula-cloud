@@ -38,6 +38,7 @@ import { AuthPage } from './components/auth/AuthPage'
 import { Dashboard } from './components/cloud/Dashboard'
 import { WorkspaceStartup } from './components/cloud/WorkspaceStartup'
 import { LandingPage } from './components/landing/LandingPage'
+import { PricingPage } from './components/pricing/PricingPage'
 import {
   OrganizationGate,
   type CloudOrganization,
@@ -83,11 +84,14 @@ export default function App() {
   const cloudRoute = pathname === '/login'
     || pathname.startsWith('/app')
     || isAuthenticationCallback(pathname)
+  const pricingRoute = pathname === '/pricing'
 
   return (
-    <PageBackground>
+    <PageBackground scrollReactive={!cloudRoute && !pricingRoute}>
       {cloudRoute ? (
         <CloudSessionRoute pathname={pathname} navigate={navigate} />
+      ) : pricingRoute ? (
+        <PricingPage onLaunch={() => navigate('/login')} />
       ) : (
         <LandingPage onLaunch={() => navigate('/login')} />
       )}
@@ -95,10 +99,10 @@ export default function App() {
   )
 }
 
-function PageBackground({ children }: { children: ReactNode }) {
+export function PageBackground({ children, scrollReactive }: { children: ReactNode; scrollReactive: boolean }) {
   return (
     <>
-      <NebulaBackground fade={0} variant="classic" palette="graphite" resolutionScale={0.5} />
+      <NebulaBackground fade={0} variant="classic" palette="graphite" resolutionScale={0.5} scrollReactive={scrollReactive} />
       <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-[1] bg-[radial-gradient(circle_at_66%_40%,transparent_0%,rgba(5,6,7,0.08)_28%,rgba(5,6,7,0.76)_78%)]" />
       <div aria-hidden="true" className="shader-bottom-fade pointer-events-none fixed inset-x-0 bottom-0 z-[1]" />
       {children}
@@ -361,7 +365,7 @@ function WorkspaceResolutionError({
       : 'Nebula unavailable'
   return (
     <div className="relative z-[2] flex min-h-screen items-center justify-center px-5 text-white">
-      <div className="w-full max-w-sm rounded-xl border border-white/[0.10] bg-[#111]/95 p-5 shadow-[0_24px_80px_rgba(0,0,0,0.65)] backdrop-blur-xl">
+      <div className="w-full max-w-sm rounded-2xl bg-[var(--color-surface-auth)] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.65)] backdrop-blur-xl">
         <p className="text-[14px] font-semibold text-white/90">{title}</p>
         <p className="mt-2 text-[12px] leading-5 text-white/45">{error.message}</p>
         <button
@@ -376,7 +380,7 @@ function WorkspaceResolutionError({
   )
 }
 
-function SettingsWindow({
+export function SettingsWindow({
   user,
   organization,
   workspaceId,
@@ -652,7 +656,7 @@ function SettingsWindow({
                 <div>
                   <p className="text-[12px] font-medium text-white/75">Restart operator</p>
                   <p className="mt-0.5 text-[10px] leading-4 text-white/35">
-                    Restarts Nebula and the terminal without deleting your files.
+                    Recreates Nebula from the current image without deleting your files.
                   </p>
                 </div>
                 {restartState === 'confirming' ? null : (
@@ -677,7 +681,7 @@ function SettingsWindow({
               {restartState === 'confirming' && (
                 <div className="mt-3 flex items-center justify-between gap-3 border-t border-white/[0.07] pt-3">
                   <p className="text-[10px] leading-4 text-white/40">
-                    Active commands and terminal connections will stop.
+                    Active commands and terminal connections will stop. Persistent files stay mounted.
                   </p>
                   <div className="flex shrink-0 items-center gap-2">
                     <button

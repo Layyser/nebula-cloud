@@ -1,0 +1,234 @@
+Nebula frontend production plan
+================================
+
+Guiding rule
+-------------
+
+Use nebula-frontend as the visual and behavioral source of truth. Formalize the
+parts that already work there, then move nebula-cloud toward those shared rules.
+Preserve intentional differences between marketing pages and the operational
+workspace; remove accidental differences between controls that do the same job.
+
+Every numbered task is an independently reviewable patch. Do not begin the next
+task until the current patch has been built, tested, visually checked, and
+accepted.
+
+1. Establish a deterministic baseline
+-------------------------------------
+
+- [x] Add a backend-free mock RuntimeTransport to nebula-frontend.
+- [x] Expose the first deterministic development-only workspace preview without
+      creating a second application shell (`?preview=workspace`).
+- [x] Add the remaining deterministic nebula-frontend preview states.
+- [x] Cover the default workspace, populated session, empty state, runtime
+      unavailable state, settings/dialog state, and narrow/mobile layouts.
+- [x] Add equivalent deterministic Cloud previews for login, organization setup,
+      workspace startup, dashboard, terminal, and settings.
+- [x] Capture reference screenshots at 375, 768, 1024, 1280, and 1440 px.
+- [x] Record the exact commands and URLs used to reproduce every baseline.
+
+Acceptance: both repositories can render their important states without a live
+runtime or control plane, and the references are reproducible on another machine.
+
+2. Define the semantic token system in nebula-frontend
+------------------------------------------------------
+
+- [x] Replace the current five-token compatibility layer with explicit semantic
+      roles for page, sidebar, panel, raised, recessed, overlay, hover, selected,
+      and glass surfaces.
+- [x] Define primary, secondary, muted, subtle, and disabled text roles.
+- [x] Define default, subtle, strong, focus, success, warning, and danger borders.
+- [x] Define accent and status colors without coupling component APIs to raw hues.
+- [x] Define shadow, glow, blur, focus-ring, control-height, motion, and content-
+      width tokens.
+- [x] Define the radius scale: control 8 px, surface 12 px, large 16 px, pill full.
+- [x] Keep temporary aliases for existing Tailwind alpha utilities during migration.
+
+Acceptance: new components can be built without hard-coded colors, radii, shadows,
+or white-alpha borders, while the current UI remains visually unchanged.
+
+3. Build the shared primitive layer in nebula-frontend
+------------------------------------------------------
+
+- [x] Finish Button and add LinkButton and IconButton variants. Cover primary,
+      secondary/glass, ghost, and danger treatments; compact, default, large,
+      and hero sizes; and an explicit marketing-pill radius exception.
+- [x] Add Surface/Card with density and interaction variants. Give transparent
+      controls one semantic glass treatment instead of repeated `bg-black/20`
+      and one-off backdrop/border combinations.
+- [x] Add Field, Input, Textarea, Checkbox, and form-message primitives.
+- [x] Add SegmentedControl and Tabs; adopt the existing Radix Switch. Keep one
+      flush track/thumb anatomy and motion model for two-option selectors, with
+      neutral and high-contrast visual variants; keep multi-item Tabs distinct.
+- [x] Add Dialog and AlertDialog on the existing Radix dependency.
+- [x] Add Badge, StatusBadge, EmptyState, Spinner, and LoadingState.
+- [x] Add a canonical capability icon registry and metadata-chip convention:
+      Capabilities=Blocks, MCPs=AtSign, Skills=BookOpen, Commands=Code2,
+      Hooks=Clock3, Rules=ScrollText, and Tools=Wrench.
+- [x] Add PageHeader and content-width layout primitives.
+- [x] Keep Tooltip, Popover, ScrollArea, ContextSelect, and MultiSelect aligned
+      with the same token and focus rules.
+
+Acceptance: primitives have documented variants, keyboard/focus behavior, disabled
+states, and focused tests. Product screens no longer need to invent base controls.
+
+4. Migrate nebula-frontend to its own primitives
+-------------------------------------------------
+
+- [x] Migrate Sidebar navigation, identity controls, menus, and compact buttons.
+- [ ] Split ChatInput into composer, attachment, workspace, agent, model, security,
+      and submit controls without changing behavior.
+- [ ] Migrate AgentsView and ConnectionsView forms, cards, fields, and actions,
+      including New Agent, New MCP/capability, Save, and delete controls.
+- [ ] Make Agent-card capability chips consistent: MCPs, Skills, Tools, and other
+      capability counts either all use their canonical icon or all omit icons.
+- [ ] Migrate ChatPanel, MessageBubble, ToolCallCard, empty states, and errors.
+- [ ] Extract WorkspaceApp stateful hooks for catalog, session, external navigation,
+      and mounted host views.
+- [ ] Remove unused App.css and undefined legacy variables after migration.
+
+Acceptance: nebula-frontend is visually unchanged or intentionally improved, large
+modules have clear ownership boundaries, and duplicate raw controls are removed.
+
+5. Publish the design-system surface
+------------------------------------
+
+- [ ] Export stable UI entry points from @nebula/runtime-ui/ui.
+- [ ] Export tokens.css separately from the full application stylesheet.
+- [ ] Export brand, shader/background, transport, and workspace entry points with
+      explicit public types.
+- [ ] Prevent Cloud from relying on internal #nebula aliases or source layout.
+- [ ] Add a tarball consumer test before publishing a runtime-ui archive.
+
+Acceptance: nebula-cloud can consume tokens and primitives only through supported
+package exports, and a packed archive builds in an isolated fixture.
+
+6. Migrate the nebula-cloud application UI
+------------------------------------------
+
+- [ ] Replace raw settings controls with shared primitives.
+- [ ] Standardize startup, authentication, organization, and runtime error states.
+- [ ] Migrate AuthPage and OrganizationGate forms and feedback, including their
+      primary submit buttons and the Sign in/Create account SegmentedControl.
+- [ ] Migrate Dashboard surfaces and controls while keeping app density distinct
+      from marketing pages.
+- [ ] Migrate Terminal host controls and shell-adjacent actions.
+- [ ] Use 12 px runtime surfaces, 8 px controls, and 16 px auth containers unless a
+      documented exception requires otherwise.
+
+Acceptance: operational controls look and behave like nebula-frontend, with no
+duplicate same-purpose styles in Cloud.
+
+7. Remove parallel and dead Cloud UI
+------------------------------------
+
+- [ ] Confirm CloudShell, Operators, OrganizationPage, and PlaceholderPage have no
+      intended route or pending product work.
+- [ ] Remove or archive those unused implementations.
+- [ ] Keep RuntimeWorkspace as the single operational shell.
+- [ ] Add a route/composition test preventing a second shell from silently returning.
+
+Acceptance: there is one active application shell and no dead UI can mislead future
+implementation work.
+
+8. Migrate marketing pages carefully
+------------------------------------
+
+- [ ] Extract the shared landing/pricing header and navigation menu data.
+- [ ] Use shared Button, LinkButton, SegmentedControl, Tooltip, and layout primitives.
+      Header, hero, and final CTA differences must be named size/radius variants,
+      not unrelated class strings; the runtime selector reuses SegmentedControl.
+- [ ] Preserve the existing landing diagrams, spacing, glow, and typography.
+- [ ] Preserve the separate pricing route and product content.
+- [ ] Convert footer link groups and social links into typed data.
+- [ ] Keep marketing radius and glass exceptions explicit rather than accidental.
+
+Acceptance: landing and pricing retain their approved appearance while sharing base
+behavior and no longer duplicating structural controls.
+
+9. Replace diagram duplication with diagram primitives
+-------------------------------------------------------
+
+- [ ] Define IconDiagramNode, NodeLabel, Connector, BranchConnector, EndpointDot,
+      and GlowGroup primitives.
+- [ ] Standardize node size, line padding, dash cadence, opacity, dots, and hover glow.
+- [ ] Drive desktop and vertical diagrams from one typed data source.
+- [ ] Preserve responsive app-removal order and the wider middle operator row.
+- [ ] Add focused geometry tests for square nodes and connector endpoints.
+
+Acceptance: desktop/mobile diagrams cannot drift in labels, icons, node size, or
+content, and connector spacing is controlled in one place.
+
+10. Consolidate shader and static background behavior
+-----------------------------------------------------
+
+- [ ] Give WebGL and static fallbacks one public component API.
+- [ ] Move duplicated fallback blobs, stars, masks, and shader fades into the package.
+- [ ] Keep static fallback fixed and non-animated on GPU-disabled paths.
+- [ ] Keep motion subtle and honor prefers-reduced-motion.
+- [ ] Define one background layering contract for frontend, Cloud app, landing, and
+      pricing consumers.
+
+Acceptance: the same component produces a consistent background on WebGL, software,
+and reduced-motion paths without duplicated CSS.
+
+11. Complete accessibility
+--------------------------
+
+- [ ] Validate keyboard access and visible focus for every interactive primitive.
+- [ ] Add correct labels, descriptions, error associations, and live regions to forms.
+- [ ] Add focus trapping/restoration and Escape behavior to dialogs.
+- [ ] Verify menus, selects, tabs, segmented controls, and switches with a screen reader.
+- [ ] Check contrast for every semantic token and status state.
+- [ ] Enforce reduced-motion behavior for shader, scroll reveal, tab transitions, and
+      diagram glow.
+
+Acceptance: automated Axe checks pass and all critical flows are keyboard-complete.
+
+12. Complete responsive behavior
+--------------------------------
+
+- [ ] Validate landing diagrams and headings at 375, 768, 1024, 1280, and 1440 px.
+- [ ] Validate shared workspace shell, chat composer, sidebars, forms, dialogs, and
+      host panels at the same widths.
+- [ ] Eliminate accidental horizontal overflow and component compression.
+- [ ] Document deliberate breakpoint changes and minimum supported viewport.
+
+Acceptance: every baseline state is usable without clipping, distorted square nodes,
+or hidden actions.
+
+13. Add visual and interaction regression coverage
+---------------------------------------------------
+
+- [ ] Add deterministic screenshot tests for all Task 1 states.
+- [ ] Add interaction tests for navigation, composer controls, forms, dialogs, switch
+      transitions, and diagram hover/selection.
+- [ ] Mask or disable non-deterministic shader output in screenshot tests while
+      separately testing shader/fallback selection.
+- [ ] Review diffs at the five target viewport widths.
+
+Acceptance: unintended visual or behavioral changes fail CI with an inspectable diff.
+
+14. Harden CI and package delivery
+----------------------------------
+
+- [ ] Run lint, typecheck, unit tests, accessibility tests, visual tests, and builds
+      for both repositories.
+- [ ] Test the exact packed runtime-ui artifact consumed by Cloud.
+- [ ] Verify vendor checksum metadata points at the active package version.
+- [ ] Add bundle-size and major asset-size reporting.
+- [ ] Keep production builds free of preview/mock code paths.
+
+Acceptance: one clean CI run proves both source repositories and the packaged consumer.
+
+15. Remove compatibility layers and document the system
+--------------------------------------------------------
+
+- [ ] Remove temporary white-alpha mappings and stale hard-coded token aliases.
+- [ ] Remove superseded utilities, duplicate styles, and confirmed dead components.
+- [ ] Document tokens, primitives, density modes, marketing exceptions, package exports,
+      and contribution rules.
+- [ ] Add a short review checklist for new components and pages.
+
+Acceptance: the final codebase has one documented design language, no compatibility
+scaffolding, and clear rules that prevent drift.
