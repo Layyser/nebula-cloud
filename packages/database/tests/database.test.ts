@@ -4,10 +4,14 @@ import {
   ensurePersonalWorkspace,
   ensureWorkspaceRunning,
   finishProvisioningJob,
+  getOrganizationUsageSummary,
+  getPersonalUsageSummary,
   migrateCloudSchema,
   openCloudDatabase,
   ProvisioningJobLeaseLostError,
+  recordUsageEvent,
   resolveWorkspaceAccess,
+  UsageAccessDeniedError,
   WorkspaceMembershipNotFoundError,
 } from '../src'
 
@@ -35,7 +39,7 @@ test('applies the minimal application schema idempotently', () => {
     expect(tables).toContain('workspace')
     expect(database.query<{ count: number }, []>(
       'SELECT COUNT(*) AS count FROM nebula_migration',
-    ).get()?.count).toBe(4)
+    ).get()?.count).toBe(8)
   } finally {
     database.close()
   }
@@ -227,6 +231,141 @@ test('requires live ownership or an administrative role for workspace access', (
       userId: 'user-admin',
       organizationId: 'org-1',
     })).toBeNull()
+  } finally {
+    database.close()
+  }
+})
+
+test('deduplicates usage and authorizes personal and organization summaries', () => {
+  const database = openCloudDatabase({ path: ':memory:' })
+  try {
+    database.exec(`
+      CREATE TABLE user (id TEXT PRIMARY KEY, name TEXT NOT NULL);
+      CREATE TABLE organization (id TEXT PRIMARY KEY);
+      CREATE TABLE member (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL REFERENCES user(id),
+        organizationId TEXT NOT NULL REFERENCES organization(id),
+        role TEXT NOT NULL DEFAULT 'member'
+      );
+      INSERT INTO user (id, name) VALUES
+        ('owner', 'Owner'),
+        ('user-1', 'Jorge'),
+        ('user-2', 'Alex'),
+        ('outsider', 'Outsider');
+      INSERT INTO organization (id) VALUES ('org-1'), ('org-2');
+      INSERT INTO member (id, userId, organizationId, role) VALUES
+        ('owner-member', 'owner', 'org-1', 'owner'),
+        ('member-1', 'user-1', 'org-1', 'member'),
+        ('member-2', 'user-2', 'org-1', 'member'),
+        ('outsider-member', 'outsider', 'org-2', 'owner');
+    `)
+    migrateCloudSchema(database)
+    const workspace1 = ensurePersonalWorkspace(database, {
+      userId: 'user-1', organizationId: 'org-1', createId: () => 'workspace-1',
+    })
+    const workspace2 = ensurePersonalWorkspace(database, {
+      userId: 'user-2', organizationId: 'org-1', createId: () => 'workspace-2',
+    })
+    const base = {
+      organizationId: 'org-1', provider: 'openai', model: 'gpt-test',
+      cachedTokens: 5, occurredAt: 100, receivedAt: 101,
+    }
+    const first = {
+      ...base, eventId: 'turn-1', membershipId: 'member-1',
+      workspaceId: workspace1.id, sessionId: 'chat-a', sessionDisplayName: 'First session',
+      inputTokens: 100, outputTokens: 20, reasoningTokens: 4,
+      estimatedCostMicrousd: 2_500, cacheSavingsMicrousd: 500,
+    }
+    expect(recordUsageEvent(database, first)).toBeTrue()
+    expect(recordUsageEvent(database, first)).toBeFalse()
+    expect(recordUsageEvent(database, {
+      ...first,
+      eventId: 'cost-backfill',
+      estimatedCostMicrousd: 0,
+      cacheSavingsMicrousd: 0,
+    })).toBeTrue()
+    expect(recordUsageEvent(database, {
+      ...first,
+      eventId: 'cost-backfill',
+      estimatedCostMicrousd: 1_250,
+      cacheSavingsMicrousd: 250,
+    })).toBeTrue()
+    expect(database.query<{
+      estimated_cost_microusd: number
+      cache_savings_microusd: number
+    }, []>(`
+      SELECT estimated_cost_microusd, cache_savings_microusd
+      FROM usage_event
+      WHERE event_id = 'cost-backfill'
+    `).get()).toEqual({
+      estimated_cost_microusd: 1_250,
+      cache_savings_microusd: 250,
+    })
+    database.run("DELETE FROM usage_event WHERE event_id = 'cost-backfill'")
+    recordUsageEvent(database, {
+      ...base, eventId: 'turn-2', membershipId: 'member-1',
+      workspaceId: workspace1.id, sessionId: 'chat-b',
+      inputTokens: 30, outputTokens: 10, estimatedCostMicrousd: 1_000, occurredAt: 200,
+    })
+    recordUsageEvent(database, {
+      ...base, eventId: 'turn-3', membershipId: 'member-2',
+      workspaceId: workspace2.id, sessionId: 'chat-c',
+      inputTokens: 50, outputTokens: 15, estimatedCostMicrousd: 750, occurredAt: 300,
+    })
+
+    const personal = getPersonalUsageSummary(database, {
+      userId: 'user-1', organizationId: 'org-1', since: 0, rangeDays: 30,
+    })
+    expect(personal.totals).toEqual({
+      modelTurns: 2, inputTokens: 130, outputTokens: 30,
+      cachedTokens: 10, reasoningTokens: 4, totalTokens: 160,
+      estimatedCostMicrousd: 3_500, cacheSavingsMicrousd: 500,
+    })
+    expect(personal.sessions.map(session => session.sessionId))
+      .toEqual(['chat-b', 'chat-a'])
+    expect(personal.sessions.find(session => session.sessionId === 'chat-a')?.displayName)
+      .toBe('First session')
+    expect(personal.models).toEqual([expect.objectContaining({
+      provider: 'openai', model: 'gpt-test', totalTokens: 160,
+    })])
+    expect(personal.timeline).toEqual([expect.objectContaining({
+      date: '1970-01-01', totalTokens: 160,
+    })])
+    expect(personal.modelTimeline).toEqual([expect.objectContaining({
+      date: '1970-01-01', provider: 'openai', model: 'gpt-test', totalTokens: 160,
+    })])
+
+    const filteredPersonal = getPersonalUsageSummary(database, {
+      userId: 'user-1', organizationId: 'org-1', since: 150, rangeDays: 7,
+    })
+    expect(filteredPersonal.rangeDays).toBe(7)
+    expect(filteredPersonal.totals).toMatchObject({ modelTurns: 1, totalTokens: 40 })
+
+    const organization = getOrganizationUsageSummary(database, {
+      userId: 'owner', organizationId: 'org-1', since: 0, rangeDays: 30,
+    })
+    expect(organization.totals).toEqual({
+      modelTurns: 3, inputTokens: 180, outputTokens: 45,
+      cachedTokens: 15, reasoningTokens: 4, totalTokens: 225,
+      estimatedCostMicrousd: 4_250, cacheSavingsMicrousd: 500,
+    })
+    expect(organization.members.find(member => member.membershipId === 'member-2'))
+      .toMatchObject({ name: 'Alex', modelTurns: 1, totalTokens: 65 })
+    expect(organization.members.find(member => member.membershipId === 'owner-member'))
+      .toMatchObject({ modelTurns: 0, totalTokens: 0 })
+
+    expect(() => getOrganizationUsageSummary(database, {
+      userId: 'user-1', organizationId: 'org-1', since: 0, rangeDays: 30,
+    })).toThrow(UsageAccessDeniedError)
+    expect(() => getOrganizationUsageSummary(database, {
+      userId: 'outsider', organizationId: 'org-1', since: 0, rangeDays: 30,
+    })).toThrow(UsageAccessDeniedError)
+    expect(() => recordUsageEvent(database, {
+      ...base, eventId: 'cross-scope', membershipId: 'member-2',
+      workspaceId: workspace1.id, sessionId: 'chat-x',
+      inputTokens: 1, outputTokens: 1,
+    })).toThrow('usage event scope does not match workspace ownership')
   } finally {
     database.close()
   }

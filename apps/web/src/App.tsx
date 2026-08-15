@@ -265,7 +265,7 @@ function AuthenticatedCloudApp({
       onSelect: () => {},
       content: (
         <Suspense fallback={<div className="min-w-0 flex-1 bg-[#080808]" />}>
-          <TerminalPage workspaceId={workspaceId} />
+          <TerminalPage key={workspaceId} workspaceId={workspaceId} />
         </Suspense>
       ),
     },
@@ -276,11 +276,16 @@ function AuthenticatedCloudApp({
       onSelect: () => {},
       content: (
         <div className="min-w-0 flex-1 overflow-y-auto bg-[#080808]">
-          <Dashboard userName={user.name} />
+          <Dashboard
+            userName={user.name}
+            userKey={user.email}
+            organizationId={activeOrganization.id}
+            organizationName={activeOrganization.name}
+          />
         </div>
       ),
     },
-  ], [user.name, workspaceId])
+  ], [activeOrganization.id, activeOrganization.name, user.name, workspaceId])
 
   const signOut = useCallback(async () => {
     if (signingOut) return

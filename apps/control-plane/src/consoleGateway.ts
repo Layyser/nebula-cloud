@@ -48,6 +48,7 @@ export interface PrepareConsoleInput {
   actorId: string
   rows?: string | null
   columns?: string | null
+  terminalId?: string | null
 }
 
 function consoleError(
@@ -82,6 +83,7 @@ function webSocketWorkerURL(
   workspaceId: string,
   rows: number,
   columns: number,
+  terminalId: string,
 ): string {
   const url = new URL(workerURL)
   if (url.protocol === 'http:') url.protocol = 'ws:'
@@ -91,6 +93,7 @@ function webSocketWorkerURL(
   url.search = new URLSearchParams({
     rows: String(rows),
     columns: String(columns),
+    terminal_id: terminalId,
   }).toString()
   return url.toString()
 }
@@ -197,6 +200,10 @@ export class ConsoleGateway {
         'Console dimensions are invalid',
       )
     }
+    const terminalId = input.terminalId?.trim() || 'terminal-1'
+    if (!/^[a-z0-9-]{1,48}$/.test(terminalId)) {
+      return consoleError(400, 'invalid_terminal_id', 'Terminal id is invalid')
+    }
 
     const workspace = this.#resolveWorkspace({
       workspaceId: input.workspaceId,
@@ -225,6 +232,7 @@ export class ConsoleGateway {
           workspace.workerWorkspaceId,
           rows,
           columns,
+          terminalId,
         ),
         {
           authorization: workerAuthorizationHeader({

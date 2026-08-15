@@ -62,3 +62,58 @@ export interface RestartWorkspaceResponse {
   workspaceId: string
   state: 'ready'
 }
+
+export interface UsageTotals {
+  modelTurns: number
+  inputTokens: number
+  outputTokens: number
+  cachedTokens: number
+  reasoningTokens: number
+  totalTokens: number
+  estimatedCostMicrousd: number
+  cacheSavingsMicrousd: number
+}
+
+export interface UsageSessionSummary extends UsageTotals {
+  sessionId: string
+  displayName: string
+  lastOccurredAt: number
+}
+
+export interface UsageModelSummary extends UsageTotals {
+  provider: string
+  model: string
+}
+
+export interface UsageDaySummary extends UsageTotals {
+  date: string
+}
+
+export interface UsageModelDaySummary extends UsageDaySummary {
+  provider: string
+  model: string
+}
+
+export interface PersonalUsageResponse {
+  organizationId: string
+  membershipId: string
+  rangeDays: 7 | 30 | 90
+  totals: UsageTotals
+  sessions: UsageSessionSummary[]
+  models: UsageModelSummary[]
+  timeline: UsageDaySummary[]
+  modelTimeline: UsageModelDaySummary[]
+}
+
+export interface OrganizationMemberUsageSummary extends UsageTotals {
+  membershipId: string
+  userId: string
+  name: string
+}
+
+export interface OrganizationUsageResponse {
+  organizationId: string
+  rangeDays: 7 | 30 | 90
+  totals: UsageTotals
+  members: OrganizationMemberUsageSummary[]
+}

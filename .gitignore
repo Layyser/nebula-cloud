@@ -10,3 +10,7 @@ dist
 apps/control-plane/data/
 .nebula/
 *:Zone.Identifier
+vendor/*
+.codex-tmp/
+docs/
+plan.md

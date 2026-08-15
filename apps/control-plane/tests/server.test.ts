@@ -68,6 +68,72 @@ test('forwards auth routes only to the configured Better Auth handler', async ()
   expect(forwardedPath).toBe('/api/auth/get-session')
 })
 
+test('serves personal usage only for the active organization', async () => {
+  const handler = createControlPlaneHandler({
+    resolveSession: async () => ({
+      userId: 'user-1',
+      activeOrganizationId: 'org-1',
+    }),
+    getPersonalUsage: input => ({
+      organizationId: input.organizationId,
+      membershipId: 'member-1',
+      rangeDays: input.rangeDays,
+      totals: {
+        modelTurns: 1,
+        inputTokens: 10,
+        outputTokens: 5,
+        cachedTokens: 2,
+        reasoningTokens: 0,
+        totalTokens: 15,
+        estimatedCostMicrousd: 1_250,
+        cacheSavingsMicrousd: 0,
+      },
+      sessions: [],
+      models: [],
+      timeline: [],
+      modelTimeline: [],
+    }),
+  })
+  const response = await handler(new Request('http://control-plane.test/api/usage/me?days=7'))
+
+  expect(response.status).toBe(200)
+  expect(await response.json()).toMatchObject({
+    organizationId: 'org-1',
+    membershipId: 'member-1',
+    rangeDays: 7,
+    totals: { modelTurns: 1, totalTokens: 15 },
+  })
+})
+
+test('does not allow organization usage through a different active organization', async () => {
+  let calls = 0
+  const handler = createControlPlaneHandler({
+    resolveSession: async () => ({
+      userId: 'owner-1',
+      activeOrganizationId: 'org-1',
+    }),
+    getOrganizationUsage: () => {
+      calls += 1
+      throw new Error('must not resolve cross-organization usage')
+    },
+  })
+  const response = await handler(new Request(
+    'http://control-plane.test/api/organizations/org-2/usage',
+  ))
+
+  expect(response.status).toBe(403)
+  expect((await response.json()).code).toBe('usage_access_denied')
+  expect(calls).toBe(0)
+})
+
+test('rejects unsupported usage ranges', async () => {
+  const handler = createControlPlaneHandler()
+  const response = await handler(new Request('http://control-plane.test/api/usage/me?days=14'))
+
+  expect(response.status).toBe(400)
+  expect((await response.json()).code).toBe('invalid_request')
+})
+
 test('requires authentication before resolving a personal workspace', async () => {
   const handler = createControlPlaneHandler({
     resolveSession: async () => null,

@@ -10,6 +10,7 @@ interface ConsolePreparer {
 export interface ConsoleUpgradeOptions {
   request: Request
   encodedWorkspaceId: string
+  encodedTerminalId?: string
   trustedOrigins: readonly string[]
   resolveSession: (
     request: Request,
@@ -39,6 +40,7 @@ function consoleUpgradeError(
 export async function prepareConsoleUpgrade({
   request,
   encodedWorkspaceId,
+  encodedTerminalId,
   trustedOrigins,
   resolveSession,
   consoleGateway,
@@ -101,6 +103,15 @@ export async function prepareConsoleUpgrade({
     )
   }
 
+  let terminalId: string | null = null
+  if (encodedTerminalId) {
+    try {
+      terminalId = decodeURIComponent(encodedTerminalId)
+    } catch {
+      return consoleUpgradeError(400, 'invalid_request', 'terminalId is invalid')
+    }
+  }
+
   return await consoleGateway.prepare({
     workspaceId,
     userId: session.userId,
@@ -108,5 +119,6 @@ export async function prepareConsoleUpgrade({
     actorId: session.userId,
     rows: new URL(request.url).searchParams.get('rows'),
     columns: new URL(request.url).searchParams.get('columns'),
+    terminalId: terminalId ?? new URL(request.url).searchParams.get('terminal_id'),
   })
 }

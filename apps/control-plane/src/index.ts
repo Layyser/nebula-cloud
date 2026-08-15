@@ -6,6 +6,9 @@ import { initializePersistence } from './persistence'
 import {
   ensurePersonalWorkspace,
   ensureWorkspaceRunning,
+  getOrganizationUsageSummary,
+  getPersonalUsageSummary,
+  recordUsageEvent,
   resolveWorkspaceAccess,
 } from '@nebula-cloud/database'
 import { randomUUID } from 'node:crypto'
@@ -76,6 +79,7 @@ const runtimeGateway = workerClient
   ? new RuntimeGateway({
       worker: workerClient,
       resolveWorkspace: input => resolveWorkspaceAccess(database, input),
+      recordUsageEvent: input => recordUsageEvent(database, input),
     })
   : null
 
@@ -89,6 +93,19 @@ const consoleGateway = workerClient
 
 const controlPlaneHandler = createControlPlaneHandler({
   version,
+  reconcileUsage: runtimeGateway
+    ? async ({ userId, organizationId }) => {
+        const workspace = ensurePersonalWorkspace(database, {
+          userId,
+          organizationId,
+        })
+        await runtimeGateway.reconcileWorkspaceUsage({
+          workspaceId: workspace.id,
+          userId,
+          organizationId,
+        })
+      }
+    : undefined,
   authHandler: auth.handler,
   resolveSession: async request => {
     const session = await auth.api.getSession({
@@ -165,6 +182,8 @@ const controlPlaneHandler = createControlPlaneHandler({
   proxyRuntime: runtimeGateway
     ? input => runtimeGateway.proxy(input)
     : undefined,
+  getPersonalUsage: input => getPersonalUsageSummary(database, input),
+  getOrganizationUsage: input => getOrganizationUsageSummary(database, input),
 })
 
 const server = Bun.serve({
@@ -174,12 +193,13 @@ const server = Bun.serve({
   async fetch(request, bunServer) {
     const url = new URL(request.url)
     const consoleRoute = url.pathname.match(
-      /^\/api\/workspaces\/([^/]+)\/console$/,
+      /^\/api\/workspaces\/([^/]+)\/console(?:\/([^/]+))?$/,
     )
     if (!consoleRoute) return await controlPlaneHandler(request)
     const prepared = await prepareConsoleUpgrade({
       request,
       encodedWorkspaceId: consoleRoute[1],
+      encodedTerminalId: consoleRoute[2],
       trustedOrigins,
       resolveSession: async consoleRequest => {
         const session = await auth.api.getSession({

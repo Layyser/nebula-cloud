@@ -50,7 +50,12 @@ function WorkspacePreview({ view }: { view: 'dashboard' | 'terminal' }) {
       onSelect: () => {},
       content: (
         <div className="min-w-0 flex-1 overflow-y-auto bg-[#080808]">
-          <Dashboard userName={cloudPreviewUser.name} />
+          <Dashboard
+            userName={cloudPreviewUser.name}
+            userKey={cloudPreviewUser.email}
+            organizationId={cloudPreviewOrganization.id}
+            organizationName={cloudPreviewOrganization.name}
+          />
         </div>
       ),
     },

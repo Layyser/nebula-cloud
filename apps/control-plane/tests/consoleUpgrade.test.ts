@@ -95,5 +95,6 @@ test('passes only an authenticated principal to the Console gateway', async () =
     actorId: 'user-1',
     rows: '30',
     columns: '100',
+    terminalId: null,
   }])
 })

@@ -6,11 +6,18 @@ import {
   type EnsureWorkspaceRunningResponse,
   type HealthResponse,
   type PersonalWorkspaceResponse,
+  type PersonalUsageResponse,
+  type OrganizationUsageResponse,
   type RestartWorkspaceResponse,
 } from '@nebula-cloud/contracts'
-import { WorkspaceMembershipNotFoundError } from '@nebula-cloud/database'
+import {
+  UsageAccessDeniedError,
+  WorkspaceMembershipNotFoundError,
+} from '@nebula-cloud/database'
 
 const service = 'nebula-cloud-control-plane' as const
+const personalUsagePath = '/api/usage/me'
+const organizationUsagePath = /^\/api\/organizations\/([^/]+)\/usage$/
 
 // Workspace replacement may legitimately run for up to two minutes. Bun's
 // ten-second default would close the request while the worker was converging
@@ -47,6 +54,22 @@ export interface ControlPlaneHandlerOptions {
     userId: string
     organizationId: string
   }) => Promise<Response>
+  getPersonalUsage?: (input: {
+    userId: string
+    organizationId: string
+    since: number
+    rangeDays: 7 | 30 | 90
+  }) => PersonalUsageResponse
+  getOrganizationUsage?: (input: {
+    userId: string
+    organizationId: string
+    since: number
+    rangeDays: 7 | 30 | 90
+  }) => OrganizationUsageResponse
+  reconcileUsage?: (input: {
+    userId: string
+    organizationId: string
+  }) => Promise<void>
 }
 
 function json(value: unknown, status = 200): Response {
@@ -58,6 +81,21 @@ function json(value: unknown, status = 200): Response {
   })
 }
 
+function usageRange(url: URL): { days: 7 | 30 | 90; since: number } | Response {
+  const raw = url.searchParams.get('days') ?? '30'
+  const days = Number(raw)
+  if (days !== 7 && days !== 30 && days !== 90) {
+    return json({
+      error: 'days must be one of 7, 30, or 90',
+      code: 'invalid_request',
+    } satisfies CloudErrorResponse, 400)
+  }
+  return {
+    days,
+    since: Date.now() - days * 24 * 60 * 60 * 1000,
+  }
+}
+
 export function createControlPlaneHandler({
   version = 'dev',
   isReady = () => true,
@@ -67,6 +105,9 @@ export function createControlPlaneHandler({
   ensureWorkspaceRunning,
   restartWorkspace,
   proxyRuntime,
+  getPersonalUsage,
+  getOrganizationUsage,
+  reconcileUsage,
 }: ControlPlaneHandlerOptions = {}): (request: Request) => Promise<Response> {
   return async request => {
     const url = new URL(request.url)
@@ -78,6 +119,133 @@ export function createControlPlaneHandler({
         code: 'auth_unavailable',
         retryable: true,
       } satisfies CloudErrorResponse, 503)
+    }
+
+    if (request.method === 'GET' && url.pathname === personalUsagePath) {
+      const range = usageRange(url)
+      if (range instanceof Response) return range
+      const session = resolveSession ? await resolveSession(request) : null
+      if (!session) {
+        return json({
+          error: 'authentication required',
+          code: 'authentication_required',
+        } satisfies CloudErrorResponse, 401)
+      }
+      if (!session.activeOrganizationId) {
+        return json({
+          error: 'an active organization is required',
+          code: 'active_organization_required',
+        } satisfies CloudErrorResponse, 403)
+      }
+      if (!getPersonalUsage) {
+        return json({
+          error: 'usage reporting is unavailable',
+          code: 'usage_reporting_unavailable',
+          retryable: true,
+        } satisfies CloudErrorResponse, 503)
+      }
+      try {
+        if (reconcileUsage) {
+          try {
+            await reconcileUsage({
+              userId: session.userId,
+              organizationId: session.activeOrganizationId,
+            })
+          } catch {
+            // Reconciliation is a compatibility fallback. Previously recorded
+            // usage must remain available if a runtime is temporarily offline.
+          }
+        }
+        const usage = getPersonalUsage({
+          userId: session.userId,
+          organizationId: session.activeOrganizationId,
+          since: range.since,
+          rangeDays: range.days,
+        })
+        return json({
+          ...usage,
+          // Keep the wire response explicit so every dashboard revision gets
+          // the per-model time series required to draw one line per model.
+          modelTimeline: usage.modelTimeline ?? [],
+        } satisfies PersonalUsageResponse)
+      } catch (error) {
+        if (error instanceof WorkspaceMembershipNotFoundError) {
+          return json({
+            error: 'organization membership required',
+            code: error.code,
+          } satisfies CloudErrorResponse, 403)
+        }
+        return json({
+          error: 'usage summary could not be loaded',
+          code: 'usage_summary_failed',
+          retryable: true,
+        } satisfies CloudErrorResponse, 500)
+      }
+    }
+
+    const organizationUsageRoute = url.pathname.match(organizationUsagePath)
+    if (request.method === 'GET' && organizationUsageRoute) {
+      const range = usageRange(url)
+      if (range instanceof Response) return range
+      const session = resolveSession ? await resolveSession(request) : null
+      if (!session) {
+        return json({
+          error: 'authentication required',
+          code: 'authentication_required',
+        } satisfies CloudErrorResponse, 401)
+      }
+      let organizationId: string
+      try {
+        organizationId = decodeURIComponent(organizationUsageRoute[1])
+      } catch {
+        return json({
+          error: 'organizationId is invalid',
+          code: 'invalid_request',
+        } satisfies CloudErrorResponse, 400)
+      }
+      if (!session.activeOrganizationId || session.activeOrganizationId !== organizationId) {
+        return json({
+          error: 'organization usage is unavailable',
+          code: 'usage_access_denied',
+        } satisfies CloudErrorResponse, 403)
+      }
+      if (!getOrganizationUsage) {
+        return json({
+          error: 'usage reporting is unavailable',
+          code: 'usage_reporting_unavailable',
+          retryable: true,
+        } satisfies CloudErrorResponse, 503)
+      }
+      try {
+        if (reconcileUsage) {
+          try {
+            await reconcileUsage({
+              userId: session.userId,
+              organizationId,
+            })
+          } catch {
+            // Keep serving the durable ledger when live reconciliation fails.
+          }
+        }
+        return json(getOrganizationUsage({
+          userId: session.userId,
+          organizationId,
+          since: range.since,
+          rangeDays: range.days,
+        }))
+      } catch (error) {
+        if (error instanceof UsageAccessDeniedError) {
+          return json({
+            error: 'organization usage is unavailable',
+            code: error.code,
+          } satisfies CloudErrorResponse, 403)
+        }
+        return json({
+          error: 'usage summary could not be loaded',
+          code: 'usage_summary_failed',
+          retryable: true,
+        } satisfies CloudErrorResponse, 500)
+      }
     }
 
     if (request.method === 'POST' && url.pathname === '/api/workspaces/personal') {

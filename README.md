@@ -263,7 +263,7 @@ Browser
 
 - `nebula-cloud` owns commercial and organization business logic.
 - `nebula-frontend` owns reusable, organization-neutral runtime UI.
-- `agentic` owns the standalone Nebula binary and Runtime API.
+- `nebula-agent` owns the standalone Nebula binary and Runtime API.
 - `nebula-worker` owns containers, persistent workspace storage, resource
   isolation, and Console PTYs.
 

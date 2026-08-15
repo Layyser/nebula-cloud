@@ -287,6 +287,249 @@ test('forwards token, tool, and completion events in arrival order', async () =>
   expect(response.headers.get('x-accel-buffering')).toBe('no')
 })
 
+test('syncs stable completed-turn usage without changing the chat stream', async () => {
+  const recorded: unknown[] = []
+  const requests: Request[] = []
+  const gateway = new RuntimeGateway({
+    resolveWorkspace: () => workspace(),
+    recordUsageEvent: event => {
+      recorded.push(event)
+      return true
+    },
+    worker: {
+      getRuntimeAccess: async () => ({
+        workspaceId: 'worker-workspace-1',
+        network: 'private-network',
+        address: '172.31.0.7:7777',
+        accessToken: 'private-runtime-token',
+      }),
+    },
+    fetch: async (input, init) => {
+      const request = new Request(input, init)
+      requests.push(request)
+      if (request.url.endsWith('/chat/demo/session')) {
+        return Response.json({
+          provider: 'openai',
+          model: 'gpt-test',
+          agent: 'Frontend',
+          llm_request_log: [{
+            event_id: 'stable-turn-1',
+            status: 'success',
+            created_at: 123,
+            usage: {
+              input_tokens: 100,
+              output_tokens: 25,
+              input_tokens_details: { cached_tokens: 40 },
+              output_tokens_details: { reasoning_tokens: 5 },
+              estimated_cost_microusd: 2_000,
+              cache_savings_microusd: 600,
+            },
+          }],
+        })
+      }
+      return new Response('data: [DONE]\n\n', {
+        headers: { 'content-type': 'text/event-stream' },
+      })
+    },
+  })
+
+  const response = await gateway.proxy({
+    request: new Request(
+      'http://cloud.test/api/workspaces/workspace-1/runtime/chat/demo',
+      { method: 'POST', body: '{"message":"hello"}' },
+    ),
+    workspaceId: 'workspace-1',
+    runtimePath: '/chat/demo',
+    userId: 'user-1',
+    organizationId: 'org-1',
+  })
+
+  expect(await response.text()).toBe('data: [DONE]\n\n')
+  expect(requests.map(request => request.url)).toEqual([
+    'http://172.31.0.7:7777/chat/demo',
+    'http://172.31.0.7:7777/chat/demo/session',
+  ])
+  expect(recorded).toEqual([{
+    eventId: 'stable-turn-1',
+    organizationId: 'org-1',
+    membershipId: 'member-1',
+    workspaceId: 'workspace-1',
+    sessionId: 'demo',
+    agentId: 'Frontend',
+    provider: 'openai',
+    model: 'gpt-test',
+    inputTokens: 100,
+    outputTokens: 25,
+    cachedTokens: 40,
+    reasoningTokens: 5,
+    estimatedCostMicrousd: 2_000,
+    cacheSavingsMicrousd: 600,
+    outcome: 'success',
+    occurredAt: 123000,
+  }])
+  expect(requests[1].headers.get('authorization')).toBe(
+    'Bearer private-runtime-token',
+  )
+})
+
+test('syncs usage from runtimes released before stable event IDs', async () => {
+  const recorded: Array<{ eventId?: string }> = []
+  const gateway = new RuntimeGateway({
+    resolveWorkspace: () => workspace(),
+    recordUsageEvent: event => {
+      recorded.push(event)
+      return true
+    },
+    worker: {
+      getRuntimeAccess: async () => ({
+        workspaceId: 'worker-workspace-1',
+        network: 'private-network',
+        address: '172.31.0.7:7777',
+        accessToken: 'private-runtime-token',
+      }),
+    },
+    fetch: async input => {
+      if (String(input).endsWith('/chat/demo/session')) {
+        return Response.json({
+          llm_request_log: [{
+            purpose: 'chat',
+            status: 'success',
+            created_at: 1786717540,
+            message_count: 3,
+            usage: { input_tokens: 65, output_tokens: 6 },
+          }],
+        })
+      }
+      return new Response('data: [DONE]\n\n', {
+        headers: { 'content-type': 'text/event-stream' },
+      })
+    },
+  })
+
+  const response = await gateway.proxy({
+    request: new Request(
+      'http://cloud.test/api/workspaces/workspace-1/runtime/chat/demo',
+      { method: 'POST', body: '{"message":"hello"}' },
+    ),
+    workspaceId: 'workspace-1',
+    runtimePath: '/chat/demo',
+    userId: 'user-1',
+    organizationId: 'org-1',
+  })
+
+  await response.text()
+  expect(recorded).toHaveLength(1)
+  expect(recorded[0]?.eventId).toBe(
+    'legacy-runtime-usage:workspace-1:demo:1786717540:chat:3:0',
+  )
+})
+
+test('syncs usage when the browser cancels immediately after the done event', async () => {
+  const recorded: unknown[] = []
+  const encoder = new TextEncoder()
+  const gateway = new RuntimeGateway({
+    resolveWorkspace: () => workspace(),
+    recordUsageEvent: event => {
+      recorded.push(event)
+      return true
+    },
+    worker: {
+      getRuntimeAccess: async () => ({
+        workspaceId: 'worker-workspace-1',
+        network: 'private-network',
+        address: '172.31.0.7:7777',
+        accessToken: 'private-runtime-token',
+      }),
+    },
+    fetch: async input => {
+      if (String(input).endsWith('/chat/demo/session')) {
+        return Response.json({
+          llm_request_log: [{
+            event_id: 'cancel-after-done-1',
+            status: 'success',
+            usage: { input_tokens: 10, output_tokens: 2 },
+          }],
+        })
+      }
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+          // The runtime may keep the socket alive briefly after the terminal
+          // event. The real browser transport cancels during that interval.
+        },
+      }), { headers: { 'content-type': 'text/event-stream' } })
+    },
+  })
+
+  const response = await gateway.proxy({
+    request: new Request(
+      'http://cloud.test/api/workspaces/workspace-1/runtime/chat/demo',
+      { method: 'POST', body: '{"message":"hello"}' },
+    ),
+    workspaceId: 'workspace-1',
+    runtimePath: '/chat/demo',
+    userId: 'user-1',
+    organizationId: 'org-1',
+  })
+
+  const reader = response.body!.getReader()
+  expect(new TextDecoder().decode((await reader.read()).value)).toBe(
+    'data: [DONE]\n\n',
+  )
+  await reader.cancel('client saw done')
+  await Bun.sleep(0)
+  expect(recorded).toHaveLength(1)
+})
+
+test('reconciles saved chat usage and display names for dashboard refreshes', async () => {
+  const recorded: Array<{ sessionId?: string; sessionDisplayName?: string | null }> = []
+  const gateway = new RuntimeGateway({
+    resolveWorkspace: () => workspace(),
+    recordUsageEvent: event => {
+      recorded.push(event)
+      return true
+    },
+    worker: {
+      getRuntimeAccess: async () => ({
+        workspaceId: 'worker-workspace-1',
+        network: 'private-network',
+        address: '172.31.0.7:7777',
+        accessToken: 'private-runtime-token',
+      }),
+    },
+    fetch: async input => {
+      const url = String(input)
+      if (url.endsWith('/chats')) {
+        return Response.json({
+          chats: [
+            { name: 'first', display_name: 'Review the deployment' },
+            { name: 'second', display_name: 'Analyze customer feedback' },
+          ],
+        })
+      }
+      return Response.json({
+        llm_request_log: [{
+          event_id: `usage-${url.includes('/first/') ? 'first' : 'second'}`,
+          status: 'success',
+          usage: { input_tokens: 10, output_tokens: 2 },
+        }],
+      })
+    },
+  })
+
+  await gateway.reconcileWorkspaceUsage({
+    workspaceId: 'workspace-1',
+    userId: 'user-1',
+    organizationId: 'org-1',
+  })
+
+  expect(recorded.map(event => event.sessionId)).toEqual(['first', 'second'])
+  expect(recorded.map(event => event.sessionDisplayName)).toEqual([
+    'Review the deployment',
+    'Analyze customer feedback',
+  ])
+})
+
 test('forwards cancellation and reconnection requests without changing their contract', async () => {
   const requests: Request[] = []
   const gateway = new RuntimeGateway({

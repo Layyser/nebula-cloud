@@ -30,6 +30,14 @@ export default defineConfig({
         target: 'http://127.0.0.1:7790',
         changeOrigin: false,
       },
+      '/api/usage': {
+        target: 'http://127.0.0.1:7790',
+        changeOrigin: false,
+      },
+      '/api/organizations': {
+        target: 'http://127.0.0.1:7790',
+        changeOrigin: false,
+      },
     },
   },
   resolve: {
