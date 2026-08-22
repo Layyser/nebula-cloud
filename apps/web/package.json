@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@nebula-cloud/contracts": "workspace:*",
-    "@nebula/runtime-ui": "file:../../vendor/nebula-runtime-ui-0.1.26.tgz",
+    "@nebula/runtime-ui": "file:../../vendor/nebula-runtime-ui-0.1.28.tgz",
     "@radix-ui/react-navigation-menu": "^1.2.22",
     "@radix-ui/react-tooltip": "^1.2.13",
     "@tailwindcss/vite": "^4.2.4",
@@ -23,6 +23,8 @@
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-icons": "^5.7.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "tailwindcss": "^4.2.4"
   },
   "devDependencies": {
