@@ -1,5 +1,6 @@
 import type { PersonalWorkspace } from '@nebula-cloud/database'
 import { workerAuthorizationHeader } from './workerAuth'
+import type { WorkerConnection } from './workerDirectory'
 
 const defaultRows = 24
 const defaultColumns = 80
@@ -26,8 +27,9 @@ export interface ConsoleBridgeData {
 }
 
 export interface ConsoleGatewayOptions {
-  workerURL: string
-  workerToken: string
+  workerURL?: string
+  workerToken?: string
+  resolveWorkerConnection?: (workspaceId: string) => WorkerConnection
   resolveWorkspace: (input: {
     workspaceId: string
     userId: string
@@ -163,8 +165,9 @@ async function connectUpstream(
 }
 
 export class ConsoleGateway {
-  readonly #workerURL: string
-  readonly #workerToken: string
+  readonly #workerURL: string | null
+  readonly #workerToken: string | null
+  readonly #resolveWorkerConnection: ((workspaceId: string) => WorkerConnection) | null
   readonly #resolveWorkspace: ConsoleGatewayOptions['resolveWorkspace']
   readonly #connect: NonNullable<ConsoleGatewayOptions['connect']>
   readonly #now: () => number
@@ -173,19 +176,23 @@ export class ConsoleGateway {
   constructor({
     workerURL,
     workerToken,
+    resolveWorkerConnection,
     resolveWorkspace,
     connect = defaultConnect,
     now = Date.now,
     nonce,
   }: ConsoleGatewayOptions) {
-    this.#workerURL = workerURL.replace(/\/$/, '')
-    this.#workerToken = workerToken.trim()
+    this.#workerURL = workerURL?.replace(/\/$/, '') || null
+    this.#workerToken = workerToken?.trim() || null
+    this.#resolveWorkerConnection = resolveWorkerConnection ?? null
     this.#resolveWorkspace = resolveWorkspace
     this.#connect = connect
     this.#now = now
     this.#nonce = nonce ?? (() => crypto.randomUUID().replaceAll('-', ''))
-    if (!this.#workerURL) throw new Error('Worker URL is required')
-    if (this.#workerToken.length < 32) {
+    if (!this.#resolveWorkerConnection && !this.#workerURL) {
+      throw new Error('Worker URL or connection resolver is required')
+    }
+    if (!this.#resolveWorkerConnection && (this.#workerToken?.length ?? 0) < 32) {
       throw new Error('Worker service signing secret must contain at least 32 characters')
     }
   }
@@ -224,11 +231,14 @@ export class ConsoleGateway {
 
     let upstream: WebSocket
     try {
+      const connection = this.#resolveWorkerConnection
+        ? this.#resolveWorkerConnection(workspace.id)
+        : { baseURL: this.#workerURL!, token: this.#workerToken! }
       const path = `/internal/v1/workspaces/${encodeURIComponent(workspace.workerWorkspaceId)}/console`
       upstream = await connectUpstream(
         this.#connect,
         webSocketWorkerURL(
-          this.#workerURL,
+          connection.baseURL,
           workspace.workerWorkspaceId,
           rows,
           columns,
@@ -236,7 +246,7 @@ export class ConsoleGateway {
         ),
         {
           authorization: workerAuthorizationHeader({
-            secret: this.#workerToken,
+            secret: connection.token,
             method: 'GET',
             path,
             now: this.#now,

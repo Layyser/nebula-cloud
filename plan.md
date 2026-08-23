@@ -476,25 +476,28 @@ worker_health_sample         # short retention
 
 #### Implementation
 
-- [ ] Introduce `WorkerDirectory` and `WorkerClientFactory`; gateway, Console,
+- [x] Introduce `WorkerDirectory` and `WorkerClientFactory`; gateway, Console,
       restart, and provisioning resolve the workspace's assigned worker.
 - [ ] Add admin-only worker registration/update/disable/drain operations.
-- [ ] Keep worker credentials in deployment secrets or an encrypted secret
+- [x] Keep worker credentials in deployment secrets or an encrypted secret
       store. The database should reference a key ID, not expose bearer/HMAC keys.
 - [ ] Connect control plane to workers through private networking (for example
       WireGuard between hosts). Keep worker APIs off the public internet. Retain
       request authentication and replay protection even on the private network.
 - [ ] Poll authenticated status/capacity, persist last-known health, and alert on
       staleness. Do not trust provider labels supplied by the browser.
-- [ ] Placement filters to enabled + schedulable + recently healthy hosts, checks
+      The local compatibility path now polls readiness and persists bounded
+      health samples; authenticated capacity reporting, retention, and alerts
+      remain before production.
+- [x] Placement filters to enabled + schedulable + recently healthy hosts, checks
       hard workspace/resource/disk ceilings, then chooses the least-loaded valid
       host. Tie-break deterministically.
-- [ ] Reserve capacity transactionally when a provisioning job receives an
+- [x] Reserve capacity transactionally when a provisioning job receives an
       assignment so concurrent jobs cannot overbook a host.
-- [ ] Never re-place an already assigned workspace because its worker is briefly
+- [x] Never re-place an already assigned workspace because its worker is briefly
       unhealthy. Retry there and escalate to an operator; cross-host data
       migration is a later feature.
-- [ ] `draining` rejects new placements but preserves existing workspaces.
+- [x] `draining` rejects new placements but preserves existing workspaces.
 - [ ] Deploy two real worker nodes, preferably across two providers only to prove
       the boundary. Use the same immutable, digest-pinned workspace image.
 - [ ] Add a canary workspace per host and run Chat, file persistence, Console,

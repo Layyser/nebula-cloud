@@ -26,6 +26,8 @@ The control plane reads:
 ```text
 NEBULA_WORKER_URL
 NEBULA_WORKER_TOKEN
+NEBULA_WORKER_ID
+NEBULA_WORKER_CREDENTIAL_KEY_ID
 NEBULA_WORKSPACE_IMAGE
 ```
 
@@ -34,9 +36,19 @@ The token is a private service credential and must never be exposed to the
 browser. The worker image defaults to `nebula-workspace:dev` for local
 development.
 
+The legacy URL/token pair now seeds a durable `worker_host` registry entry.
+Cloud stores only the credential key ID with that host; the secret remains in
+the process environment. Additional capacity and placement settings are listed
+in `apps/control-plane/.env.example`.
+
 ## Processing guarantees
 
 - SQLite leases allow only one processor to own a job at a time.
+- Placement atomically reserves memory, CPU, disk, and one workspace slot on a
+  recently healthy, schedulable host before the worker is called.
+- Least-loaded placement is deterministic, draining hosts reject new
+  assignments, and existing assignments remain sticky during transient health
+  failures.
 - Expired leases are reclaimed after process failure.
 - Worker mutation keys derive from the durable Cloud job ID, so retries do not
   duplicate storage or compute.

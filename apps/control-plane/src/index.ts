@@ -4,6 +4,7 @@ import {
 } from './server'
 import { initializePersistence } from './persistence'
 import {
+  assignWorkspaceWorker,
   ensurePersonalWorkspace,
   ensureWorkspaceRunning,
   getOrganizationAdminSummary,
@@ -17,16 +18,22 @@ import {
   OrganizationMemberMutationError,
   recordAuditEvent,
   recordUsageEvent,
+  recordWorkerHealth,
   resolveOrganizationJoinCode,
   resolveWorkspaceAccess,
   rotateOrganizationJoinCode,
   setOrganizationMemberDisabled,
+  upsertWorkerHost,
   updateOrganizationName,
 } from '@nebula-cloud/database'
 import { createFilesystemEmailSender } from '@nebula-cloud/auth'
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
-import { NebulaWorkerClient } from './workerClient'
 import { ProvisioningProcessor } from './provisioningProcessor'
+import {
+  MapWorkerCredentialProvider,
+  WorkerClientFactory,
+  WorkerDirectory,
+} from './workerDirectory'
 import { RuntimeGateway } from './runtimeGateway'
 import {
   attachConsoleBrowser,
@@ -65,6 +72,33 @@ const workerURL = process.env.NEBULA_WORKER_URL?.trim() || ''
 const workerToken = process.env.NEBULA_WORKER_TOKEN?.trim() || ''
 const workspaceImage = process.env.NEBULA_WORKSPACE_IMAGE?.trim()
   || 'nebula-workspace:dev'
+const workerId = process.env.NEBULA_WORKER_ID?.trim() || 'local-worker'
+const workerCredentialKeyId = process.env.NEBULA_WORKER_CREDENTIAL_KEY_ID?.trim()
+  || 'local-worker-token'
+
+function positiveIntegerEnvironment(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim()
+  if (!raw) return fallback
+  const value = Number(raw)
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a positive safe integer`)
+  }
+  return value
+}
+
+const gibibyte = 1024 * 1024 * 1024
+const workerCapacity = {
+  memoryBytes: positiveIntegerEnvironment('NEBULA_WORKER_TOTAL_MEMORY_BYTES', 16 * gibibyte),
+  cpuMillis: positiveIntegerEnvironment('NEBULA_WORKER_TOTAL_CPU_MILLIS', 8000),
+  diskBytes: positiveIntegerEnvironment('NEBULA_WORKER_TOTAL_DISK_BYTES', 100 * gibibyte),
+  workspaceSlots: positiveIntegerEnvironment('NEBULA_WORKER_TOTAL_WORKSPACE_SLOTS', 4),
+}
+const workspaceReservation = {
+  memoryBytes: positiveIntegerEnvironment('NEBULA_WORKSPACE_MEMORY_RESERVATION_BYTES', 4 * gibibyte),
+  cpuMillis: positiveIntegerEnvironment('NEBULA_WORKSPACE_CPU_RESERVATION_MILLIS', 2000),
+  diskBytes: positiveIntegerEnvironment('NEBULA_WORKSPACE_DISK_RESERVATION_BYTES', 5 * gibibyte),
+  workspaceSlots: 1,
+}
 
 function organizationCodeSignature(organizationId: string, lookupKey: string): string {
   return createHmac('sha256', organizationCodeSecret)
@@ -114,34 +148,94 @@ if (Boolean(workerURL) !== Boolean(workerToken)) {
   throw new Error('NEBULA_WORKER_URL and NEBULA_WORKER_TOKEN must be configured together')
 }
 
-const workerClient = workerURL
-  ? new NebulaWorkerClient({
-      baseURL: workerURL,
-      token: workerToken,
-      workspaceImage,
-    })
-  : null
+let workerHealthTimer: ReturnType<typeof setInterval> | null = null
+let workerDirectory: WorkerDirectory | null = null
+if (workerURL) {
+  upsertWorkerHost(database, {
+    id: workerId,
+    name: workerId,
+    provider: process.env.NEBULA_WORKER_PROVIDER?.trim() || 'local',
+    region: process.env.NEBULA_WORKER_REGION?.trim() || 'local',
+    baseURL: workerURL,
+    credentialKeyId: workerCredentialKeyId,
+    totalMemoryBytes: workerCapacity.memoryBytes,
+    totalCpuMillis: workerCapacity.cpuMillis,
+    totalDiskBytes: workerCapacity.diskBytes,
+    totalWorkspaceSlots: workerCapacity.workspaceSlots,
+  })
+  const clientFactory = new WorkerClientFactory({
+    credentials: new MapWorkerCredentialProvider(new Map([
+      [workerCredentialKeyId, workerToken],
+    ])),
+    workspaceImage,
+  })
+  workerDirectory = new WorkerDirectory({
+    database,
+    clientFactory,
+    placementRequirements: workspaceReservation,
+    heartbeatMaxAgeMs: 30000,
+  })
+  const pollWorkerHealth = async () => {
+    try {
+      const response = await fetch(`${workerURL.replace(/\/$/, '')}/health/ready`, {
+        signal: AbortSignal.timeout(5000),
+      })
+      recordWorkerHealth(database, {
+        workerHostId: workerId,
+        state: response.ok ? 'healthy' : 'unavailable',
+        errorCode: response.ok ? null : `http_${response.status}`,
+      })
+    } catch {
+      recordWorkerHealth(database, {
+        workerHostId: workerId,
+        state: 'unavailable',
+        errorCode: 'worker_unreachable',
+      })
+    }
+  }
+  await pollWorkerHealth()
+  const legacyWorkspaceIds = database.query<{ id: string }, []>(`
+    SELECT id FROM workspace
+    WHERE worker_workspace_id IS NOT NULL AND worker_host_id IS NULL
+    ORDER BY created_at, id
+  `).all()
+  for (const workspace of legacyWorkspaceIds) {
+    try {
+      assignWorkspaceWorker(database, {
+        workspaceId: workspace.id,
+        requirements: workspaceReservation,
+        heartbeatMaxAgeMs: 30000,
+      })
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: 'legacy_workspace_assignment_failed',
+        workspaceId: workspace.id,
+        message: error instanceof Error ? error.message : 'unknown error',
+      }))
+    }
+  }
+  workerHealthTimer = setInterval(() => void pollWorkerHealth(), 10000)
+}
 
-const provisioningProcessor = workerClient
+const provisioningProcessor = workerDirectory
   ? new ProvisioningProcessor({
       database,
-      worker: workerClient,
+      worker: workerDirectory,
       processorId: `control-plane-${randomUUID()}`,
     })
   : null
 
-const runtimeGateway = workerClient
+const runtimeGateway = workerDirectory
   ? new RuntimeGateway({
-      worker: workerClient,
+      worker: workerDirectory,
       resolveWorkspace: input => resolveWorkspaceAccess(database, input),
       recordUsageEvent: input => recordUsageEvent(database, input),
     })
   : null
 
-const consoleGateway = workerClient
+const consoleGateway = workerDirectory
   ? new ConsoleGateway({
-      workerURL,
-      workerToken,
+      resolveWorkerConnection: workspaceId => workerDirectory!.connectionForWorkspace(workspaceId),
       resolveWorkspace: input => resolveWorkspaceAccess(database, input),
     })
   : null
@@ -242,7 +336,7 @@ const controlPlaneHandler = createControlPlaneHandler({
         : null,
     }
   },
-  restartWorkspace: workerClient
+  restartWorkspace: workerDirectory
     ? async ({ workspaceId, userId, organizationId }) => {
         const workspace = resolveWorkspaceAccess(database, {
           workspaceId,
@@ -253,8 +347,8 @@ const controlPlaneHandler = createControlPlaneHandler({
         if (!workspace.workerWorkspaceId) {
           throw new Error('Workspace has not been assigned to a worker')
         }
-        const restarted = await workerClient.restartWorkspace({
-          workspaceId: workspace.workerWorkspaceId,
+        const restarted = await workerDirectory.restartWorkspace({
+          workspaceId: workspace.id,
           operationId: `cloud-restart-${randomUUID()}`,
         })
         recordAuditEvent(database, {
@@ -271,7 +365,7 @@ const controlPlaneHandler = createControlPlaneHandler({
         }
       }
     : undefined,
-  getOperatorRuntime: workerClient
+  getOperatorRuntime: workerDirectory
     ? async ({ workspaceId, userId, organizationId }) => {
         const workspace = resolveWorkspaceAccess(database, {
           workspaceId,
@@ -279,8 +373,8 @@ const controlPlaneHandler = createControlPlaneHandler({
           organizationId,
         })
         if (!workspace?.workerWorkspaceId) return null
-        const operator = await workerClient.getWorkspace({
-          workspaceId: workspace.workerWorkspaceId,
+        const operator = await workerDirectory.getWorkspace({
+          workspaceId: workspace.id,
         })
         return {
           workspaceId,
@@ -452,6 +546,7 @@ function stop() {
   if (stopping) return
   stopping = true
   provisioningProcessor?.stop()
+  if (workerHealthTimer) clearInterval(workerHealthTimer)
   server.stop(true)
   database.close()
 }

@@ -110,8 +110,15 @@ To enable real provisioning, configure the ignored control-plane `.env`:
 ```text
 NEBULA_WORKER_URL=http://127.0.0.1:7780
 NEBULA_WORKER_TOKEN=<same private service token as nebula-worker>
+NEBULA_WORKER_ID=local-worker
+NEBULA_WORKER_CREDENTIAL_KEY_ID=local-worker-token
 NEBULA_WORKSPACE_IMAGE=nebula-workspace:dev
 ```
+
+The complete worker capacity and workspace reservation settings are documented
+in `apps/control-plane/.env.example`. Cloud persists the worker assignment and
+reserves capacity before provisioning; changing a transient health state does
+not move an existing workspace.
 
 If the URL and token are absent, the control plane remains usable for
 authentication and workspace metadata but does not consume provisioning jobs.

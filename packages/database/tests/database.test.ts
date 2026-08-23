@@ -1,10 +1,12 @@
 import { expect, test } from 'bun:test'
 import {
+  assignWorkspaceWorker,
   claimProvisioningJob,
   ensurePersonalWorkspace,
   ensureWorkspaceRunning,
   finishProvisioningJob,
   getOrganizationUsageSummary,
+  getWorkerHost,
   getOrganizationMembers,
   getPersonalUsageSummary,
   listOrganizationAuditEvents,
@@ -13,10 +15,14 @@ import {
   ProvisioningJobLeaseLostError,
   recordAuditEvent,
   recordUsageEvent,
+  recordWorkerHealth,
   rotateOrganizationJoinCode,
   resolveWorkspaceAccess,
+  setWorkerHostScheduling,
+  upsertWorkerHost,
   UsageAccessDeniedError,
   WorkspaceMembershipNotFoundError,
+  WorkerPlacementUnavailableError,
 } from '../src'
 
 test('applies the minimal application schema idempotently', () => {
@@ -43,7 +49,7 @@ test('applies the minimal application schema idempotently', () => {
     expect(tables).toContain('workspace')
     expect(database.query<{ count: number }, []>(
       'SELECT COUNT(*) AS count FROM nebula_migration',
-    ).get()?.count).toBe(10)
+    ).get()?.count).toBe(11)
   } finally {
     database.close()
   }
@@ -619,6 +625,181 @@ test('durably deduplicates, leases, retries, and completes ensure-running jobs',
     })
     expect(ready.workspace.state).toBe('ready')
     expect(ready.job).toBeNull()
+  } finally {
+    database.close()
+  }
+})
+
+test('places workspaces deterministically and reserves worker capacity atomically', () => {
+  const database = openCloudDatabase({ path: ':memory:' })
+  try {
+    database.exec(`
+      CREATE TABLE user (id TEXT PRIMARY KEY);
+      CREATE TABLE organization (id TEXT PRIMARY KEY);
+      CREATE TABLE member (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL REFERENCES user(id),
+        organizationId TEXT NOT NULL REFERENCES organization(id),
+        role TEXT NOT NULL DEFAULT 'member'
+      );
+      INSERT INTO user (id) VALUES ('user-1'), ('user-2'), ('user-3');
+      INSERT INTO organization (id) VALUES ('org-1');
+      INSERT INTO member (id, userId, organizationId) VALUES
+        ('member-1', 'user-1', 'org-1'),
+        ('member-2', 'user-2', 'org-1'),
+        ('member-3', 'user-3', 'org-1');
+    `)
+    migrateCloudSchema(database)
+    for (const id of ['a-worker', 'b-worker']) {
+      upsertWorkerHost(database, {
+        id,
+        name: id,
+        provider: 'local',
+        region: 'local-1',
+        baseURL: `http://${id}:7780`,
+        credentialKeyId: `${id}-credential`,
+        totalMemoryBytes: 2048,
+        totalCpuMillis: 2000,
+        totalDiskBytes: 4096,
+        totalWorkspaceSlots: 2,
+        now: () => 10,
+      })
+      recordWorkerHealth(database, {
+        workerHostId: id,
+        state: 'healthy',
+        now: () => 100,
+      })
+    }
+    const workspaces = ['user-1', 'user-2', 'user-3'].map((userId, index) =>
+      ensurePersonalWorkspace(database, {
+        userId,
+        organizationId: 'org-1',
+        createId: () => `workspace-${index + 1}`,
+      }))
+    const requirements = {
+      memoryBytes: 1024,
+      cpuMillis: 500,
+      diskBytes: 1024,
+    }
+
+    const first = assignWorkspaceWorker(database, {
+      workspaceId: workspaces[0]!.id,
+      requirements,
+      now: () => 110,
+    })
+    const second = assignWorkspaceWorker(database, {
+      workspaceId: workspaces[1]!.id,
+      requirements,
+      now: () => 111,
+    })
+    const third = assignWorkspaceWorker(database, {
+      workspaceId: workspaces[2]!.id,
+      requirements,
+      now: () => 112,
+    })
+
+    expect(first.workerHost.id).toBe('a-worker')
+    expect(second.workerHost.id).toBe('b-worker')
+    expect(third.workerHost.id).toBe('a-worker')
+    expect(getWorkerHost(database, 'a-worker')).toMatchObject({
+      reservedMemoryBytes: 2048,
+      reservedWorkspaceSlots: 2,
+    })
+    expect(getWorkerHost(database, 'b-worker')).toMatchObject({
+      reservedMemoryBytes: 1024,
+      reservedWorkspaceSlots: 1,
+    })
+  } finally {
+    database.close()
+  }
+})
+
+test('keeps assignments sticky and excludes draining, stale, and full workers', () => {
+  const database = openCloudDatabase({ path: ':memory:' })
+  try {
+    database.exec(`
+      CREATE TABLE user (id TEXT PRIMARY KEY);
+      CREATE TABLE organization (id TEXT PRIMARY KEY);
+      CREATE TABLE member (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL REFERENCES user(id),
+        organizationId TEXT NOT NULL REFERENCES organization(id),
+        role TEXT NOT NULL DEFAULT 'member'
+      );
+      INSERT INTO user (id) VALUES ('user-1'), ('user-2');
+      INSERT INTO organization (id) VALUES ('org-1');
+      INSERT INTO member (id, userId, organizationId) VALUES
+        ('member-1', 'user-1', 'org-1'),
+        ('member-2', 'user-2', 'org-1');
+    `)
+    migrateCloudSchema(database)
+    for (const id of ['draining-worker', 'healthy-worker']) {
+      upsertWorkerHost(database, {
+        id,
+        name: id,
+        provider: 'local',
+        region: 'local-1',
+        baseURL: `http://${id}:7780`,
+        credentialKeyId: `${id}-credential`,
+        totalMemoryBytes: 1024,
+        totalCpuMillis: 1000,
+        totalDiskBytes: 2048,
+        totalWorkspaceSlots: 1,
+      })
+      recordWorkerHealth(database, {
+        workerHostId: id,
+        state: 'healthy',
+        now: () => 100,
+      })
+    }
+    setWorkerHostScheduling(database, {
+      workerHostId: 'draining-worker',
+      schedulable: false,
+      state: 'draining',
+      now: () => 101,
+    })
+    const firstWorkspace = ensurePersonalWorkspace(database, {
+      userId: 'user-1',
+      organizationId: 'org-1',
+      createId: () => 'workspace-1',
+    })
+    const secondWorkspace = ensurePersonalWorkspace(database, {
+      userId: 'user-2',
+      organizationId: 'org-1',
+      createId: () => 'workspace-2',
+    })
+    const requirements = {
+      memoryBytes: 1024,
+      cpuMillis: 1000,
+      diskBytes: 2048,
+    }
+
+    const first = assignWorkspaceWorker(database, {
+      workspaceId: firstWorkspace.id,
+      requirements,
+      now: () => 110,
+    })
+    expect(first.workerHost.id).toBe('healthy-worker')
+
+    recordWorkerHealth(database, {
+      workerHostId: 'healthy-worker',
+      state: 'unavailable',
+      errorCode: 'health_check_failed',
+      now: () => 120,
+    })
+    const repeated = assignWorkspaceWorker(database, {
+      workspaceId: firstWorkspace.id,
+      requirements: { memoryBytes: 1, cpuMillis: 1, diskBytes: 1 },
+      now: () => 121,
+    })
+    expect(repeated.workerHost.id).toBe('healthy-worker')
+    expect(repeated.workspace.reservedMemoryBytes).toBe(1024)
+
+    expect(() => assignWorkspaceWorker(database, {
+      workspaceId: secondWorkspace.id,
+      requirements,
+      now: () => 121,
+    })).toThrow(WorkerPlacementUnavailableError)
   } finally {
     database.close()
   }

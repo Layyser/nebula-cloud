@@ -425,7 +425,7 @@ export class RuntimeGateway {
     ) return
 
     const access = await this.#worker.getRuntimeAccess({
-      workspaceId: workspace.workerWorkspaceId,
+      workspaceId: workspace.id,
     })
     const response = await this.#fetch(
       privateRuntimeURL(access, '/chats', ''),
@@ -500,7 +500,7 @@ export class RuntimeGateway {
     let access: WorkerRuntimeAccess
     try {
       access = await this.#worker.getRuntimeAccess({
-        workspaceId: workspace.workerWorkspaceId,
+        workspaceId: workspace.id,
         signal: upstreamController.signal,
       })
     } catch (error) {
