@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test'
 import {
   authenticationRedirect,
   isAuthenticationCallback,
+  isPublicAuthenticationRoute,
 } from '../src/auth/authRouting'
 
 test('routes completed authentication callbacks according to session state', () => {
@@ -25,6 +26,13 @@ test('routes completed authentication callbacks according to session state', () 
 })
 
 test('protects app routes and keeps authenticated users out of login', () => {
+  expect(isPublicAuthenticationRoute('/login')).toBe(true)
+  expect(isPublicAuthenticationRoute('/reset-password')).toBe(true)
+  expect(authenticationRedirect({
+    pathname: '/reset-password',
+    pending: false,
+    authenticated: false,
+  })).toBeNull()
   expect(authenticationRedirect({
     pathname: '/app',
     pending: false,
@@ -32,6 +40,11 @@ test('protects app routes and keeps authenticated users out of login', () => {
   })).toBe('/login')
   expect(authenticationRedirect({
     pathname: '/login',
+    pending: false,
+    authenticated: true,
+  })).toBe('/app')
+  expect(authenticationRedirect({
+    pathname: '/reset-password',
     pending: false,
     authenticated: true,
   })).toBe('/app')

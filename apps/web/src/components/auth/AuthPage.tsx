@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { ArrowRight, LoaderCircle } from 'lucide-react'
+import { ArrowLeft, ArrowRight, LoaderCircle } from 'lucide-react'
 import { authClient } from '../../auth/authClient'
 import { CloudBrand } from './CloudBrand'
 import { SegmentedControl } from '../ui/SegmentedControl'
@@ -8,31 +8,110 @@ interface AuthPageProps {
   onAuthenticated: () => void
   onBack: () => void
   notice?: string
+  initialMode?: AuthMode
+  resetToken?: string
 }
 
-export function AuthPage({ onAuthenticated, onBack, notice }: AuthPageProps) {
-  const [mode, setMode] = useState<'sign-in' | 'sign-up'>('sign-in')
+type AuthMode = 'sign-in' | 'sign-up' | 'forgot-password' | 'reset-password'
+
+export function AuthPage({
+  onAuthenticated,
+  onBack,
+  notice,
+  initialMode = 'sign-in',
+  resetToken = '',
+}: AuthPageProps) {
+  const [mode, setMode] = useState<AuthMode>(initialMode)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+  const [verificationRequired, setVerificationRequired] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     setError('')
+    setSuccess('')
+    setVerificationRequired(false)
     setSubmitting(true)
 
     try {
+      if (mode === 'forgot-password') {
+        const result = await authClient.requestPasswordReset({
+          email: email.trim(),
+          redirectTo: `${window.location.origin}/reset-password`,
+        })
+        if (result.error) {
+          setError(result.error.message || 'Could not request a password reset')
+          return
+        }
+        setSuccess('If this email exists, a password reset link is on its way.')
+        return
+      }
+
+      if (mode === 'reset-password') {
+        if (!resetToken) {
+          setError('This password reset link is invalid or incomplete.')
+          return
+        }
+        const result = await authClient.resetPassword({
+          newPassword: password,
+          token: resetToken,
+        })
+        if (result.error) {
+          setError(result.error.message || 'Could not reset your password')
+          return
+        }
+        setMode('sign-in')
+        setPassword('')
+        setSuccess('Password updated. Sign in with your new password.')
+        window.history.replaceState(null, '', '/login')
+        return
+      }
+
       const result = mode === 'sign-up'
-        ? await authClient.signUp.email({ name: name.trim(), email: email.trim(), password })
+        ? await authClient.signUp.email({
+            name: name.trim(),
+            email: email.trim(),
+            password,
+            callbackURL: `${window.location.origin}/app`,
+          })
         : await authClient.signIn.email({ email: email.trim(), password })
 
       if (result.error) {
         setError(result.error.message || 'Authentication failed')
+        setVerificationRequired(result.error.code === 'EMAIL_NOT_VERIFIED')
+        return
+      }
+      if (mode === 'sign-up' && result.data.token === null) {
+        setSuccess('Check your email to verify your account before signing in.')
         return
       }
       onAuthenticated()
+    } catch {
+      setError('Could not reach the Nebula control plane')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const resendVerification = async () => {
+    setError('')
+    setSuccess('')
+    setSubmitting(true)
+    try {
+      const result = await authClient.sendVerificationEmail({
+        email: email.trim(),
+        callbackURL: `${window.location.origin}/app`,
+      })
+      if (result.error) {
+        setError(result.error.message || 'Could not resend the verification email')
+        return
+      }
+      setSuccess('A fresh verification link is on its way.')
+      setVerificationRequired(false)
     } catch {
       setError('Could not reach the Nebula control plane')
     } finally {
@@ -46,22 +125,53 @@ export function AuthPage({ onAuthenticated, onBack, notice }: AuthPageProps) {
         <div className="w-full rounded-2xl bg-[var(--color-surface-auth)] p-6 shadow-[0_32px_100px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:p-8">
           <CloudBrand onSelect={onBack} />
         <h1 className="mt-3 text-3xl font-medium tracking-[-0.04em]">
-          {mode === 'sign-in' ? 'Welcome back' : 'Create your workspace'}
+          {mode === 'sign-in'
+            ? 'Welcome back'
+            : mode === 'sign-up'
+              ? 'Create your workspace'
+              : mode === 'forgot-password'
+                ? 'Reset your password'
+                : 'Choose a new password'}
         </h1>
         <p className="mt-2 text-sm leading-6 text-[var(--color-text-muted)]">
           {mode === 'sign-in'
             ? 'Sign in to your organization and personal Linux workspace.'
-            : 'Create your account. You can create or join an organization next.'}
+            : mode === 'sign-up'
+              ? 'Create your account. You can create or join an organization next.'
+              : mode === 'forgot-password'
+                ? 'Enter your email and we will send a secure reset link.'
+                : 'Use at least eight characters for your new password.'}
         </p>
 
-        <SegmentedControl
-          ariaLabel="Authentication mode"
-          value={mode}
-          options={[{ value: 'sign-in', label: 'Sign in' }, { value: 'sign-up', label: 'Create account' }]}
-          onValueChange={nextMode => { setMode(nextMode); setError('') }}
-          tone="dark"
-          className="mt-6 w-full"
-        />
+        {(mode === 'sign-in' || mode === 'sign-up') ? (
+          <SegmentedControl
+            ariaLabel="Authentication mode"
+            value={mode}
+            options={[{ value: 'sign-in', label: 'Sign in' }, { value: 'sign-up', label: 'Create account' }]}
+            onValueChange={nextMode => {
+              setMode(nextMode)
+              setError('')
+              setSuccess('')
+              setVerificationRequired(false)
+            }}
+            tone="dark"
+            className="mt-6 w-full"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setMode('sign-in')
+              setError('')
+              setSuccess('')
+              setVerificationRequired(false)
+            }}
+            className="mt-6 inline-flex items-center gap-2 text-sm text-[var(--color-text-muted)] transition hover:text-[var(--color-text-primary)]"
+          >
+            <ArrowLeft size={14} />
+            Back to sign in
+          </button>
+        )}
 
         <form onSubmit={submit} className="mt-6 space-y-4">
           {notice && (
@@ -80,30 +190,66 @@ export function AuthPage({ onAuthenticated, onBack, notice }: AuthPageProps) {
               required
             />
           )}
-          <Field
-            label="Email"
-            type="email"
-            value={email}
-            onChange={setEmail}
-            autoComplete="email"
-            placeholder="you@company.com"
-            required
-          />
-          <Field
-            label="Password"
-            type="password"
-            value={password}
-            onChange={setPassword}
-            autoComplete={mode === 'sign-in' ? 'current-password' : 'new-password'}
-            placeholder="At least 8 characters"
-            minLength={8}
-            required
-          />
+          {mode !== 'reset-password' && (
+            <Field
+              label="Email"
+              type="email"
+              value={email}
+              onChange={setEmail}
+              autoComplete="email"
+              placeholder="you@company.com"
+              required
+            />
+          )}
+          {mode !== 'forgot-password' && (
+            <Field
+              label={mode === 'reset-password' ? 'New password' : 'Password'}
+              type="password"
+              value={password}
+              onChange={setPassword}
+              autoComplete={mode === 'sign-in' ? 'current-password' : 'new-password'}
+              placeholder="At least 8 characters"
+              minLength={8}
+              required
+            />
+          )}
+
+          {mode === 'sign-in' && (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('forgot-password')
+                  setError('')
+                  setSuccess('')
+                  setVerificationRequired(false)
+                }}
+                className="text-xs text-[var(--color-text-muted)] transition hover:text-[var(--color-text-primary)]"
+              >
+                Forgot password?
+              </button>
+            </div>
+          )}
 
           {error && (
             <p role="alert" className="rounded-xl bg-[var(--color-status-danger-surface)] px-3 py-2.5 text-xs leading-5 text-[var(--color-status-danger-strong)]">
               {error}
             </p>
+          )}
+          {success && (
+            <p role="status" className="rounded-xl bg-[var(--color-status-success-surface)] px-3 py-2.5 text-xs leading-5 text-[var(--color-status-success-strong)]">
+              {success}
+            </p>
+          )}
+          {verificationRequired && email.trim() && (
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={() => void resendVerification()}
+              className="text-xs font-medium text-[var(--color-text-muted)] transition hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              Resend verification email
+            </button>
           )}
 
           <button
@@ -115,7 +261,13 @@ export function AuthPage({ onAuthenticated, onBack, notice }: AuthPageProps) {
               <LoaderCircle size={15} className="animate-spin" />
             ) : (
               <>
-                {mode === 'sign-in' ? 'Sign in' : 'Continue'}
+                {mode === 'sign-in'
+                  ? 'Sign in'
+                  : mode === 'forgot-password'
+                    ? 'Send reset link'
+                    : mode === 'reset-password'
+                      ? 'Update password'
+                      : 'Continue'}
                 <ArrowRight size={15} className="transition-transform group-hover:translate-x-1" />
               </>
             )}

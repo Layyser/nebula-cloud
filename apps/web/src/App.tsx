@@ -100,6 +100,7 @@ function usePathname() {
 export default function App() {
   const { pathname, navigate } = usePathname()
   const cloudRoute = pathname === '/login'
+    || pathname === '/reset-password'
     || pathname.startsWith('/app')
     || isAuthenticationCallback(pathname)
   const plansRoute = pathname === '/plans' || pathname === '/pricing'
@@ -192,6 +193,10 @@ function CloudSessionRoute({
     return (
       <AuthPage
         onBack={() => navigate('/')}
+        initialMode={pathname === '/reset-password' ? 'reset-password' : 'sign-in'}
+        resetToken={pathname === '/reset-password'
+          ? new URLSearchParams(window.location.search).get('token') || ''
+          : undefined}
         onAuthenticated={() => {
           clearSessionExpired()
           setSessionExpired(false)

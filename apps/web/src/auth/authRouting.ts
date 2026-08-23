@@ -3,6 +3,12 @@ export function isAuthenticationCallback(pathname: string): boolean {
     || pathname.startsWith('/auth/callback/')
 }
 
+export function isPublicAuthenticationRoute(pathname: string): boolean {
+  return pathname === '/login'
+    || pathname === '/reset-password'
+    || isAuthenticationCallback(pathname)
+}
+
 export function authenticationRedirect(input: {
   pathname: string
   pending: boolean
@@ -12,7 +18,12 @@ export function authenticationRedirect(input: {
   if (isAuthenticationCallback(input.pathname)) {
     return input.authenticated ? '/app' : '/login'
   }
-  if (!input.authenticated && input.pathname !== '/login') return '/login'
-  if (input.authenticated && input.pathname === '/login') return '/app'
+  if (!input.authenticated && !isPublicAuthenticationRoute(input.pathname)) {
+    return '/login'
+  }
+  if (input.authenticated && (
+    input.pathname === '/login'
+    || input.pathname === '/reset-password'
+  )) return '/app'
   return null
 }

@@ -322,13 +322,16 @@ sending.
       and HTML templates, and a private filesystem outbox for local verification,
       password-reset, and organization-invitation testing without buying an
       email service. Production transport and delivery diagnostics remain open.
-- [ ] Implement Better Auth `sendVerificationEmail`, send on signup, and require
-      verification before creating/provisioning a workspace.
+- [x] Implement Better Auth `sendVerificationEmail`, send on signup/sign-in,
+      and make verified email enforceable before a session can reach workspace
+      provisioning. Enforcement remains disabled by default until a production
+      transport and DNS are configured.
 - [ ] Implement forgot/reset password, reset completion, resend verification,
-      expired-link, and already-used-link UI.
+      expired-link, and already-used-link UI. The request, completion, and resend
+      flows are implemented; dedicated expired/already-used states remain open.
 - [ ] Implement organization invitation email and acceptance screens; require
       the signed-in address to match the invitation.
-- [ ] Build branded plain-text and HTML templates with absolute Nubols URLs.
+- [x] Build branded plain-text and HTML templates with absolute Nubols URLs.
 - [ ] Store provider message ID and delivery status, not email bodies, in an
       `email_delivery` diagnostic table.
 - [ ] Add per-IP and per-address limits for signup, login, reset, resend, and
