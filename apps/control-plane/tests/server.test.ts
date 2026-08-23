@@ -126,6 +126,53 @@ test('does not allow organization usage through a different active organization'
   expect(calls).toBe(0)
 })
 
+test('serves the bounded organization audit stream only through the active organization', async () => {
+  const calls: unknown[] = []
+  const handler = createControlPlaneHandler({
+    resolveSession: async () => ({
+      userId: 'owner-1',
+      activeOrganizationId: 'org-1',
+    }),
+    getOrganizationAudit: input => {
+      calls.push(input)
+      return {
+        events: [{
+          eventId: 'event-1',
+          organizationId: input.organizationId,
+          actorUserId: input.userId,
+          action: 'organization.access_code_rotated',
+          targetType: 'organization',
+          targetId: input.organizationId,
+          result: 'success',
+          sourceIpHash: null,
+          metadata: {},
+          occurredAt: 10,
+        }],
+      }
+    },
+  })
+  const response = await handler(new Request(
+    'http://control-plane.test/api/organizations/org-1/audit?limit=25&before=100',
+  ))
+
+  expect(response.status).toBe(200)
+  expect(calls).toEqual([{
+    userId: 'owner-1',
+    organizationId: 'org-1',
+    limit: 25,
+    before: 100,
+  }])
+  expect(await response.json()).toMatchObject({
+    events: [{ eventId: 'event-1' }],
+  })
+
+  const crossOrganization = await handler(new Request(
+    'http://control-plane.test/api/organizations/org-2/audit',
+  ))
+  expect(crossOrganization.status).toBe(403)
+  expect(calls).toHaveLength(1)
+})
+
 test('rejects unsupported usage ranges', async () => {
   const handler = createControlPlaneHandler()
   const response = await handler(new Request('http://control-plane.test/api/usage/me?days=14'))

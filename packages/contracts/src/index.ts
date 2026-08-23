@@ -195,3 +195,23 @@ export interface JoinOrganizationResponse {
 export interface UpdateOrganizationRequest {
   name: string
 }
+
+export type AuditEventResult = 'success' | 'failure'
+export type AuditMetadataValue = string | number | boolean | null
+
+export interface OrganizationAuditEvent {
+  eventId: string
+  organizationId: string
+  actorUserId: string
+  action: string
+  targetType: string
+  targetId: string
+  result: AuditEventResult
+  sourceIpHash: string | null
+  metadata: Record<string, AuditMetadataValue>
+  occurredAt: number
+}
+
+export interface OrganizationAuditResponse {
+  events: OrganizationAuditEvent[]
+}

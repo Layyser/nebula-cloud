@@ -7,6 +7,7 @@ import {
   type HealthResponse,
   type OperatorRuntimeResponse,
   type OrganizationAdminResponse,
+  type OrganizationAuditResponse,
   type OrganizationMembersResponse,
   type OrganizationOperatorsResponse,
   type JoinOrganizationRequest,
@@ -33,6 +34,7 @@ const organizationMembersPath = /^\/api\/organizations\/([^/]+)\/members$/
 const organizationMemberPath = /^\/api\/organizations\/([^/]+)\/members\/([^/]+)$/
 const organizationOperatorsPath = /^\/api\/organizations\/([^/]+)\/operators$/
 const organizationAdminPath = /^\/api\/organizations\/([^/]+)\/admin$/
+const organizationAuditPath = /^\/api\/organizations\/([^/]+)\/audit$/
 const organizationJoinCodePath = /^\/api\/organizations\/([^/]+)\/admin\/join-code$/
 const organizationPath = /^\/api\/organizations\/([^/]+)$/
 const operatorRuntimePath = /^\/api\/workspaces\/([^/]+)\/operator$/
@@ -107,6 +109,12 @@ export interface ControlPlaneHandlerOptions {
     userId: string
     organizationId: string
   }) => OrganizationAdminResponse
+  getOrganizationAudit?: (input: {
+    userId: string
+    organizationId: string
+    limit: number
+    before: number | null
+  }) => OrganizationAuditResponse
   rotateOrganizationJoinCode?: (input: {
     userId: string
     organizationId: string
@@ -166,6 +174,7 @@ export function createControlPlaneHandler({
   setOrganizationMemberDisabled,
   getOrganizationOperators,
   getOrganizationAdmin,
+  getOrganizationAudit,
   rotateOrganizationJoinCode,
   joinOrganization,
   updateOrganization,
@@ -214,10 +223,11 @@ export function createControlPlaneHandler({
     const memberMatch = url.pathname.match(organizationMemberPath)
     const operatorsMatch = url.pathname.match(organizationOperatorsPath)
     const adminMatch = url.pathname.match(organizationAdminPath)
+    const auditMatch = url.pathname.match(organizationAuditPath)
     const joinCodeMatch = url.pathname.match(organizationJoinCodePath)
     const organizationMatch = url.pathname.match(organizationPath)
     if (
-      membersMatch || memberMatch || operatorsMatch || adminMatch
+      membersMatch || memberMatch || operatorsMatch || adminMatch || auditMatch
       || joinCodeMatch || (organizationMatch && request.method === 'PATCH')
     ) {
       const session = resolveSession ? await resolveSession(request) : null
@@ -226,7 +236,7 @@ export function createControlPlaneHandler({
       }
       const encodedOrganizationId = (
         membersMatch?.[1] ?? memberMatch?.[1] ?? operatorsMatch?.[1]
-        ?? adminMatch?.[1] ?? joinCodeMatch?.[1] ?? organizationMatch?.[1]
+        ?? adminMatch?.[1] ?? auditMatch?.[1] ?? joinCodeMatch?.[1] ?? organizationMatch?.[1]
       )!
       let organizationId: string
       try {
@@ -264,6 +274,23 @@ export function createControlPlaneHandler({
         }
         if (request.method === 'GET' && adminMatch && getOrganizationAdmin) {
           return json(getOrganizationAdmin({ userId: session.userId, organizationId }))
+        }
+        if (request.method === 'GET' && auditMatch && getOrganizationAudit) {
+          const limit = Number(url.searchParams.get('limit') ?? '50')
+          const beforeValue = url.searchParams.get('before')
+          const before = beforeValue === null ? null : Number(beforeValue)
+          if (
+            !Number.isInteger(limit) || limit < 1 || limit > 200
+            || (before !== null && (!Number.isSafeInteger(before) || before < 1))
+          ) {
+            return json({ error: 'invalid audit pagination', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+          }
+          return json(getOrganizationAudit({
+            userId: session.userId,
+            organizationId,
+            limit,
+            before,
+          }))
         }
         if (request.method === 'POST' && joinCodeMatch && rotateOrganizationJoinCode) {
           return json(rotateOrganizationJoinCode({ userId: session.userId, organizationId }))

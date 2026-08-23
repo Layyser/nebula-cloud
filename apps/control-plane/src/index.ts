@@ -13,7 +13,9 @@ import {
   getPersonalUsageSummary,
   isOrganizationMemberEnabled,
   joinOrganizationById,
+  listOrganizationAuditEvents,
   OrganizationMemberMutationError,
+  recordAuditEvent,
   recordUsageEvent,
   resolveOrganizationJoinCode,
   resolveWorkspaceAccess,
@@ -173,6 +175,17 @@ const controlPlaneHandler = createControlPlaneHandler({
       userId,
       organizationId,
     })
+    recordAuditEvent(database, {
+      userId,
+      organizationId,
+      action: 'operator.ensure_running_requested',
+      targetType: 'workspace',
+      targetId: result.workspace.id,
+      metadata: {
+        state: result.workspace.state,
+        scheduled: result.job !== null,
+      },
+    })
     return {
       workspace: {
         id: result.workspace.id,
@@ -209,6 +222,14 @@ const controlPlaneHandler = createControlPlaneHandler({
         const restarted = await workerClient.restartWorkspace({
           workspaceId: workspace.workerWorkspaceId,
           operationId: `cloud-restart-${randomUUID()}`,
+        })
+        recordAuditEvent(database, {
+          userId,
+          organizationId,
+          action: 'operator.restart_requested',
+          targetType: 'workspace',
+          targetId: workspaceId,
+          metadata: { workerWorkspaceId: workspace.workerWorkspaceId },
         })
         return {
           workspaceId,
@@ -248,7 +269,20 @@ const controlPlaneHandler = createControlPlaneHandler({
   getPersonalUsage: input => getPersonalUsageSummary(database, input),
   getOrganizationUsage: input => getOrganizationUsageSummary(database, input),
   getOrganizationMembers: input => getOrganizationMembers(database, input),
-  setOrganizationMemberDisabled: input => setOrganizationMemberDisabled(database, input),
+  setOrganizationMemberDisabled: input => {
+    const member = setOrganizationMemberDisabled(database, input)
+    recordAuditEvent(database, {
+      userId: input.userId,
+      organizationId: input.organizationId,
+      action: input.disabled
+        ? 'organization.member_disabled'
+        : 'organization.member_enabled',
+      targetType: 'membership',
+      targetId: input.membershipId,
+      metadata: { targetUserId: member.userId, role: member.role },
+    })
+    return member
+  },
   getOrganizationOperators: input => ({
     operators: getOrganizationOperators(database, input),
   }),
@@ -267,9 +301,19 @@ const controlPlaneHandler = createControlPlaneHandler({
       admins: summary.admins,
     }
   },
+  getOrganizationAudit: input => ({
+    events: listOrganizationAuditEvents(database, input),
+  }),
   rotateOrganizationJoinCode: input => {
     const lookupKey = randomBytes(6).toString('hex').toUpperCase()
     rotateOrganizationJoinCode(database, { ...input, lookupKey })
+    recordAuditEvent(database, {
+      userId: input.userId,
+      organizationId: input.organizationId,
+      action: 'organization.access_code_rotated',
+      targetType: 'organization',
+      targetId: input.organizationId,
+    })
     return { joinCode: organizationCode(input.organizationId, lookupKey) }
   },
   joinOrganization: ({ userId, code }) => {
@@ -286,15 +330,32 @@ const controlPlaneHandler = createControlPlaneHandler({
     if (!safeEqual(expected, match[2])) {
       throw new OrganizationMemberMutationError('invalid_organization_code', 'Invalid organization code')
     }
+    const membershipId = joinOrganizationById(database, {
+      userId,
+      organizationId: resolved.organizationId,
+    })
+    recordAuditEvent(database, {
+      userId,
+      organizationId: resolved.organizationId,
+      action: 'organization.access_code_used',
+      targetType: 'membership',
+      targetId: membershipId,
+    })
     return {
       organizationId: resolved.organizationId,
-      membershipId: joinOrganizationById(database, {
-        userId,
-        organizationId: resolved.organizationId,
-      }),
+      membershipId,
     }
   },
-  updateOrganization: input => updateOrganizationName(database, input),
+  updateOrganization: input => {
+    updateOrganizationName(database, input)
+    recordAuditEvent(database, {
+      userId: input.userId,
+      organizationId: input.organizationId,
+      action: 'organization.name_updated',
+      targetType: 'organization',
+      targetId: input.organizationId,
+    })
+  },
 })
 
 const server = Bun.serve({

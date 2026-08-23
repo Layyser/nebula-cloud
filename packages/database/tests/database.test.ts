@@ -7,9 +7,11 @@ import {
   getOrganizationUsageSummary,
   getOrganizationMembers,
   getPersonalUsageSummary,
+  listOrganizationAuditEvents,
   migrateCloudSchema,
   openCloudDatabase,
   ProvisioningJobLeaseLostError,
+  recordAuditEvent,
   recordUsageEvent,
   rotateOrganizationJoinCode,
   resolveWorkspaceAccess,
@@ -41,7 +43,88 @@ test('applies the minimal application schema idempotently', () => {
     expect(tables).toContain('workspace')
     expect(database.query<{ count: number }, []>(
       'SELECT COUNT(*) AS count FROM nebula_migration',
-    ).get()?.count).toBe(9)
+    ).get()?.count).toBe(10)
+  } finally {
+    database.close()
+  }
+})
+
+test('records immutable bounded audit events and restricts the organization stream', () => {
+  const database = openCloudDatabase({ path: ':memory:' })
+  try {
+    database.exec(`
+      CREATE TABLE user (id TEXT PRIMARY KEY);
+      CREATE TABLE organization (id TEXT PRIMARY KEY);
+      CREATE TABLE member (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL REFERENCES user(id),
+        organizationId TEXT NOT NULL REFERENCES organization(id),
+        role TEXT NOT NULL DEFAULT 'member'
+      );
+      INSERT INTO user (id) VALUES ('owner'), ('member'), ('outsider');
+      INSERT INTO organization (id) VALUES ('org-1');
+      INSERT INTO member (id, userId, organizationId, role) VALUES
+        ('owner-membership', 'owner', 'org-1', 'owner'),
+        ('member-membership', 'member', 'org-1', 'member');
+    `)
+    migrateCloudSchema(database)
+
+    recordAuditEvent(database, {
+      eventId: 'event-1',
+      userId: 'member',
+      organizationId: 'org-1',
+      action: 'operator.ensure_running_requested',
+      targetType: 'workspace',
+      targetId: 'workspace-1',
+      metadata: { scheduled: true },
+      now: () => 10,
+    })
+    recordAuditEvent(database, {
+      eventId: 'event-2',
+      userId: 'owner',
+      organizationId: 'org-1',
+      action: 'organization.access_code_rotated',
+      targetType: 'organization',
+      targetId: 'org-1',
+      now: () => 20,
+    })
+
+    expect(listOrganizationAuditEvents(database, {
+      userId: 'owner',
+      organizationId: 'org-1',
+    })).toEqual([
+      expect.objectContaining({ eventId: 'event-2', occurredAt: 20 }),
+      expect.objectContaining({
+        eventId: 'event-1',
+        metadata: { scheduled: true },
+        occurredAt: 10,
+      }),
+    ])
+    expect(() => listOrganizationAuditEvents(database, {
+      userId: 'member',
+      organizationId: 'org-1',
+    })).toThrow('cannot administer')
+    expect(() => recordAuditEvent(database, {
+      userId: 'outsider',
+      organizationId: 'org-1',
+      action: 'operator.restart_requested',
+      targetType: 'workspace',
+      targetId: 'workspace-1',
+    })).toThrow('cannot administer')
+    expect(() => recordAuditEvent(database, {
+      userId: 'member',
+      organizationId: 'org-1',
+      action: 'operator.restart_requested',
+      targetType: 'workspace',
+      targetId: 'workspace-1',
+      metadata: { detail: 'x'.repeat(257) },
+    })).toThrow('at most 256 characters')
+    expect(() => database.prepare(
+      'UPDATE audit_event SET result = ? WHERE event_id = ?',
+    ).run('failure', 'event-1')).toThrow('append-only')
+    expect(() => database.prepare(
+      'DELETE FROM audit_event WHERE event_id = ?',
+    ).run('event-1')).toThrow('append-only')
   } finally {
     database.close()
   }

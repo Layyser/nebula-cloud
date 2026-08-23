@@ -193,6 +193,43 @@ const migrations = [
       );
     `,
   },
+  {
+    id: '0010_audit_event',
+    sql: `
+      CREATE TABLE audit_event (
+        event_id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL
+          REFERENCES organization(id) ON DELETE RESTRICT,
+        actor_user_id TEXT NOT NULL REFERENCES user(id) ON DELETE RESTRICT,
+        action TEXT NOT NULL,
+        target_type TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        result TEXT NOT NULL CHECK (result IN ('success', 'failure')),
+        source_ip_hash TEXT,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        occurred_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX audit_event_organization_time_idx
+        ON audit_event(organization_id, occurred_at DESC, event_id DESC);
+      CREATE INDEX audit_event_actor_time_idx
+        ON audit_event(actor_user_id, occurred_at DESC);
+      CREATE INDEX audit_event_target_idx
+        ON audit_event(organization_id, target_type, target_id, occurred_at DESC);
+
+      CREATE TRIGGER audit_event_update_guard
+      BEFORE UPDATE ON audit_event
+      BEGIN
+        SELECT RAISE(ABORT, 'audit events are append-only');
+      END;
+
+      CREATE TRIGGER audit_event_delete_guard
+      BEFORE DELETE ON audit_event
+      BEGIN
+        SELECT RAISE(ABORT, 'audit events are append-only');
+      END;
+    `,
+  },
 ] as const
 
 export type WorkspaceState = 'pending' | 'provisioning' | 'ready' | 'stopped' | 'failed'
@@ -385,6 +422,38 @@ export interface UsageSummaryAccessOptions {
 export interface OrganizationAccessOptions {
   userId: string
   organizationId: string
+}
+
+export type AuditEventResult = 'success' | 'failure'
+export type AuditMetadataValue = string | number | boolean | null
+
+export interface AuditEvent {
+  eventId: string
+  organizationId: string
+  actorUserId: string
+  action: string
+  targetType: string
+  targetId: string
+  result: AuditEventResult
+  sourceIpHash: string | null
+  metadata: Record<string, AuditMetadataValue>
+  occurredAt: number
+}
+
+export interface RecordAuditEventOptions extends OrganizationAccessOptions {
+  eventId?: string
+  action: string
+  targetType: string
+  targetId: string
+  result?: AuditEventResult
+  sourceIpHash?: string | null
+  metadata?: Record<string, AuditMetadataValue>
+  now?: () => number
+}
+
+export interface ListOrganizationAuditEventsOptions extends OrganizationAccessOptions {
+  limit?: number
+  before?: number | null
 }
 
 export class WorkspaceMembershipNotFoundError extends Error {
@@ -942,6 +1011,145 @@ function requireOrganizationAdmin(
     throw new OrganizationAccessDeniedError()
   }
   return actor.role
+}
+
+function requireEnabledOrganizationMember(
+  database: Database,
+  { userId, organizationId }: OrganizationAccessOptions,
+): void {
+  if (!isOrganizationMemberEnabled(database, { userId, organizationId })) {
+    throw new OrganizationAccessDeniedError()
+  }
+}
+
+const auditIdentifierPattern = /^[a-z0-9][a-z0-9._:-]{0,127}$/i
+
+function requireAuditIdentifier(value: string, field: string): string {
+  const normalized = value.trim()
+  if (!auditIdentifierPattern.test(normalized)) {
+    throw new TypeError(`${field} must be a non-empty audit identifier`)
+  }
+  return normalized
+}
+
+function serializeAuditMetadata(
+  metadata: Record<string, AuditMetadataValue> = {},
+): string {
+  const entries = Object.entries(metadata)
+  if (entries.length > 16) throw new TypeError('audit metadata may contain at most 16 fields')
+  const normalized: Record<string, AuditMetadataValue> = {}
+  for (const [key, value] of entries.sort(([left], [right]) => left.localeCompare(right))) {
+    if (!auditIdentifierPattern.test(key)) {
+      throw new TypeError('audit metadata keys must be identifiers')
+    }
+    if (
+      value !== null
+      && typeof value !== 'string'
+      && typeof value !== 'number'
+      && typeof value !== 'boolean'
+    ) {
+      throw new TypeError('audit metadata values must be scalar')
+    }
+    if (typeof value === 'string' && value.length > 256) {
+      throw new TypeError('audit metadata strings may contain at most 256 characters')
+    }
+    if (typeof value === 'number' && !Number.isFinite(value)) {
+      throw new TypeError('audit metadata numbers must be finite')
+    }
+    normalized[key] = value
+  }
+  const serialized = JSON.stringify(normalized)
+  if (new TextEncoder().encode(serialized).byteLength > 4_096) {
+    throw new TypeError('audit metadata may contain at most 4096 bytes')
+  }
+  return serialized
+}
+
+export function recordAuditEvent(
+  database: Database,
+  options: RecordAuditEventOptions,
+): AuditEvent {
+  requireEnabledOrganizationMember(database, options)
+  const eventId = options.eventId ?? randomUUID()
+  const action = requireAuditIdentifier(options.action, 'action')
+  const targetType = requireAuditIdentifier(options.targetType, 'targetType')
+  const targetId = requireAuditIdentifier(options.targetId, 'targetId')
+  const sourceIpHash = options.sourceIpHash?.trim() || null
+  if (sourceIpHash !== null && !/^[a-f0-9]{32,128}$/i.test(sourceIpHash)) {
+    throw new TypeError('sourceIpHash must be a hexadecimal digest')
+  }
+  const metadataJson = serializeAuditMetadata(options.metadata)
+  const occurredAt = (options.now ?? Date.now)()
+  const result = options.result ?? 'success'
+  database.prepare(`
+    INSERT INTO audit_event (
+      event_id, organization_id, actor_user_id, action, target_type,
+      target_id, result, source_ip_hash, metadata_json, occurred_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    eventId,
+    options.organizationId,
+    options.userId,
+    action,
+    targetType,
+    targetId,
+    result,
+    sourceIpHash,
+    metadataJson,
+    occurredAt,
+  )
+  return {
+    eventId,
+    organizationId: options.organizationId,
+    actorUserId: options.userId,
+    action,
+    targetType,
+    targetId,
+    result,
+    sourceIpHash,
+    metadata: JSON.parse(metadataJson) as Record<string, AuditMetadataValue>,
+    occurredAt,
+  }
+}
+
+export function listOrganizationAuditEvents(
+  database: Database,
+  options: ListOrganizationAuditEventsOptions,
+): AuditEvent[] {
+  requireOrganizationAdmin(database, options)
+  const limit = Math.min(Math.max(Math.trunc(options.limit ?? 50), 1), 200)
+  const before = options.before ?? Number.MAX_SAFE_INTEGER
+  const rows = database.query<{
+    event_id: string
+    organization_id: string
+    actor_user_id: string
+    action: string
+    target_type: string
+    target_id: string
+    result: AuditEventResult
+    source_ip_hash: string | null
+    metadata_json: string
+    occurred_at: number
+  }, [string, number, number]>(`
+    SELECT event_id, organization_id, actor_user_id, action, target_type,
+      target_id, result, source_ip_hash, metadata_json, occurred_at
+    FROM audit_event
+    WHERE organization_id = ? AND occurred_at < ?
+    ORDER BY occurred_at DESC, event_id DESC
+    LIMIT ?
+  `).all(options.organizationId, before, limit)
+  return rows.map(row => ({
+    eventId: row.event_id,
+    organizationId: row.organization_id,
+    actorUserId: row.actor_user_id,
+    action: row.action,
+    targetType: row.target_type,
+    targetId: row.target_id,
+    result: row.result,
+    sourceIpHash: row.source_ip_hash,
+    metadata: JSON.parse(row.metadata_json) as Record<string, AuditMetadataValue>,
+    occurredAt: Number(row.occurred_at),
+  }))
 }
 
 export function isOrganizationMemberEnabled(
