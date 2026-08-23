@@ -118,6 +118,29 @@ release/rollout command. Until that command exists, do not claim an agent
 release is fully deployed merely because the image was built or the container
 was restarted.
 
+### Local workspace rollout
+
+Local development pins the mutable `nebula-workspace:dev` tag in the worker and
+control plane. Rebuilding the image under that same tag leaves the worker's
+desired spec hash unchanged, so its replacement operation (`force=false`)
+short-circuits and restarting the container or the worker keeps the old image.
+
+`nebula-worker/scripts/rollout-workspace.sh` rebuilds the agent and the image,
+then forces a replacement for the target workspaces through the worker's
+restart operation (`force=true`), preserving each workspace's persistent
+`/home/nebula` data volume while replacing compute:
+
+```bash
+cd /home/jorge/nebula-worker
+./scripts/rollout-workspace.sh --all            # every worker workspace
+./scripts/rollout-workspace.sh <workspace-id>   # a specific workspace
+```
+
+The script signs requests with `NEBULA_WORKER_TOKEN` (falling back to
+`nebula-worker/.env`) and verifies each replacement container runs the freshly
+built image. Override the image tag with `NEBULA_WORKSPACE_IMAGE` when rolling
+out an immutable, versioned tag instead.
+
 ## Propagate nebula-frontend into nebula-cloud
 
 Cloud consumes an immutable tarball of `@nebula/runtime-ui`, not the sibling

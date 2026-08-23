@@ -6,12 +6,22 @@ import { initializePersistence } from './persistence'
 import {
   ensurePersonalWorkspace,
   ensureWorkspaceRunning,
+  getOrganizationAdminSummary,
+  getOrganizationMembers,
+  getOrganizationOperators,
   getOrganizationUsageSummary,
   getPersonalUsageSummary,
+  isOrganizationMemberEnabled,
+  joinOrganizationById,
+  OrganizationMemberMutationError,
   recordUsageEvent,
+  resolveOrganizationJoinCode,
   resolveWorkspaceAccess,
+  rotateOrganizationJoinCode,
+  setOrganizationMemberDisabled,
+  updateOrganizationName,
 } from '@nebula-cloud/database'
-import { randomUUID } from 'node:crypto'
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { NebulaWorkerClient } from './workerClient'
 import { ProvisioningProcessor } from './provisioningProcessor'
 import { RuntimeGateway } from './runtimeGateway'
@@ -30,6 +40,8 @@ const version = process.env.NEBULA_CLOUD_VERSION || 'dev'
 const databasePath = process.env.NEBULA_CLOUD_DATABASE_PATH?.trim() || './data/nebula-cloud.sqlite'
 const authBaseURL = process.env.BETTER_AUTH_URL?.trim() || `http://${hostname}:${port}`
 const authSecret = process.env.BETTER_AUTH_SECRET?.trim() || ''
+const organizationCodeSecret = process.env.NEBULA_ORGANIZATION_CODE_SECRET?.trim()
+  || authSecret
 const trustedOrigins = (process.env.NEBULA_CLOUD_TRUSTED_ORIGINS
   || 'http://localhost:5173,http://127.0.0.1:5173')
   .split(',')
@@ -39,6 +51,25 @@ const workerURL = process.env.NEBULA_WORKER_URL?.trim() || ''
 const workerToken = process.env.NEBULA_WORKER_TOKEN?.trim() || ''
 const workspaceImage = process.env.NEBULA_WORKSPACE_IMAGE?.trim()
   || 'nebula-workspace:dev'
+
+function organizationCodeSignature(organizationId: string, lookupKey: string): string {
+  return createHmac('sha256', organizationCodeSecret)
+    .update(`${organizationId}:${lookupKey}`)
+    .digest('hex')
+    .slice(0, 12)
+    .toUpperCase()
+}
+
+function organizationCode(organizationId: string, lookupKey: string): string {
+  return `NBL-${lookupKey}-${organizationCodeSignature(organizationId, lookupKey)}`
+}
+
+function safeEqual(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left)
+  const rightBuffer = Buffer.from(right)
+  return leftBuffer.length === rightBuffer.length
+    && timingSafeEqual(leftBuffer, rightBuffer)
+}
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error('NEBULA_CLOUD_PORT must be an integer between 1 and 65535')
@@ -111,12 +142,18 @@ const controlPlaneHandler = createControlPlaneHandler({
     const session = await auth.api.getSession({
       headers: request.headers,
     })
-    return session
-      ? {
+    if (!session) return null
+    const activeOrganizationId = session.session.activeOrganizationId
+    return {
+      userId: session.user.id,
+      activeOrganizationId: activeOrganizationId
+        && isOrganizationMemberEnabled(database, {
           userId: session.user.id,
-          activeOrganizationId: session.session.activeOrganizationId,
-        }
-      : null
+          organizationId: activeOrganizationId,
+        })
+        ? activeOrganizationId
+        : null,
+    }
   },
   ensurePersonalWorkspace: ({ userId, organizationId }) => {
     const workspace = ensurePersonalWorkspace(database, {
@@ -179,11 +216,85 @@ const controlPlaneHandler = createControlPlaneHandler({
         }
       }
     : undefined,
+  getOperatorRuntime: workerClient
+    ? async ({ workspaceId, userId, organizationId }) => {
+        const workspace = resolveWorkspaceAccess(database, {
+          workspaceId,
+          userId,
+          organizationId,
+        })
+        if (!workspace?.workerWorkspaceId) return null
+        const operator = await workerClient.getWorkspace({
+          workspaceId: workspace.workerWorkspaceId,
+        })
+        return {
+          workspaceId,
+          state: operator.observedState,
+          image: operator.image,
+          resources: {
+            memoryRequestBytes: operator.resources.memory_request_bytes,
+            memoryLimitBytes: operator.resources.memory_limit_bytes,
+            cpuRequest: operator.resources.cpu_request,
+            cpuLimit: operator.resources.cpu_limit,
+            pidsLimit: operator.resources.pids_limit,
+            diskLimitBytes: operator.resources.disk_limit_bytes,
+          },
+        }
+      }
+    : undefined,
   proxyRuntime: runtimeGateway
     ? input => runtimeGateway.proxy(input)
     : undefined,
   getPersonalUsage: input => getPersonalUsageSummary(database, input),
   getOrganizationUsage: input => getOrganizationUsageSummary(database, input),
+  getOrganizationMembers: input => getOrganizationMembers(database, input),
+  setOrganizationMemberDisabled: input => setOrganizationMemberDisabled(database, input),
+  getOrganizationOperators: input => ({
+    operators: getOrganizationOperators(database, input),
+  }),
+  getOrganizationAdmin: input => {
+    const summary = getOrganizationAdminSummary(database, input)
+    return {
+      organization: {
+        id: summary.organizationId,
+        name: summary.name,
+        slug: summary.slug,
+      },
+      actorRole: summary.actorRole,
+      joinCode: summary.joinCodeLookupKey
+        ? organizationCode(summary.organizationId, summary.joinCodeLookupKey)
+        : null,
+      admins: summary.admins,
+    }
+  },
+  rotateOrganizationJoinCode: input => {
+    const lookupKey = randomBytes(6).toString('hex').toUpperCase()
+    rotateOrganizationJoinCode(database, { ...input, lookupKey })
+    return { joinCode: organizationCode(input.organizationId, lookupKey) }
+  },
+  joinOrganization: ({ userId, code }) => {
+    const normalized = code.trim().toUpperCase()
+    const match = /^NBL-([A-F0-9]{12})-([A-F0-9]{12})$/.exec(normalized)
+    if (!match) {
+      throw new OrganizationMemberMutationError('invalid_organization_code', 'Invalid organization code')
+    }
+    const resolved = resolveOrganizationJoinCode(database, match[1])
+    if (!resolved) {
+      throw new OrganizationMemberMutationError('invalid_organization_code', 'Invalid organization code')
+    }
+    const expected = organizationCodeSignature(resolved.organizationId, resolved.lookupKey)
+    if (!safeEqual(expected, match[2])) {
+      throw new OrganizationMemberMutationError('invalid_organization_code', 'Invalid organization code')
+    }
+    return {
+      organizationId: resolved.organizationId,
+      membershipId: joinOrganizationById(database, {
+        userId,
+        organizationId: resolved.organizationId,
+      }),
+    }
+  },
+  updateOrganization: input => updateOrganizationName(database, input),
 })
 
 const server = Bun.serve({

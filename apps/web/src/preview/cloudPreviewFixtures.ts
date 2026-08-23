@@ -32,14 +32,12 @@ const previewChats = [
   {
     name: 'release-monitoring',
     display_name: 'Review the failed deployment',
-    agent: 'Default',
     cwd: '/workspace/nebula-cloud',
     workspace_root: '/workspace/nebula-cloud',
   },
   {
     name: 'frontend-review',
     display_name: 'Refine the landing experience',
-    agent: 'Default',
     cwd: '/workspace/nebula-frontend',
     workspace_root: '/workspace/nebula-frontend',
   },
@@ -78,7 +76,7 @@ function previewSession(chat: string) {
   const fixture = previewChats.find(candidate => candidate.name === chat)
   return {
     chat,
-    agent: fixture?.agent ?? null,
+    agent: null,
     model: 'gpt-5.2-codex',
     reasoning_effort: 'medium',
     reasoning_effort_override: null,

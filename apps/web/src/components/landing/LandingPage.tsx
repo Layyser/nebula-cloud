@@ -8,11 +8,13 @@ import {
   Clock,
   LayoutDashboard,
   MessageSquare,
+  Moon,
   Monitor,
   PanelLeftClose,
   Play,
   Plus,
   Search,
+  Sun,
   Terminal,
   Users,
 } from 'lucide-react'
@@ -20,7 +22,15 @@ import * as NavigationMenu from '@radix-ui/react-navigation-menu'
 import * as TooltipPrimitive from '@radix-ui/react-tooltip'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { FaGithub, FaLinkedinIn, FaXTwitter, FaYoutube } from 'react-icons/fa6'
-import { NebulaBackground, NebulaMark } from '@nebula/runtime-ui'
+import {
+  NebulaBackground,
+  NebulaMark,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+  useThemePreference,
+} from '@nebula/runtime-ui'
 import excelIcon from '../../assets/excel-svgrepo-com.svg'
 import githubIcon from '../../assets/github-142-svgrepo-com.svg'
 import gmailIcon from '../../assets/gmail-svgrepo-com.svg'
@@ -30,6 +40,7 @@ import pythonIcon from '../../assets/python-svgrepo-com.svg'
 import telegramIcon from '../../assets/telegram-svgrepo-com.svg'
 import gitlabIcon from '../../assets/gitlab-logo-500-rgb.svg'
 import CIcon from '../../assets/C.svg'
+import { SectionEyebrow } from '../public/SectionEyebrow'
 import { SegmentedControl } from '../ui/SegmentedControl'
 
 const NEBULA_ASCII = String.raw`
@@ -116,11 +127,11 @@ export function LandingPage({ onLaunch }: LandingPageProps) {
               Deploy persistent AI teammates with a private Linux workspace, tools, memory, and controlled access. Delegate in Chat, take over in Console, and govern the whole operation from one place.
             </p>
             <div className="mt-7 flex flex-wrap items-center justify-center gap-3 lg:justify-start">
-              <a href="/app" onClick={handleLaunch} className="group inline-flex h-12 items-center gap-2 rounded-full bg-white px-6 text-sm font-semibold text-black transition hover:bg-white/88">
+              <a href="/app" onClick={handleLaunch} className="group inline-flex h-12 items-center gap-2 rounded-full bg-[var(--color-control-primary)] px-6 text-sm font-semibold text-[var(--color-control-on-primary)] transition hover:bg-[var(--color-control-primary-hover)]">
                 Deploy an operator
                 <ArrowRight size={15} className="transition-transform group-hover:translate-x-0.5" />
               </a>
-              <a href="#runtime" className="inline-flex h-12 items-center rounded-full bg-[var(--color-surface-diagram-node)] px-6 text-sm font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-diagram-node-hover)] hover:text-white">
+              <a href="#runtime" className="inline-flex h-12 items-center rounded-full bg-[var(--color-surface-diagram-node)] px-6 text-sm font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-diagram-node-hover)] hover:text-[var(--color-text-primary)]">
                 See how it works
               </a>
             </div>
@@ -142,8 +153,22 @@ export function LandingPage({ onLaunch }: LandingPageProps) {
   )
 }
 
-export function Header({ onLaunch }: { onLaunch: (event: MouseEvent<HTMLAnchorElement>) => void }) {
+export type HeaderNavigationLink = {
+  label: string
+  href: string
+  active?: boolean
+  onClick?: (event: MouseEvent<HTMLAnchorElement>) => void
+}
+
+export function Header({
+  onLaunch,
+  navigationLinks,
+}: {
+  onLaunch: (event: MouseEvent<HTMLAnchorElement>) => void
+  navigationLinks?: readonly HeaderNavigationLink[]
+}) {
   const [scrolled, setScrolled] = useState(() => window.scrollY > 16)
+  const [pathname, setPathname] = useState(() => window.location.pathname)
 
   useEffect(() => {
     const update = () => setScrolled(window.scrollY > 16)
@@ -151,38 +176,64 @@ export function Header({ onLaunch }: { onLaunch: (event: MouseEvent<HTMLAnchorEl
     return () => window.removeEventListener('scroll', update)
   }, [])
 
+  useEffect(() => {
+    const update = () => setPathname(window.location.pathname)
+    window.addEventListener('popstate', update)
+    return () => window.removeEventListener('popstate', update)
+  }, [])
+
   return (
-    <header className={`landing-header fixed inset-x-0 top-0 z-50 transition-[background-color,box-shadow] duration-500 ease-out ${scrolled ? 'bg-[#080909]/72 shadow-[0_12px_40px_rgba(0,0,0,0.18)] backdrop-blur-xl' : 'bg-transparent'}`}>
-      <nav className={`relative z-10 mx-auto flex max-w-[1480px] items-center justify-between px-6 transition-[height] duration-500 ease-out lg:px-10 ${scrolled ? 'h-16' : 'h-24'}`} aria-label="Main navigation">
-        <a href="/" className="flex items-center gap-3 text-lg font-semibold tracking-[-0.02em] text-white">
+    <header className={`landing-header fixed inset-x-0 top-0 z-50 border-b transition-[background-color,border-color] duration-500 ease-out ${scrolled ? 'border-[var(--color-border-default)] bg-[var(--color-surface-header-scrolled)] backdrop-blur-xl' : 'border-transparent bg-transparent'}`}>
+      <nav className="relative z-10 mx-auto flex h-16 max-w-[1480px] items-center justify-between px-6 lg:px-10" aria-label="Main navigation">
+        <a href="/" className="flex items-center gap-3 text-lg font-semibold tracking-[-0.02em] text-[var(--color-text-primary)]">
           <NebulaMark size={32} />
           <span className="nebula-wordmark">Nebula</span>
         </a>
         <div className="flex items-center gap-3">
           <NavigationMenu.Root className="relative hidden md:block">
             <NavigationMenu.List className="flex items-center gap-1 text-sm font-medium text-[var(--color-text-secondary)]">
-              <HeaderMenu label="Platform">
-                <HeaderMenuLink href="#platform" title="Operator control plane" description="Delegate, observe, and govern a persistent AI workforce." />
-                <HeaderMenuLink href="#workspace" title="Chat + Console" description="Let operators work independently or take over directly." />
-              </HeaderMenu>
-              <HeaderMenu label="Runtime">
-                <HeaderMenuLink href="#runtime" title="Persistent Linux workspaces" description="A private home, tools, and memory for every operator." />
-                <HeaderMenuLink href="#runtime" title="Standalone Nebula core" description="A small, portable runtime that stays out of the way." />
-              </HeaderMenu>
-              <NavigationMenu.Item>
-                <NavigationMenu.Link asChild>
-                  <a href="/pricing" className="inline-flex h-10 items-center rounded-lg px-3 transition-colors hover:bg-white/[0.06] hover:text-white">Pricing</a>
-                </NavigationMenu.Link>
-              </NavigationMenu.Item>
-              <NavigationMenu.Item>
-                <NavigationMenu.Link asChild>
-                  <a href="#workspace" className="inline-flex h-10 items-center rounded-lg px-3 transition-colors hover:bg-white/[0.06] hover:text-white">Workspace</a>
-                </NavigationMenu.Link>
-              </NavigationMenu.Item>
+              {navigationLinks ? navigationLinks.map(link => (
+                <NavigationMenu.Item key={link.href}>
+                  <NavigationMenu.Link asChild active={link.active}>
+                    <a
+                      href={link.href}
+                      onClick={link.onClick}
+                      aria-current={link.active ? 'page' : undefined}
+                      className={`inline-flex h-10 items-center rounded-[var(--radius-control)] px-3 transition-colors ${link.active ? 'bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]' : 'hover:bg-[var(--color-surface-selected)] hover:text-[var(--color-text-primary)]'}`}
+                    >
+                      {link.label}
+                    </a>
+                  </NavigationMenu.Link>
+                </NavigationMenu.Item>
+              )) : (
+                <>
+                  <HeaderMenu label="Product" active={pathname === '/'}>
+                    <HeaderMenuLink href="/#platform" title="Nebula Cloud" description="Persistent operators coordinated through one control plane." />
+                    <HeaderMenuLink href="/#runtime" title="Nebula Runtime" description="Choose the standalone runtime or managed Cloud deployment." />
+                  </HeaderMenu>
+                  <NavigationMenu.Item>
+                    <NavigationMenu.Link asChild>
+                      <a href="/docs" className={`inline-flex h-10 items-center rounded-lg px-3 transition-colors ${pathname.startsWith('/docs') ? 'bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]' : 'hover:bg-[var(--color-surface-selected)] hover:text-[var(--color-text-primary)]'}`}>Docs</a>
+                    </NavigationMenu.Link>
+                  </NavigationMenu.Item>
+                  <NavigationMenu.Item>
+                    <NavigationMenu.Link asChild>
+                      <a href="/plans" className={`inline-flex h-10 items-center rounded-lg px-3 transition-colors ${pathname === '/plans' || pathname === '/pricing' ? 'bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]' : 'hover:bg-[var(--color-surface-selected)] hover:text-[var(--color-text-primary)]'}`}>Plans</a>
+                    </NavigationMenu.Link>
+                  </NavigationMenu.Item>
+                  <HeaderMenu label="Privacy" active={pathname.startsWith('/legal')}>
+                    <HeaderMenuLink href="/legal?document=privacy" title="Privacy policy" description="How data is collected, processed, and protected." />
+                    <HeaderMenuLink href="/legal?document=terms" title="Terms of service" description="The agreement governing access to Nebula products." />
+                    <HeaderMenuLink href="/legal?document=acceptable-use" title="Acceptable use" description="Rules for responsible use of operators and workspaces." />
+                    <HeaderMenuLink href="/legal?document=cookies" title="Cookies" description="Browser storage and public-site preferences." />
+                    <HeaderMenuLink href="/legal?document=security" title="Security" description="Security practices and responsible disclosure." />
+                  </HeaderMenu>
+                </>
+              )}
             </NavigationMenu.List>
-            <NavigationMenu.Viewport className="absolute left-1/2 top-[calc(100%+0.75rem)] z-50 w-[360px] -translate-x-1/2 overflow-hidden rounded-2xl bg-[var(--color-surface-diagram-node)] p-2 shadow-[0_24px_70px_rgba(0,0,0,0.42)]" />
+            <NavigationMenu.Viewport className="absolute left-1/2 top-[calc(100%+0.75rem)] z-50 w-[360px] -translate-x-1/2 overflow-hidden rounded-2xl bg-[var(--color-surface-diagram-node)] p-2 shadow-[var(--shadow-surface)]" />
           </NavigationMenu.Root>
-          <a href="/app" onClick={onLaunch} className="inline-flex h-10 items-center rounded-full bg-white px-4 text-sm font-semibold text-black transition hover:bg-white/90">
+          <a href="/app" onClick={onLaunch} className="inline-flex h-10 items-center rounded-full bg-[var(--color-control-primary)] px-4 text-sm font-semibold text-[var(--color-control-on-primary)] transition hover:bg-[var(--color-control-primary-hover)]">
             Launch app
           </a>
         </div>
@@ -191,15 +242,15 @@ export function Header({ onLaunch }: { onLaunch: (event: MouseEvent<HTMLAnchorEl
   )
 }
 
-function HeaderMenu({ label, children }: { label: string; children: ReactNode }) {
+function HeaderMenu({ label, children, active = false }: { label: string; children: ReactNode; active?: boolean }) {
   return (
     <NavigationMenu.Item>
-      <NavigationMenu.Trigger className="group inline-flex h-10 items-center gap-1 rounded-lg px-3 transition-colors hover:bg-white/[0.06] hover:text-white data-[state=open]:bg-white/[0.08] data-[state=open]:text-white">
+      <NavigationMenu.Trigger className={`group inline-flex h-10 items-center gap-1 rounded-[var(--radius-control)] px-3 transition-colors hover:bg-[var(--color-surface-selected)] hover:text-[var(--color-text-primary)] data-[state=open]:bg-[var(--color-surface-selected)] data-[state=open]:text-[var(--color-text-primary)] ${active ? 'bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]' : ''}`}>
         {label}
-        <ChevronDown size={14} className="text-white/40 transition-transform duration-200 group-data-[state=open]:rotate-180 group-data-[state=open]:text-white/70" />
+        <ChevronDown size={14} className="text-[var(--color-text-disabled)] transition-transform duration-200 group-data-[state=open]:rotate-180 group-data-[state=open]:text-[var(--color-text-secondary)]" />
       </NavigationMenu.Trigger>
       <NavigationMenu.Content className="w-[344px] p-1">
-        <div className="px-3 pb-2 pt-2 text-[10px] font-medium uppercase tracking-[0.16em] text-white/35">{label}</div>
+        <div className="px-3 pb-2 pt-2 text-[10px] font-medium uppercase tracking-[0.16em] text-[var(--color-text-subtle)]">{label}</div>
         <div className="grid gap-0.5">{children}</div>
       </NavigationMenu.Content>
     </NavigationMenu.Item>
@@ -209,9 +260,9 @@ function HeaderMenu({ label, children }: { label: string; children: ReactNode })
 function HeaderMenuLink({ href, title, description }: { href: string; title: string; description: string }) {
   return (
     <NavigationMenu.Link asChild>
-      <a href={href} className="group rounded-xl px-3 py-2.5 transition-colors hover:bg-[var(--color-surface-diagram-node-hover)]">
-        <span className="block text-sm font-medium text-white/85 group-hover:text-white">{title}</span>
-        <span className="mt-1 block text-xs leading-5 text-white/42 group-hover:text-white/58">{description}</span>
+      <a href={href} className="group rounded-[var(--radius-control)] px-3 py-2.5 transition-colors hover:bg-[var(--color-surface-selected)]">
+        <span className="block text-sm font-medium text-[var(--color-text-primary)]">{title}</span>
+        <span className="mt-1 block text-xs leading-5 text-[var(--color-text-muted)] group-hover:text-[var(--color-text-secondary)]">{description}</span>
       </a>
     </NavigationMenu.Link>
   )
@@ -221,8 +272,10 @@ function RuntimeCard() {
   const [preview, setPreview] = useState<'web' | 'tui'>('web')
   const [webPreviewReady, setWebPreviewReady] = useState(false)
   const boundsRef = useRef<HTMLDivElement>(null)
+  const previewWindowRef = useRef<HTMLDivElement>(null)
   const hasAdjustedFrameRef = useRef(false)
   const [frame, setFrame] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
+  const { resolvedTheme } = useThemePreference()
 
   useEffect(() => {
     const bounds = boundsRef.current
@@ -291,6 +344,7 @@ function RuntimeCard() {
     hasAdjustedFrameRef.current = true
 
     const gestureTarget = event.currentTarget
+    const previewWindow = previewWindowRef.current
     const embeddedPreview = boundsRef.current.querySelector('iframe')
     const startX = event.clientX
     const startY = event.clientY
@@ -307,11 +361,20 @@ function RuntimeCard() {
     gestureTarget.setPointerCapture(event.pointerId)
     if (embeddedPreview) embeddedPreview.style.pointerEvents = 'none'
 
+    let pendingFrame = startFrame
+
     const handleMove = (pointerEvent: PointerEvent) => {
-      setFrame(update(pointerEvent.clientX - startX, pointerEvent.clientY - startY, startFrame, bounds))
+      pendingFrame = update(pointerEvent.clientX - startX, pointerEvent.clientY - startY, startFrame, bounds)!
+      if (previewWindow && pendingFrame) {
+        previewWindow.style.left = `${pendingFrame.x}px`
+        previewWindow.style.top = `${pendingFrame.y}px`
+        previewWindow.style.width = `${pendingFrame.width}px`
+        previewWindow.style.height = `${pendingFrame.height}px`
+      }
     }
 
     const finish = () => {
+      setFrame(pendingFrame)
       document.body.style.cursor = previousCursor
       document.body.style.userSelect = previousSelection
       if (embeddedPreview) embeddedPreview.style.pointerEvents = ''
@@ -370,13 +433,14 @@ function RuntimeCard() {
     <div ref={boundsRef} className="relative mx-auto flex h-[558px] w-full max-w-[880px] items-center justify-center lg:-ml-40 lg:h-[700px] lg:w-[calc(100%_+_32rem)] lg:max-w-none">
       <div className="absolute -inset-10 rounded-full bg-sky-300/[0.035] blur-3xl" />
       <div
-        className={`absolute overflow-hidden rounded-2xl border border-white/[0.12] bg-[#090a0b]/90 shadow-[0_32px_100px_rgba(0,0,0,0.6)] backdrop-blur-[2px] transition-[opacity,filter,transform] duration-700 ease-out ${webPreviewReady ? 'scale-100 opacity-100 blur-0' : 'pointer-events-none scale-[0.985] opacity-0 blur-sm'}`}
+        ref={previewWindowRef}
+        className={`absolute overflow-hidden rounded-2xl border border-[var(--color-border-strong)] bg-[var(--color-surface-page)] shadow-[var(--shadow-surface)] transition-[opacity,filter,transform] duration-700 ease-out ${webPreviewReady ? 'scale-100 opacity-100 blur-0' : 'pointer-events-none scale-[0.985] opacity-0 blur-sm'}`}
         style={frame
           ? { left: frame.x, top: frame.y, width: frame.width, height: frame.height }
           : { inset: '31px 16px', maxWidth: 880, margin: 'auto' }}
       >
         <div
-          className="relative flex h-9 touch-auto select-none items-center justify-between border-b border-white/[0.08] bg-[var(--color-surface-diagram-node)] px-3 cursor-default lg:touch-none lg:cursor-pointer"
+          className="relative flex h-9 touch-auto select-none items-center justify-between border-b border-[var(--color-border-default)] bg-[var(--color-surface-diagram-node)] px-3 cursor-default lg:touch-none lg:cursor-pointer"
           onPointerDown={startDragging}
         >
           <div className="flex items-center gap-2">
@@ -384,19 +448,19 @@ function RuntimeCard() {
             <span className="h-2 w-2 rounded-full bg-[#febc2e]" />
             <span className="h-2 w-2 rounded-full bg-[#28c840]" />
           </div>
-          <div className="absolute left-1/2 flex -translate-x-1/2 rounded-lg bg-white/[0.045] p-0.5 text-[10px] font-medium text-white/40">
+          <div className="absolute left-1/2 flex -translate-x-1/2 rounded-lg bg-[var(--color-surface-segment)] p-0.5 text-[10px] font-medium text-[var(--color-text-subtle)]">
             <span
               aria-hidden="true"
-              className={`absolute inset-y-0.5 left-0.5 w-[calc(50%-2px)] rounded-md border border-white/[0.08] bg-white/[0.09] shadow-sm transition-transform duration-300 ease-out ${preview === 'tui' ? 'translate-x-full' : 'translate-x-0'}`}
+              className={`absolute inset-y-0.5 left-0.5 w-[calc(50%-2px)] rounded-md bg-[var(--color-surface-segment-selected)] shadow-sm transition-transform duration-300 ease-out ${preview === 'tui' ? 'translate-x-full' : 'translate-x-0'}`}
             />
-            <button type="button" aria-pressed={preview === 'web'} onClick={() => setPreview('web')} className={`relative z-10 w-14 rounded-md py-1 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/15 ${preview === 'web' ? 'text-white/85' : 'hover:text-white/65'}`}>Web</button>
-            <button type="button" aria-pressed={preview === 'tui'} onClick={() => setPreview('tui')} className={`relative z-10 w-14 rounded-md py-1 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/15 ${preview === 'tui' ? 'text-white/85' : 'hover:text-white/65'}`}>TUI</button>
+            <button type="button" aria-pressed={preview === 'web'} onClick={() => setPreview('web')} className={`relative z-10 w-14 rounded-md py-1 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--focus-ring-color)] ${preview === 'web' ? 'text-[var(--color-text-primary)]' : 'hover:text-[var(--color-text-secondary)]'}`}>Web</button>
+            <button type="button" aria-pressed={preview === 'tui'} onClick={() => setPreview('tui')} className={`relative z-10 w-14 rounded-md py-1 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--focus-ring-color)] ${preview === 'tui' ? 'text-[var(--color-text-primary)]' : 'hover:text-[var(--color-text-secondary)]'}`}>TUI</button>
           </div>
           <span className="w-10" />
         </div>
         <div className="relative h-[calc(100%_-_2.25rem)] min-h-0">
           <div aria-hidden={preview !== 'web'} className={`absolute inset-0 transition-all duration-500 ease-out ${preview === 'web' ? 'translate-y-0 opacity-100' : '-translate-y-2 opacity-0 pointer-events-none'}`}>
-            <WebControlPlanePreview onReady={() => {
+            <WebControlPlanePreview theme={resolvedTheme} onReady={() => {
               // Give the iframe one completed paint after loading before revealing it.
               window.requestAnimationFrame(() => {
                 window.requestAnimationFrame(() => setWebPreviewReady(true))
@@ -432,51 +496,66 @@ function TuiPreview() {
           fontVariantLigatures: 'none',
         }}
       >
-        <div aria-hidden="true" className="pointer-events-none absolute inset-0 text-[#5fafff]">
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 text-[var(--color-tui-accent)]">
           {ASCII_BLOCK_PAIRS.map(({ row, column }) => (
             <span
               key={`${row}-${column}`}
-              className="absolute block bg-[#5fafff]"
+              className="absolute block bg-[var(--color-tui-accent)]"
               style={{ left: `${column}ch`, top: `${row}em`, width: '2ch', height: '1em' }}
             />
           ))}
         </div>
         <pre
           aria-label="Nebula ASCII wordmark"
-          className="relative z-10 m-0 text-[#5fafff]"
+          className="relative z-10 m-0 text-[var(--color-tui-accent)]"
           style={{ fontFamily: "'Lucida Console', monospace", fontKerning: 'none', fontVariantLigatures: 'none' }}
         >{NEBULA_ASCII}</pre>
       </div>
       <p className="mb-2 pl-[9px] text-[11px] text-[var(--color-text-secondary)] sm:pl-[14px]"><span className="font-semibold text-[var(--color-text-primary)]">gpt-5.6-sol</span><span className="mx-2 text-[var(--color-text-subtle)]">·</span>low<span className="mx-2 text-[var(--color-text-subtle)]">·</span>coder</p>
       <LogLine time="08:42:01" label="hooks" text="4 event sources ready" />
 
-      <div className="mt-3 border-t border-white/[0.055] pt-3 leading-5">
-        <p><span className="mr-2 text-[#808080]">&gt;</span><span className="text-[#afd7ff]">Review the failed deployment</span></p>
-        <p className="mt-2 text-white/32">Preparing the workspace and inspecting the rollout</p>
-        <p className="text-white/55"><span className="text-[#5fafff]">[tool]</span> Bash(pip install kubernetes &amp;&amp; python check_rollout.py)</p>
-        <p className="pl-5 text-white/28">deployment healthy across all replicas</p>
-        <p className="mt-2 max-w-lg text-white/55">The rollout was failing for two separate reasons. I repaired the workspace and checked the result:</p>
-        <div className="mt-4 space-y-1.5 text-white/38">
-          <p><span className="mr-2 text-sky-300/65">-</span>The rollout check now has its required Kubernetes client</p>
-          <p><span className="mr-2 text-sky-300/65">-</span>The deployment is using a fresh workspace secret</p>
-          <p><span className="mr-2 text-sky-300/65">-</span>All replicas are healthy and serving traffic</p>
+      <div className="mt-3 border-t border-[var(--color-border-default)] pt-3 leading-5">
+        <p><span className="mr-2 text-[var(--color-text-subtle)]">&gt;</span><span className="text-[var(--color-tui-accent-strong)]">Review the failed deployment</span></p>
+        <p className="mt-2 text-[var(--color-text-muted)]">Preparing the workspace and inspecting the rollout</p>
+        <p className="text-[var(--color-text-secondary)]"><span className="text-[var(--color-tui-accent)]">[tool]</span> Bash(pip install kubernetes &amp;&amp; python check_rollout.py)</p>
+        <p className="pl-5 text-[var(--color-text-subtle)]">deployment healthy across all replicas</p>
+        <p className="mt-2 max-w-lg text-[var(--color-text-secondary)]">The rollout was failing for two separate reasons. I repaired the workspace and checked the result:</p>
+        <div className="mt-4 space-y-1.5 text-[var(--color-text-muted)]">
+          <p><span className="mr-2 text-[var(--color-tui-accent)]">-</span>The rollout check now has its required Kubernetes client</p>
+          <p><span className="mr-2 text-[var(--color-tui-accent)]">-</span>The deployment is using a fresh workspace secret</p>
+          <p><span className="mr-2 text-[var(--color-tui-accent)]">-</span>All replicas are healthy and serving traffic</p>
         </div>
       </div>
 
-      <div className="mt-auto border-t border-white/[0.07] pt-2">
+      <div className="mt-auto border-t border-[var(--color-border-default)] pt-2">
         <TypingTask />
       </div>
     </div>
   )
 }
 
-function WebControlPlanePreview({ onReady }: { onReady: () => void }) {
+function WebControlPlanePreview({ onReady, theme }: { onReady: () => void; theme: 'dark' | 'light' }) {
+  const iframeRef = useRef<HTMLIFrameElement>(null)
+
+  const syncTheme = () => {
+    iframeRef.current?.contentWindow?.postMessage(
+      { type: 'nebula-preview-theme', theme },
+      window.location.origin,
+    )
+  }
+
+  useEffect(syncTheme, [theme])
+
   return (
     <div className="h-full w-full overflow-hidden">
       <iframe
+        ref={iframeRef}
         title="Interactive Nebula Cloud application preview"
         src="/?landing-preview=runtime"
-        onLoad={onReady}
+        onLoad={() => {
+          syncTheme()
+          onReady()
+        }}
         className="block origin-top-left border-0 bg-transparent"
         style={{ width: '125%', height: '125%', transform: 'scale(0.8)' }}
       />
@@ -488,7 +567,7 @@ function WebControlPlanePreview({ onReady }: { onReady: () => void }) {
 function LegacyWebControlPlanePreview() {
   const operators = [
     { name: 'Release guardian', team: 'Engineering', state: 'Working', color: 'bg-sky-300/10' },
-    { name: 'Support specialist', team: 'Customer success', state: 'Ready', color: 'bg-emerald-300/10' },
+    { name: 'Support specialist', team: 'Customer success', state: 'Ready', color: 'bg-[var(--color-status-success-surface)]' },
     { name: 'Invoice auditor', team: 'Finance', state: 'Working', color: 'bg-violet-300/10' },
     { name: 'Security reviewer', team: 'Security', state: 'Ready', color: 'bg-amber-300/10' },
     { name: 'Research analyst', team: 'Strategy', state: 'Working', color: 'bg-cyan-300/10' },
@@ -527,7 +606,7 @@ function LegacyWebControlPlanePreview() {
             <p className="text-[9px] uppercase tracking-[0.16em] text-white/25">Organization overview</p>
             <h3 className="mt-1 text-base font-medium tracking-tight text-white/90">Good morning, George</h3>
           </div>
-          <div className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.025] px-2 py-1 text-[9px] text-white/45"><span className="h-1.5 w-1.5 rounded-full bg-emerald-300" /> All systems healthy</div>
+          <div className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.025] px-2 py-1 text-[9px] text-white/45"><span className="h-1.5 w-1.5 rounded-full bg-[var(--color-status-success)]" /> All systems healthy</div>
         </div>
 
         <div className="mt-3 grid grid-cols-3 gap-2">
@@ -562,7 +641,7 @@ function LegacyWebControlPlanePreview() {
             <div key={operator.name} className="grid grid-cols-[1fr_auto] items-center border-b border-white/[0.045] px-3.5 py-1.5 last:border-0 sm:grid-cols-[1fr_0.75fr_auto]">
               <div className="flex items-center gap-2"><span className={`h-5 w-5 rounded-md ${operator.color} ring-1 ring-inset ring-white/[0.06]`} /><span className="text-[9px] text-white/70">{operator.name}</span></div>
               <span className="hidden text-[8px] text-white/25 sm:block">{operator.team}</span>
-              <span className="flex items-center gap-1.5 text-[8px] text-white/35"><span className={`h-1 w-1 rounded-full ${operator.state === 'Working' ? 'bg-sky-300' : 'bg-emerald-300'}`} />{operator.state}</span>
+              <span className="flex items-center gap-1.5 text-[8px] text-white/35"><span className={`h-1 w-1 rounded-full ${operator.state === 'Working' ? 'bg-[var(--color-status-info)]' : 'bg-[var(--color-status-success)]'}`} />{operator.state}</span>
             </div>
           ))}
         </div>
@@ -605,9 +684,9 @@ function UsageBar({ label, value, width }: { label: string; value: string; width
 
 function LogLine({ time, label, text }: { time: string; label: string; text: string }) {
   const labelColor = label === 'hooks'
-    ? 'text-[#87d7d7]'
+    ? 'text-[var(--color-tui-hooks)]'
     : label === 'github'
-      ? 'text-[#5f87af]'
+      ? 'text-[var(--color-tui-github)]'
       : 'text-[var(--color-text-muted)]'
 
   return (
@@ -649,16 +728,16 @@ function TypingTask() {
   const task = DEMO_TASKS[taskIndex].slice(0, visibleLength)
   return (
     <p className="mt-1 flex min-h-7 items-center" aria-label={`Example task: ${DEMO_TASKS[taskIndex]}`}>
-      <span className="mr-2 text-[#808080]">&gt;</span>
-      <span className="text-[#afd7ff]">{task}</span>
-      <span aria-hidden="true" className="ml-0.5 inline-block h-[1.15em] w-[7px] animate-[blink_1s_step-end_infinite] bg-white/55" />
+      <span className="mr-2 text-[var(--color-text-subtle)]">&gt;</span>
+      <span className="text-[var(--color-tui-accent-strong)]">{task}</span>
+      <span aria-hidden="true" className="ml-0.5 inline-block h-[1.15em] w-[7px] animate-[blink_1s_step-end_infinite] bg-[var(--color-text-secondary)]" />
     </p>
   )
 }
 
 function Metrics() {
   return (
-    <div className="mx-auto mt-7 grid w-full max-w-xl grid-cols-3 divide-x divide-white/[0.08] text-center lg:mx-0 lg:text-left">
+    <div className="mx-auto mt-7 grid w-full max-w-xl grid-cols-3 divide-x divide-[var(--color-border-strong)] text-center lg:mx-0 lg:text-left">
       <Metric value="Linux" label="a persistent home for every operator" />
       <Metric value="Chat + Console" label="delegate work or take over directly" />
       <Metric value="<30 MB RAM" label="standalone Nebula core" />
@@ -682,7 +761,7 @@ function PlatformSection() {
     <section id="platform" className="bg-transparent">
       <div className="mx-auto max-w-[1480px] px-6 py-28 lg:px-10 lg:py-36">
         <ScrollReveal className="max-w-4xl">
-          <p className="font-mono text-sm text-[var(--color-text-muted)] sm:text-base">/cloud</p>
+          <SectionEyebrow>/cloud</SectionEyebrow>
           <h2 className="mt-5 text-4xl font-medium tracking-[-0.045em] text-[var(--color-text-primary)] sm:text-6xl">Give every operator its own computer.</h2>
           <p className="mt-6 max-w-3xl text-base leading-7 text-[var(--color-text-secondary)]">Connect each operator to the tools it needs, then route work through Nebula Cloud so people can delegate, inspect, and stay in control.</p>
         </ScrollReveal>
@@ -753,9 +832,9 @@ function PlatformSection() {
   )
 }
 
-const DIAGRAM_NODE_BASE = 'border-transparent bg-[var(--color-surface-diagram-node)] text-sky-100/85 hover:border-white/[0.24] hover:bg-[var(--color-surface-diagram-node-hover)] [&_img]:transition-[filter,opacity] [&_img]:duration-200 [&_svg]:transition-[filter,opacity] [&_svg]:duration-200'
-const DIAGRAM_ACTIVE_GLOW = 'border-sky-200/[0.48] bg-sky-200/[0.18] text-sky-100 shadow-[0_18px_70px_rgba(56,189,248,0.28),0_0_40px_rgba(125,211,252,0.26)] [&_img]:drop-shadow-[0_0_14px_rgba(56,189,248,0.65)] [&_svg]:drop-shadow-[0_0_14px_rgba(56,189,248,0.65)]'
-const DIAGRAM_CLOUD_GLOW = 'border-sky-200/[0.48] bg-sky-200/[0.18] text-sky-100 shadow-[0_18px_70px_rgba(56,189,248,0.28),0_0_40px_rgba(125,211,252,0.26)]'
+const DIAGRAM_NODE_BASE = 'diagram-node-base border-transparent [&_img]:transition-[filter,opacity] [&_img]:duration-200 [&_svg]:transition-[filter,opacity] [&_svg]:duration-200'
+const DIAGRAM_ACTIVE_GLOW = 'diagram-node-active'
+const DIAGRAM_CLOUD_GLOW = 'diagram-node-active diagram-node-cloud'
 
 function AgentCluster() {
   const [activeOperator, setActiveOperator] = useState<number | null>(null)
@@ -770,7 +849,7 @@ function AgentCluster() {
   return (
     <div className="flex h-72 w-[53rem] max-w-full shrink-0 items-center max-[1199px]:w-[46.5rem] max-[1099px]:w-[40.5rem] max-[1023px]:w-[36.5rem] max-[767px]:w-[27.5rem]" onMouseMove={handleMouseMove} onMouseLeave={() => setActiveOperator(null)}>
       <div className="mr-6 flex h-72 shrink-0 flex-col justify-between">
-        <ToolCluster active={activeOperator === 0} tools={[{ label: 'Python', icon: <ToolAsset src={pythonIcon} /> }, { label: 'C', icon: <ToolAsset src={CIcon} /> }, { label: 'GitHub', icon: <ToolAsset src={githubIcon} className="brightness-0 invert" /> }]} />
+        <ToolCluster active={activeOperator === 0} tools={[{ label: 'Python', icon: <ToolAsset src={pythonIcon} /> }, { label: 'C', icon: <ToolAsset src={CIcon} /> }, { label: 'GitHub', icon: <ToolAsset src={githubIcon} className="diagram-monochrome-icon" /> }]} />
         <ToolCluster active={activeOperator === 1} tools={[{ label: 'Telegram', icon: <ToolAsset src={telegramIcon} /> }, { label: 'Gmail', icon: <ToolAsset src={gmailIcon} /> }, { label: 'Hooks', icon: <Clock size={28} /> }, { label: 'Excel', icon: <ToolAsset src={excelIcon} /> }]} />
         <ToolCluster active={activeOperator === 2} tools={[{ label: 'GitLab', icon: <ToolAsset src={gitlabIcon} /> }, { label: 'JavaScript', icon: <ToolAsset src={javascriptIcon} /> }, { label: 'npm', icon: <ToolAsset src={npmIcon} /> }]} />
       </div>
@@ -915,7 +994,7 @@ function VerticalMobileTools() {
     [
       { label: 'Python', icon: <ToolAsset src={pythonIcon} /> },
       { label: 'C', icon: <ToolAsset src={CIcon} /> },
-      { label: 'GitHub', icon: <ToolAsset src={githubIcon} className="brightness-0 invert" /> },
+      { label: 'GitHub', icon: <ToolAsset src={githubIcon} className="diagram-monochrome-icon" /> },
     ],
     [
       { label: 'Telegram', icon: <ToolAsset src={telegramIcon} /> },
@@ -956,11 +1035,7 @@ function DiagramNode({ label, className, size = 'h-20 w-20', children, onMouseEn
         <TooltipPrimitive.Trigger asChild>
           <div aria-label={label} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} className={`flex ${size} shrink-0 items-center justify-center rounded-xl border transition-[border-color,background-color,box-shadow] duration-200 [&_img]:transition-[filter,opacity] [&_img]:duration-200 [&_svg]:transition-[filter,opacity] [&_svg]:duration-200 ${className}`}>{children}</div>
       </TooltipPrimitive.Trigger>
-      <TooltipPrimitive.Portal>
-        <TooltipPrimitive.Content sideOffset={6} className="z-50 rounded-lg bg-zinc-900/95 px-2.5 py-1.5 text-xs text-white/75 shadow-xl backdrop-blur-sm">
-          {label}
-        </TooltipPrimitive.Content>
-      </TooltipPrimitive.Portal>
+      <TooltipContent sideOffset={6}>{label}</TooltipContent>
     </TooltipPrimitive.Root>
   )
 }
@@ -1000,7 +1075,7 @@ function VideoShowcase() {
     <section id="demo" aria-labelledby="demo-heading" className="bg-transparent">
       <div className="mx-auto max-w-[1480px] px-6 py-28 lg:px-10 lg:py-36">
         <ScrollReveal className="max-w-4xl">
-          <p className="font-mono text-sm text-[var(--color-text-muted)] sm:text-base">/demo</p>
+          <SectionEyebrow>/demo</SectionEyebrow>
           <h2 id="demo-heading" className="mt-5 text-4xl font-medium tracking-[-0.05em] text-[var(--color-text-primary)] sm:text-6xl">See an operator at work.</h2>
           <p className="mt-6 max-w-3xl text-base leading-7 text-[var(--color-text-secondary)]">From delegation to execution, follow an operator working inside its own persistent Linux workspace.</p>
         </ScrollReveal>
@@ -1032,7 +1107,7 @@ function RuntimeSection({ onLaunch }: { onLaunch: (event: MouseEvent<HTMLAnchorE
     <section id="runtime" className="bg-transparent">
       <div className="mx-auto max-w-[1480px] px-6 py-28 lg:px-10 lg:py-36">
           <ScrollReveal className="max-w-4xl">
-            <p className="font-mono text-sm text-[var(--color-text-muted)] sm:text-base">/runtime</p>
+            <SectionEyebrow>/runtime</SectionEyebrow>
             <h2 className="mt-5 text-4xl font-medium tracking-[-0.05em] text-[var(--color-text-primary)] sm:text-6xl">Choose how Nebula runs.</h2>
             <p className="mt-6 max-w-3xl text-base leading-7 text-[var(--color-text-secondary)]">Use the standalone runtime on your machine, or add Nebula Cloud when your team needs shared workspaces and organization-wide control.</p>
           </ScrollReveal>
@@ -1042,6 +1117,7 @@ function RuntimeSection({ onLaunch }: { onLaunch: (event: MouseEvent<HTMLAnchorE
               value={mode}
               options={[{ value: 'standalone', label: 'Standalone' }, { value: 'cloud', label: 'Nebula Cloud' }]}
               onValueChange={setMode}
+              tone="dark"
               className="w-72"
             />
           </ScrollReveal>
@@ -1050,9 +1126,6 @@ function RuntimeSection({ onLaunch }: { onLaunch: (event: MouseEvent<HTMLAnchorE
             <RuntimeProductDisplay isCloud={isCloud} />
           </ScrollReveal>
 
-        <a href="/app" onClick={onLaunch} className="group mt-8 inline-flex items-center gap-2 text-sm font-medium text-[var(--color-text-secondary)] transition hover:text-white">
-          Explore the runtime <ArrowRight size={14} className="transition-transform group-hover:translate-x-0.5" />
-        </a>
       </div>
     </section>
   )
@@ -1097,7 +1170,7 @@ function RuntimeProductDisplay({ isCloud }: { isCloud: boolean }) {
   return (
     <div className="mx-auto mt-6 w-full min-[1100px]:relative min-[1100px]:left-1/2 min-[1100px]:mx-0 min-[1100px]:w-[61.5rem] min-[1100px]:max-w-none min-[1100px]:-translate-x-1/2 min-[1200px]:w-[73rem]">
       {/* Keep this divider fixed on the switch seam; both columns get identical breathing room. */}
-      <span aria-hidden="true" className="pointer-events-none absolute inset-y-1 left-1/2 hidden w-px -translate-x-1/2 bg-white/[0.08] min-[1100px]:block" />
+      <span aria-hidden="true" className="pointer-events-none absolute inset-y-1 left-1/2 hidden w-px -translate-x-1/2 bg-[var(--color-border-default)] min-[1100px]:block" />
       <RuntimeModeSwap mode={mode} className="grid gap-14 min-[1100px]:grid-cols-2 min-[1100px]:gap-16">
         <div className="flex min-h-0 items-start justify-center pb-1 pt-1 min-[1100px]:justify-start">
           <div className="flex w-full max-w-[30rem] flex-col items-center">
@@ -1113,12 +1186,12 @@ function RuntimeProductDisplay({ isCloud }: { isCloud: boolean }) {
             <RuntimeChoiceNode detail={details.find(item => item.id === (isCloud ? 'cloud' : 'agent'))!} selected={selectedId === (isCloud ? 'cloud' : 'agent')} onSelect={() => setSelectedId(isCloud ? 'cloud' : 'agent')} labelPosition="bottom" />
 
             <div className="mt-9 flex min-h-[4.25rem] w-full max-w-[18rem] flex-wrap content-start justify-center gap-2">
-              {capabilities.map(capability => <span key={capability} className="rounded-full border border-white/[0.09] px-2.5 py-1 text-[10px] text-white/65">{capability}</span>)}
+              {capabilities.map(capability => <span key={capability} className="rounded-full border border-[var(--color-border-default)] px-2.5 py-1 text-[10px] text-[var(--color-text-secondary)]">{capability}</span>)}
             </div>
           </div>
         </div>
 
-        <aside className="flex min-h-0 min-w-0 w-full flex-col justify-start border-t border-white/[0.08] pb-1 pt-10 min-[1100px]:border-t-0 min-[1100px]:pl-8 min-[1100px]:pt-1">
+        <aside className="flex min-h-0 min-w-0 w-full flex-col justify-start border-t border-[var(--color-border-default)] pb-1 pt-10 min-[1100px]:border-t-0 min-[1100px]:pl-8 min-[1100px]:pt-1">
           <RuntimeDetailSwap transitionKey={`${mode}-${selected.id}`}>
             <RuntimeDetailPanel detail={selected} />
           </RuntimeDetailSwap>
@@ -1166,12 +1239,12 @@ function RuntimeDetailSwap({ transitionKey, children }: { transitionKey: string;
 }
 
 function RuntimeChoiceNode({ detail, selected, onSelect, labelPosition = 'bottom' }: { detail: RuntimeDetail; selected: boolean; onSelect: () => void; labelPosition?: 'top' | 'bottom' }) {
-  const label = <span className={`whitespace-nowrap text-[11px] ${selected ? 'text-white/85' : 'text-white/42'}`}>{detail.label}</span>
+  const label = <span className={`whitespace-nowrap text-[11px] ${selected ? 'text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)]'}`}>{detail.label}</span>
 
   return (
     <button type="button" aria-pressed={selected} onClick={onSelect} className="group flex min-w-0 cursor-pointer flex-col items-center gap-2.5 text-center">
       {labelPosition === 'top' && label}
-      <span className={`flex h-20 w-20 shrink-0 items-center justify-center rounded-xl border transition-[border-color,background-color,box-shadow] duration-200 ${selected ? DIAGRAM_ACTIVE_GLOW : `${DIAGRAM_NODE_BASE} group-hover:border-white/[0.2] group-hover:text-white/85`}`}>{detail.icon}</span>
+      <span className={`flex h-20 w-20 shrink-0 items-center justify-center rounded-xl border transition-[border-color,background-color,box-shadow] duration-200 ${selected ? DIAGRAM_ACTIVE_GLOW : `${DIAGRAM_NODE_BASE} group-hover:border-[var(--color-diagram-active-border)] group-hover:text-[var(--color-diagram-icon)]`}`}>{detail.icon}</span>
       {labelPosition === 'bottom' && label}
     </button>
   )
@@ -1211,18 +1284,18 @@ function RuntimeBranchConnector() {
 function RuntimeDetailPanel({ detail }: { detail: RuntimeDetail }) {
   return (
     <div className="flex min-h-0 min-w-0 w-full flex-col justify-start">
-      <div className="flex items-center gap-3 text-white/55">
+      <div className="flex items-center gap-3 text-[var(--color-text-muted)]">
         <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface-diagram-node)] [&_img]:!h-5 [&_img]:!w-5 [&_svg]:h-5 [&_svg]:w-5">{detail.icon}</span>
         <span className="text-[10px] uppercase tracking-[0.16em]">{detail.eyebrow}</span>
       </div>
-      <h3 className="mt-6 text-2xl font-medium tracking-[-0.035em] text-white sm:text-3xl">{detail.title}</h3>
-      <p className="mt-4 max-w-md text-sm leading-6 text-white/50">{detail.description}</p>
+      <h3 className="mt-6 text-2xl font-medium tracking-[-0.035em] text-[var(--color-text-primary)] sm:text-3xl">{detail.title}</h3>
+      <p className="mt-4 max-w-md text-sm leading-6 text-[var(--color-text-secondary)]">{detail.description}</p>
       <div className="mt-8 rounded-2xl bg-[var(--color-surface-diagram-node)] p-5">
-        <p className="font-mono text-[11px] text-sky-200/70">{detail.previewTitle}</p>
+        <p className="font-mono text-[11px] font-medium text-[var(--color-diagram-accent)]">{detail.previewTitle}</p>
         <div className="mt-5 space-y-3">
           {detail.previewLines.map(line => (
-            <div key={line} className="flex items-center gap-3 text-xs text-white/48">
-              <span className="h-1 w-1 shrink-0 rounded-full bg-sky-200/60" />
+            <div key={line} className="flex items-center gap-3 text-xs text-[var(--color-text-secondary)]">
+              <span className="h-1 w-1 shrink-0 rounded-full bg-[var(--color-diagram-accent)]" />
               <span>{line}</span>
             </div>
           ))}
@@ -1240,7 +1313,7 @@ function FinalCta({ onLaunch }: { onLaunch: (event: MouseEvent<HTMLAnchorElement
         { label: 'Nebula Cloud', href: '#platform' },
         { label: 'Nebula Agent', href: '#runtime' },
         { label: 'Nebula Desktop', href: '#runtime' },
-        { label: 'Pricing', href: '/pricing' },
+        { label: 'Pricing', href: '/plans' },
       ],
     },
     {
@@ -1256,8 +1329,8 @@ function FinalCta({ onLaunch }: { onLaunch: (event: MouseEvent<HTMLAnchorElement
     {
       title: 'Resources',
       links: [
-        { label: 'Documentation', href: '#' },
-        { label: 'API reference', href: '#' },
+        { label: 'Documentation', href: '/docs' },
+        { label: 'API reference', href: '/docs?topic=runtime-api#runtime-api' },
         { label: 'Blog', href: '#' },
         { label: 'Changelog', href: '#' },
         { label: 'Status', href: '#' },
@@ -1268,11 +1341,11 @@ function FinalCta({ onLaunch }: { onLaunch: (event: MouseEvent<HTMLAnchorElement
       title: 'Company',
       links: [
         { label: 'About', href: '#' },
-        { label: 'Security', href: '#' },
-        { label: 'Privacy policy', href: '#' },
-        { label: 'Terms of service', href: '#' },
-        { label: 'Responsible disclosure', href: '#' },
-        { label: 'Contact', href: '#' },
+        { label: 'Security', href: '/legal?document=security' },
+        { label: 'Privacy policy', href: '/legal?document=privacy' },
+        { label: 'Terms of service', href: '/legal?document=terms' },
+        { label: 'Responsible disclosure', href: '/legal?document=security' },
+        { label: 'Contact', href: '/contact' },
       ],
     },
   ]
@@ -1282,40 +1355,94 @@ function FinalCta({ onLaunch }: { onLaunch: (event: MouseEvent<HTMLAnchorElement
       <section className="mx-auto max-w-[1480px] px-6 py-24 lg:px-10 lg:py-28">
         <ScrollReveal
           variant="visual"
-          className="relative isolate mx-auto flex min-h-[380px] w-full items-center justify-center overflow-hidden rounded-[2rem] border border-white/[0.1] bg-[#080909] px-6 py-20 text-center shadow-[0_30px_100px_rgba(0,0,0,0.42)] sm:min-h-[420px] min-[1100px]:w-[61.5rem] min-[1200px]:w-[73rem]"
+          className="relative isolate mx-auto flex min-h-[380px] w-full items-center justify-center overflow-hidden rounded-[2rem] bg-[var(--color-surface-diagram-node)] px-6 py-20 text-center sm:min-h-[420px] min-[1100px]:w-[61.5rem] min-[1200px]:w-[73rem]"
         >
           <div aria-hidden="true" className="final-cta-shader pointer-events-none absolute inset-0 [&>*]:!absolute [&>*]:!inset-0 [&>*]:!h-full [&>*]:!w-full">
             <NebulaBackground fade={0} variant="classic" palette="graphite" resolutionScale={0.7} />
           </div>
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute left-1/2 top-1/2 h-[19rem] w-[42rem] max-w-[94%] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(ellipse_at_center,rgba(0,0,0,0.92)_0%,rgba(0,0,0,0.72)_34%,rgba(0,0,0,0.28)_62%,transparent_78%)] blur-2xl"
-          />
+          <div aria-hidden="true" className="final-cta-copy-blob pointer-events-none absolute left-1/2 top-1/2 h-[19rem] w-[42rem] max-w-[94%] -translate-x-1/2 -translate-y-1/2 rounded-full blur-2xl" />
           <div className="relative z-10 flex flex-col items-center justify-center gap-8">
             <h2 id="workspace" className="text-4xl font-medium tracking-[-0.05em] text-[var(--color-text-primary)] sm:text-6xl">Try Nebula now.</h2>
-            <a href="/app" onClick={onLaunch} className="group inline-flex h-12 shrink-0 items-center gap-2 rounded-full bg-white px-6 text-sm font-semibold text-black transition hover:bg-white/88">
+            <a href="/app" onClick={onLaunch} className="group inline-flex h-12 shrink-0 items-center gap-2 rounded-full bg-[var(--color-control-primary)] px-6 text-sm font-semibold text-[var(--color-control-on-primary)] transition hover:bg-[var(--color-control-primary-hover)]">
               Deploy an operator <ArrowRight size={15} className="transition-transform group-hover:translate-x-0.5" />
             </a>
           </div>
         </ScrollReveal>
       </section>
 
-      <footer className="bg-[#292929] text-[#f1f1ec]">
+      <Footer footerColumns={footerColumns} />
+    </>
+  )
+}
+
+type FooterColumn = {
+  title: string
+  links: { label: string; href: string }[]
+}
+
+export function Footer({ footerColumns: columns }: { footerColumns?: FooterColumn[] } = {}) {
+  const { resolvedTheme, setPreference } = useThemePreference()
+  const footerColumns = columns ?? [
+    {
+      title: 'Products',
+      links: [
+        { label: 'Nebula Cloud', href: '/#platform' },
+        { label: 'Nebula Agent', href: '/#runtime' },
+        { label: 'Nebula Desktop', href: '/#runtime' },
+        { label: 'Pricing', href: '/plans' },
+      ],
+    },
+    {
+      title: 'Platform',
+      links: [
+        { label: 'Chat', href: '/#workspace' },
+        { label: 'Console', href: '/#workspace' },
+        { label: 'Linux workspaces', href: '/#platform' },
+        { label: 'Dashboard', href: '/#platform' },
+        { label: 'Shared skills & MCPs', href: '/#platform' },
+      ],
+    },
+    {
+      title: 'Resources',
+      links: [
+        { label: 'Documentation', href: '/docs' },
+        { label: 'API reference', href: '/docs?topic=runtime-api#runtime-api' },
+        { label: 'Blog', href: '#' },
+        { label: 'Changelog', href: '#' },
+        { label: 'Status', href: '#' },
+        { label: 'Community', href: '#' },
+      ],
+    },
+    {
+      title: 'Company',
+      links: [
+        { label: 'About', href: '/contact' },
+        { label: 'Security', href: '/legal?document=security' },
+        { label: 'Privacy policy', href: '/legal?document=privacy' },
+        { label: 'Terms of service', href: '/legal?document=terms' },
+        { label: 'Responsible disclosure', href: '/legal?document=security' },
+        { label: 'Contact', href: '/contact' },
+      ],
+    },
+  ]
+
+  return (
+      <footer className="bg-[var(--color-surface-footer)] text-[var(--color-text-primary)]">
         <div className="mx-auto max-w-[1480px] px-8 pb-12 pt-8 lg:px-[50px] lg:pb-16 lg:pt-[50px]">
           <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-[1.35fr_repeat(4,minmax(0,1fr))] lg:gap-8">
             <div className="sm:col-span-2 lg:col-span-1">
-              <a href="/" aria-label="Nebula home" className="inline-flex text-white">
+              <a href="/" aria-label="Nebula home" className="inline-flex text-[var(--color-text-primary)]">
                 <NebulaMark size={48} />
               </a>
             </div>
 
             {footerColumns.map(column => (
               <div key={column.title}>
-                <h3 className="text-xs font-semibold text-white/95">{column.title}</h3>
+                <h3 className="text-xs font-semibold text-[var(--color-text-primary)]">{column.title}</h3>
                 <ul className="mt-4 space-y-2.5">
                   {column.links.map(link => (
                     <li key={link.label}>
-                      <a href={link.href} className="text-[13px] text-white/62 transition-colors hover:text-white">{link.label}</a>
+                      <a href={link.href} className="text-[13px] text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-primary)]">{link.label}</a>
                     </li>
                   ))}
                 </ul>
@@ -1324,7 +1451,24 @@ function FinalCta({ onLaunch }: { onLaunch: (event: MouseEvent<HTMLAnchorElement
           </div>
 
           <div className="mt-12">
-            <p className="text-xs text-white/55">© 2026 Nebula. All rights reserved.</p>
+            <div className="flex items-center justify-between gap-6">
+              <p className="text-xs text-[var(--color-text-muted)]">© 2026 Nebula. All rights reserved.</p>
+              <TooltipProvider delayDuration={250}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label={`Switch to ${resolvedTheme === 'dark' ? 'light' : 'dark'} mode`}
+                      onClick={() => setPreference(resolvedTheme === 'dark' ? 'light' : 'dark')}
+                      className="inline-flex size-9 shrink-0 items-center justify-center rounded-[var(--radius-control)] bg-[var(--color-surface-selected)] text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
+                    >
+                      {resolvedTheme === 'dark' ? <Moon size={16} /> : <Sun size={16} />}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">Switch to {resolvedTheme === 'dark' ? 'light' : 'dark'} mode</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
             <div className="mt-4 flex items-center gap-5">
               {[
                 { label: 'GitHub', icon: <FaGithub size={20} /> },
@@ -1332,7 +1476,7 @@ function FinalCta({ onLaunch }: { onLaunch: (event: MouseEvent<HTMLAnchorElement
                 { label: 'LinkedIn', icon: <FaLinkedinIn size={20} /> },
                 { label: 'YouTube', icon: <FaYoutube size={21} /> },
               ].map(social => (
-                <a key={social.label} href="#" aria-label={social.label} className="text-white/62 transition-colors hover:text-white">
+                <a key={social.label} href="#" aria-label={social.label} className="text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-primary)]">
                   {social.icon}
                 </a>
               ))}
@@ -1340,6 +1484,5 @@ function FinalCta({ onLaunch }: { onLaunch: (event: MouseEvent<HTMLAnchorElement
           </div>
         </div>
       </footer>
-    </>
   )
 }

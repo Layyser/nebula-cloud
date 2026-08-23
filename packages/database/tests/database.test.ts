@@ -5,11 +5,13 @@ import {
   ensureWorkspaceRunning,
   finishProvisioningJob,
   getOrganizationUsageSummary,
+  getOrganizationMembers,
   getPersonalUsageSummary,
   migrateCloudSchema,
   openCloudDatabase,
   ProvisioningJobLeaseLostError,
   recordUsageEvent,
+  rotateOrganizationJoinCode,
   resolveWorkspaceAccess,
   UsageAccessDeniedError,
   WorkspaceMembershipNotFoundError,
@@ -39,7 +41,53 @@ test('applies the minimal application schema idempotently', () => {
     expect(tables).toContain('workspace')
     expect(database.query<{ count: number }, []>(
       'SELECT COUNT(*) AS count FROM nebula_migration',
-    ).get()?.count).toBe(8)
+    ).get()?.count).toBe(9)
+  } finally {
+    database.close()
+  }
+})
+
+test('manages organization access codes and disabled memberships', () => {
+  const database = openCloudDatabase({ path: ':memory:' })
+  try {
+    database.exec(`
+      CREATE TABLE user (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL
+      );
+      CREATE TABLE organization (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        slug TEXT NOT NULL
+      );
+      CREATE TABLE member (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL REFERENCES user(id),
+        organizationId TEXT NOT NULL REFERENCES organization(id),
+        role TEXT NOT NULL DEFAULT 'member',
+        createdAt INTEGER NOT NULL
+      );
+      INSERT INTO user (id, name, email) VALUES
+        ('owner', 'Owner', 'owner@example.com'),
+        ('member', 'Member', 'member@example.com');
+      INSERT INTO organization (id, name, slug) VALUES ('org-1', 'Nubols', 'nubols');
+      INSERT INTO member (id, userId, organizationId, role, createdAt) VALUES
+        ('owner-membership', 'owner', 'org-1', 'owner', 1),
+        ('member-membership', 'member', 'org-1', 'member', 2);
+    `)
+    migrateCloudSchema(database)
+
+    expect(rotateOrganizationJoinCode(database, {
+      userId: 'owner',
+      organizationId: 'org-1',
+      lookupKey: 'ABCDEF123456',
+      now: () => 10,
+    })).toBe('ABCDEF123456')
+    expect(getOrganizationMembers(database, {
+      userId: 'owner',
+      organizationId: 'org-1',
+    }).members).toHaveLength(2)
   } finally {
     database.close()
   }

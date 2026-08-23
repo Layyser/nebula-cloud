@@ -10,18 +10,32 @@ import {
 } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import {
-  CheckCircle2,
-  Copy,
-  ExternalLink,
+  Building2,
+  Cpu,
+  HardDrive,
+  MemoryStick,
   LayoutDashboard,
   LogOut,
+  PlugZap,
+  Palette,
   RotateCw,
   Settings,
   Terminal,
-  X,
+  UserRound,
 } from 'lucide-react'
-import { NebulaBackground, RuntimeWorkspace, type RuntimeNavigationItem } from '@nebula/runtime-ui'
+import {
+  Button,
+  AppearanceSettings,
+  NebulaBackground,
+  ProviderSettings,
+  RuntimeWorkspace,
+  SettingsShell,
+  Surface,
+  type RuntimeNavigationItem,
+  type SettingsSection,
+} from '@nebula/runtime-ui'
 import type { RuntimeTransport } from '@nebula/runtime-ui/transport'
+import type { OperatorRuntimeResponse } from '@nebula-cloud/contracts'
 import { authClient } from './auth/authClient'
 import {
   authenticationRedirect,
@@ -35,10 +49,13 @@ import {
 } from './auth/sessionLifecycle'
 import { AuthLoading } from './components/auth/AuthLoading'
 import { AuthPage } from './components/auth/AuthPage'
-import { Dashboard } from './components/cloud/Dashboard'
+import { OrganizationDashboard } from './components/cloud/OrganizationDashboard'
 import { WorkspaceStartup } from './components/cloud/WorkspaceStartup'
+import { ContactPage } from './components/contact/ContactPage'
+import { DocsPage } from './components/docs/DocsPage'
 import { LandingPage } from './components/landing/LandingPage'
-import { PricingPage } from './components/pricing/PricingPage'
+import { LegalPage } from './components/legal/LegalPage'
+import { PlansPage } from './components/plans/PlansPage'
 import {
   OrganizationGate,
   type CloudOrganization,
@@ -47,6 +64,7 @@ import { createCloudRuntimeTransport } from './runtime/cloudRuntimeTransport'
 import {
   ensurePersonalWorkspace,
   ensureWorkspaceRunning,
+  getOperatorRuntime,
   restartWorkspace,
 } from './runtime/personalWorkspace'
 import {
@@ -84,14 +102,28 @@ export default function App() {
   const cloudRoute = pathname === '/login'
     || pathname.startsWith('/app')
     || isAuthenticationCallback(pathname)
-  const pricingRoute = pathname === '/pricing'
+  const plansRoute = pathname === '/plans' || pathname === '/pricing'
+  const docsRoute = pathname === '/docs'
+  const legalRoute = pathname === '/legal'
+  const contactRoute = pathname === '/contact'
+  const plainPublicRoute = plansRoute || docsRoute || legalRoute || contactRoute
+
+  useEffect(() => {
+    if (pathname === '/pricing') navigate('/plans')
+  }, [navigate, pathname])
 
   return (
-    <PageBackground scrollReactive={!cloudRoute && !pricingRoute}>
+    <PageBackground scrollReactive={!cloudRoute && !plainPublicRoute} visible={!plainPublicRoute}>
       {cloudRoute ? (
         <CloudSessionRoute pathname={pathname} navigate={navigate} />
-      ) : pricingRoute ? (
-        <PricingPage onLaunch={() => navigate('/login')} />
+      ) : plansRoute ? (
+        <PlansPage onLaunch={() => navigate('/login')} />
+      ) : docsRoute ? (
+        <DocsPage onLaunch={() => navigate('/login')} />
+      ) : legalRoute ? (
+        <LegalPage onLaunch={() => navigate('/login')} />
+      ) : contactRoute ? (
+        <ContactPage onLaunch={() => navigate('/login')} />
       ) : (
         <LandingPage onLaunch={() => navigate('/login')} />
       )}
@@ -99,12 +131,12 @@ export default function App() {
   )
 }
 
-export function PageBackground({ children, scrollReactive }: { children: ReactNode; scrollReactive: boolean }) {
+export function PageBackground({ children, scrollReactive, visible = true }: { children: ReactNode; scrollReactive: boolean; visible?: boolean }) {
   return (
     <>
-      <NebulaBackground fade={0} variant="classic" palette="graphite" resolutionScale={0.5} scrollReactive={scrollReactive} />
-      <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-[1] bg-[radial-gradient(circle_at_66%_40%,transparent_0%,rgba(5,6,7,0.08)_28%,rgba(5,6,7,0.76)_78%)]" />
-      <div aria-hidden="true" className="shader-bottom-fade pointer-events-none fixed inset-x-0 bottom-0 z-[1]" />
+      {visible && <NebulaBackground fade={0} variant="classic" palette="graphite" resolutionScale={0.5} scrollReactive={scrollReactive} />}
+      {visible && <div aria-hidden="true" className="page-shader-vignette pointer-events-none fixed inset-0 z-[1]" />}
+      {visible && !scrollReactive && <div aria-hidden="true" className="shader-bottom-fade pointer-events-none fixed inset-x-0 bottom-0 z-[1]" />}
       {children}
     </>
   )
@@ -207,6 +239,7 @@ function AuthenticatedCloudApp({
   })
   const [workspaceError, setWorkspaceError] = useState<WorkspaceStartupError | null>(null)
   const [workspaceAttempt, setWorkspaceAttempt] = useState(0)
+  const [dashboardOverShader, setDashboardOverShader] = useState(true)
 
   useEffect(() => {
     let cancelled = false
@@ -261,10 +294,11 @@ function AuthenticatedCloudApp({
       id: 'terminal',
       label: 'Terminal',
       icon: <Terminal size={15} />,
+      background: 'plain',
       keepMounted: true,
       onSelect: () => {},
       content: (
-        <Suspense fallback={<div className="min-w-0 flex-1 bg-[#080808]" />}>
+        <Suspense fallback={<div className="min-w-0 flex-1 bg-[var(--color-surface-page)]" />}>
           <TerminalPage key={workspaceId} workspaceId={workspaceId} />
         </Suspense>
       ),
@@ -273,19 +307,21 @@ function AuthenticatedCloudApp({
       id: 'dashboard',
       label: 'Dashboard',
       icon: <LayoutDashboard size={15} />,
+      background: dashboardOverShader ? 'shader' : 'plain',
       onSelect: () => {},
-      content: (
-        <div className="min-w-0 flex-1 overflow-y-auto bg-[#080808]">
-          <Dashboard
+      content: () => (
+        <div className="min-w-0 flex-1 overflow-y-auto bg-transparent">
+          <OrganizationDashboard
             userName={user.name}
             userKey={user.email}
             organizationId={activeOrganization.id}
             organizationName={activeOrganization.name}
+            onBackgroundChange={setDashboardOverShader}
           />
         </div>
       ),
     },
-  ], [activeOrganization.id, activeOrganization.name, user.name, workspaceId])
+  ], [activeOrganization.id, activeOrganization.name, dashboardOverShader, user.name, workspaceId])
 
   const signOut = useCallback(async () => {
     if (signingOut) return
@@ -403,21 +439,20 @@ export function SettingsWindow({
   onClose: () => void
 }) {
   const reduceMotion = useReducedMotion()
-  const [codexState, setCodexState] = useState<
-    'checking' | 'disconnected' | 'starting' | 'pending' | 'connected' | 'error'
-  >('checking')
-  const [codexError, setCodexError] = useState('')
-  const [copied, setCopied] = useState(false)
   const [restartState, setRestartState] = useState<
     'idle' | 'confirming' | 'restarting' | 'restarted' | 'error'
   >('idle')
   const [restartError, setRestartError] = useState('')
-  const [deviceFlow, setDeviceFlow] = useState<{
-    flowId: string
-    verificationUrl: string
-    userCode: string
-    intervalSeconds: number
-  } | null>(null)
+  const [settingsSection, setSettingsSection] = useState('general')
+  const [operatorRuntime, setOperatorRuntime] = useState<OperatorRuntimeResponse | null>(null)
+
+  const settingsSections: SettingsSection[] = [
+    { id: 'general', label: 'General', group: 'Account', icon: <UserRound size={15} /> },
+    { id: 'organization', label: 'Organization', group: 'Account', icon: <Building2 size={15} /> },
+    { id: 'providers', label: 'Providers', group: 'Runtime', icon: <PlugZap size={15} /> },
+    { id: 'operator', label: 'Operator', group: 'Runtime', icon: <Cpu size={15} /> },
+    { id: 'appearance', label: 'Appearance', group: 'Personalize', icon: <Palette size={15} /> },
+  ]
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -428,115 +463,17 @@ export function SettingsWindow({
   }, [onClose])
 
   useEffect(() => {
+    if (settingsSection !== 'operator' || !workspaceId) return
     const controller = new AbortController()
-    void transport.request('/auth/codex', { signal: controller.signal })
-      .then(async response => {
-        if (!response.ok) throw new Error('Could not read Codex connection status')
-        const payload = await response.json() as { authenticated?: boolean }
-        setCodexState(payload.authenticated ? 'connected' : 'disconnected')
-      })
-      .catch(error => {
-        if (controller.signal.aborted) return
-        setCodexError(error instanceof Error ? error.message : 'Codex status failed')
-        setCodexState('error')
+    void getOperatorRuntime(workspaceId, {
+      fetch: (input, init) => fetch(input, { ...init, signal: controller.signal }),
+    })
+      .then(setOperatorRuntime)
+      .catch(() => {
+        if (!controller.signal.aborted) setOperatorRuntime(null)
       })
     return () => controller.abort()
-  }, [transport])
-
-  useEffect(() => {
-    if (!deviceFlow || codexState !== 'pending') return
-    let cancelled = false
-    let timeout = 0
-    const poll = async () => {
-      try {
-        const response = await transport.request(
-          `/auth/codex/device/${encodeURIComponent(deviceFlow.flowId)}`,
-        )
-        const payload = await response.json() as {
-          status?: string
-          message?: string | null
-        }
-        if (cancelled) return
-        if (payload.status === 'complete') {
-          setCodexState('connected')
-          setDeviceFlow(null)
-          onProviderConnected()
-          return
-        }
-        if (payload.status !== 'pending') {
-          setCodexError(payload.message || 'Codex sign-in failed')
-          setCodexState('error')
-          setDeviceFlow(null)
-          return
-        }
-      } catch {
-        if (cancelled) return
-        setCodexError('Could not check Codex sign-in')
-        setCodexState('error')
-        setDeviceFlow(null)
-        return
-      }
-      timeout = window.setTimeout(
-        () => { void poll() },
-        Math.max(1000, deviceFlow.intervalSeconds * 1000),
-      )
-    }
-    timeout = window.setTimeout(
-      () => { void poll() },
-      Math.max(1000, deviceFlow.intervalSeconds * 1000),
-    )
-    return () => {
-      cancelled = true
-      window.clearTimeout(timeout)
-    }
-  }, [codexState, deviceFlow, onProviderConnected, transport])
-
-  const startCodexLogin = async () => {
-    setCodexError('')
-    setCopied(false)
-    setCodexState('starting')
-    try {
-      const response = await transport.request('/auth/codex/device', {
-        method: 'POST',
-      })
-      const payload = await response.json() as {
-        flow_id?: string
-        verification_url?: string
-        user_code?: string
-        interval_seconds?: number
-        error?: string
-      }
-      if (
-        !response.ok
-        || !payload.flow_id
-        || !payload.verification_url
-        || !payload.user_code
-      ) {
-        throw new Error(payload.error || 'Could not start Codex sign-in')
-      }
-      setDeviceFlow({
-        flowId: payload.flow_id,
-        verificationUrl: payload.verification_url,
-        userCode: payload.user_code,
-        intervalSeconds: payload.interval_seconds || 5,
-      })
-      setCodexState('pending')
-    } catch (error) {
-      setCodexError(error instanceof Error ? error.message : 'Codex sign-in failed')
-      setCodexState('error')
-    }
-  }
-
-  const copyDeviceCode = async () => {
-    if (!deviceFlow) return
-    try {
-      await navigator.clipboard.writeText(deviceFlow.userCode)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1600)
-    } catch {
-      setCodexError('Could not copy the one-time code')
-    }
-  }
+  }, [settingsSection, workspaceId])
 
   const restartOperator = async () => {
     if (restartState === 'restarting') return
@@ -564,158 +501,94 @@ export function SettingsWindow({
         if (event.target === event.currentTarget) onClose()
       }}
     >
-      <motion.section
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="cloud-settings-title"
+        <motion.div
         initial={reduceMotion ? false : { opacity: 0, y: 10, scale: 0.985 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 8, scale: 0.985 }}
         transition={{ duration: reduceMotion ? 0 : 0.22, ease: [0.22, 1, 0.36, 1] }}
-        className="w-full max-w-lg overflow-hidden rounded-xl border border-white/[0.10] bg-[#111] shadow-[0_24px_80px_rgba(0,0,0,0.65)]"
+        className="w-full max-w-5xl"
       >
-        <header className="flex h-14 items-center justify-between border-b border-white/[0.07] px-5">
-          <div>
-            <h2 id="cloud-settings-title" className="text-[14px] font-semibold text-white/90">Settings</h2>
-            <p className="text-[11px] text-white/35">Account, providers, and organization</p>
-          </div>
-          <button type="button" onClick={onClose} aria-label="Close settings" className="flex h-8 w-8 items-center justify-center rounded-lg text-white/35 transition-colors hover:bg-white/[0.06] hover:text-white/80">
-            <X size={15} />
-          </button>
-        </header>
-        <div className="space-y-5 p-5">
-          <SettingsField label="Name" value={user.name} />
-          <SettingsField label="Email" value={user.email} />
-          <SettingsField label="Organization" value={organization.name} />
-          <div className="border-t border-white/[0.07] pt-4">
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/30">
-              Model providers
-            </p>
-            <div className="rounded-xl border border-white/[0.08] bg-black/20 p-3">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="text-[12px] font-medium text-white/75">Codex</p>
-                  <p className="mt-0.5 text-[10px] leading-4 text-white/35">
-                    Use your ChatGPT subscription inside this operator.
-                  </p>
-                </div>
-                {codexState === 'connected' ? (
-                  <span className="flex h-8 items-center gap-1.5 rounded-lg bg-emerald-400/[0.08] px-2.5 text-[11px] text-emerald-300/80">
-                    <CheckCircle2 size={13} />
-                    Connected
-                  </span>
-                ) : codexState !== 'pending' ? (
-                  <button
-                    type="button"
-                    disabled={codexState === 'checking' || codexState === 'starting'}
-                    onClick={() => { void startCodexLogin() }}
-                    className="flex h-8 items-center rounded-lg bg-white px-3 text-[11px] font-medium text-black transition hover:bg-white/90 disabled:cursor-wait disabled:opacity-55"
-                  >
-                    {codexState === 'starting' ? 'Starting…' : 'Connect'}
-                  </button>
-                ) : null}
+        <SettingsShell
+          title="Settings"
+          sections={settingsSections}
+          activeSection={settingsSection}
+          onSectionChange={setSettingsSection}
+          onClose={onClose}
+        >
+          {settingsSection === 'general' && (
+            <SettingsContent title="General" description="Your account identity and the active workspace context.">
+              <div className="space-y-5">
+                <SettingsField label="Name" value={user.name} />
+                <SettingsField label="Email" value={user.email} />
               </div>
-              {codexState === 'pending' && deviceFlow && (
-                <div className="mt-3 border-t border-white/[0.07] pt-3">
-                  <p className="text-[11px] leading-5 text-white/45">
-                    Open OpenAI and enter this one-time code:
-                  </p>
-                  <div className="mt-2 flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => { void copyDeviceCode() }}
-                      className="flex h-9 flex-1 items-center justify-between rounded-lg border border-white/[0.09] bg-white/[0.035] px-3 font-mono text-[12px] tracking-[0.12em] text-white/75 transition hover:bg-white/[0.06]"
-                    >
-                      {deviceFlow.userCode}
-                      <span className="flex items-center gap-1 font-sans text-[10px] tracking-normal text-white/30">
-                        <Copy size={12} />
-                        {copied ? 'Copied' : 'Copy'}
-                      </span>
-                    </button>
-                    <a
-                      href={deviceFlow.verificationUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex h-9 items-center gap-1.5 rounded-lg bg-white px-3 text-[11px] font-medium text-black transition hover:bg-white/90"
-                    >
-                      Open OpenAI
-                      <ExternalLink size={12} />
-                    </a>
+            </SettingsContent>
+          )}
+
+          {settingsSection === 'organization' && (
+            <SettingsContent title="Organization" description="The organization controls shared workspaces, access, and governance.">
+              <SettingsField label="Organization" value={organization.name} />
+            </SettingsContent>
+          )}
+
+          {settingsSection === 'providers' && (
+            <SettingsContent title="Model providers" description="Connect the models Nebula can use. Credentials stay inside the runtime and are never shown to Cloud.">
+              <ProviderSettings
+                transport={transport}
+                onProviderConnected={onProviderConnected}
+              />
+            </SettingsContent>
+          )}
+
+          {settingsSection === 'operator' && (
+            <SettingsContent title="Operator" description="Manage the current workspace runtime without deleting its persistent files.">
+              <Surface variant="panel" density="compact" radius="surface" className="space-y-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-[13px] font-medium text-[var(--color-text-primary)]">Restart operator</p>
+                    <p className="mt-1 text-[11px] leading-5 text-[var(--color-text-muted)]">
+                      Recreates Nebula from the current image without deleting your files.
+                    </p>
                   </div>
-                  <p className="mt-2 text-[10px] text-white/25">
-                    Waiting for authorization. This code expires in 15 minutes.
-                  </p>
+                  {restartState === 'confirming' ? null : (
+                    <Button
+                      disabled={restartState === 'restarting'}
+                      onClick={() => setRestartState('confirming')}
+                      variant="recessed"
+                      size="compact"
+                      radius="compact"
+                    >
+                      <RotateCw size={13} className={restartState === 'restarting' ? 'animate-spin' : ''} />
+                      {restartState === 'restarting' ? 'Restarting…' : restartState === 'restarted' ? 'Restarted' : 'Restart'}
+                    </Button>
+                  )}
                 </div>
-              )}
-              {codexState === 'error' && codexError && (
-                <p className="mt-2 text-[10px] leading-4 text-red-300/65">{codexError}</p>
-              )}
-            </div>
-          </div>
-          <div className="border-t border-white/[0.07] pt-4">
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/30">
-              Operator
-            </p>
-            <div className="rounded-xl border border-white/[0.08] bg-black/20 p-3">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="text-[12px] font-medium text-white/75">Restart operator</p>
-                  <p className="mt-0.5 text-[10px] leading-4 text-white/35">
-                    Recreates Nebula from the current image without deleting your files.
-                  </p>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  <OperatorFact icon={<Cpu size={14} />} label="Runtime" value="Nebula Agent" />
+                  <OperatorFact icon={<MemoryStick size={14} />} label="Reserved RAM" value={formatBytes(operatorRuntime?.resources.memoryRequestBytes)} />
+                  <OperatorFact icon={<HardDrive size={14} />} label="Disk quota" value={formatBytes(operatorRuntime?.resources.diskLimitBytes)} />
+                  <OperatorFact label="Workspace image" value={operatorRuntime?.image ?? 'Loading…'} />
+                  <OperatorFact label="CPU limit" value={formatCpu(operatorRuntime?.resources.cpuLimit)} />
+                  <OperatorFact label="Process limit" value={formatPids(operatorRuntime?.resources.pidsLimit)} />
                 </div>
-                {restartState === 'confirming' ? null : (
-                  <button
-                    type="button"
-                    disabled={restartState === 'restarting'}
-                    onClick={() => setRestartState('confirming')}
-                    className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-white/[0.09] bg-white/[0.035] px-3 text-[11px] font-medium text-white/65 transition hover:bg-white/[0.07] hover:text-white/85 disabled:cursor-wait disabled:opacity-55"
-                  >
-                    <RotateCw
-                      size={12}
-                      className={restartState === 'restarting' ? 'animate-spin' : ''}
-                    />
-                    {restartState === 'restarting'
-                      ? 'Restarting…'
-                      : restartState === 'restarted'
-                        ? 'Restarted'
-                        : 'Restart'}
-                  </button>
+                {restartState === 'confirming' && (
+                  <div className="mt-4 flex items-center justify-between gap-3 bg-[var(--color-surface-overlay)] p-3">
+                    <p className="text-[11px] leading-5 text-[var(--color-text-muted)]">
+                      Active commands and terminal connections will stop. Persistent files stay mounted.
+                    </p>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Button type="button" onClick={() => setRestartState('idle')} variant="ghost" size="compact" radius="compact">Cancel</Button>
+                      <Button type="button" onClick={() => { void restartOperator() }} variant="primary" size="compact" radius="compact">Restart</Button>
+                    </div>
+                  </div>
                 )}
-              </div>
-              {restartState === 'confirming' && (
-                <div className="mt-3 flex items-center justify-between gap-3 border-t border-white/[0.07] pt-3">
-                  <p className="text-[10px] leading-4 text-white/40">
-                    Active commands and terminal connections will stop. Persistent files stay mounted.
-                  </p>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setRestartState('idle')}
-                      className="flex h-8 items-center rounded-lg px-3 text-[11px] font-medium text-white/45 transition hover:bg-white/[0.05] hover:text-white/70"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { void restartOperator() }}
-                      className="flex h-8 items-center rounded-lg bg-white px-3 text-[11px] font-medium text-black transition hover:bg-white/90"
-                    >
-                      Restart
-                    </button>
-                  </div>
-                </div>
-              )}
-              {restartState === 'error' && restartError && (
-                <p className="mt-2 text-[10px] leading-4 text-red-300/65">{restartError}</p>
-              )}
-            </div>
-          </div>
-          <p className="border-t border-white/[0.07] pt-4 text-[11px] leading-5 text-white/35">
-            More account, organization, and operator preferences will appear here as the Cloud control plane grows.
-          </p>
-        </div>
-      </motion.section>
+                {restartState === 'error' && restartError && <p className="mt-3 text-[11px] leading-5 text-[var(--color-status-danger-strong)]">{restartError}</p>}
+              </Surface>
+            </SettingsContent>
+          )}
+
+          {settingsSection === 'appearance' && <AppearanceSettings />}
+        </SettingsShell>
+      </motion.div>
     </motion.div>
   )
 }
@@ -723,8 +596,58 @@ export function SettingsWindow({
 function SettingsField({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/30">{label}</p>
-      <div className="rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2.5 text-[12px] text-white/70">{value}</div>
+      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">{label}</p>
+      <div className="flex h-[var(--control-height-field)] items-center rounded-[var(--radius-control)] bg-[var(--color-surface-input)] px-3 text-[12px] text-[var(--color-text-secondary)]">{value}</div>
+    </div>
+  )
+}
+
+function OperatorFact({
+  icon,
+  label,
+  value,
+}: {
+  icon?: ReactNode
+  label: string
+  value: string
+}) {
+  return (
+    <div className="min-w-0 rounded-[var(--radius-control)] bg-[var(--color-surface-recessed)] px-3 py-2.5">
+      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">
+        {icon}
+        <span className="truncate">{label}</span>
+      </div>
+      <p title={value} className="mt-1 truncate text-[12px] text-[var(--color-text-secondary)]">{value}</p>
+    </div>
+  )
+}
+
+function formatBytes(value: number | undefined) {
+  if (!Number.isFinite(value) || !value || value <= 0) return 'Loading…'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let amount = value
+  let unit = 0
+  while (amount >= 1024 && unit < units.length - 1) {
+    amount /= 1024
+    unit += 1
+  }
+  return `${amount >= 10 || unit === 0 ? Math.round(amount) : amount.toFixed(1)} ${units[unit]}`
+}
+
+function formatCpu(value: number | undefined) {
+  return Number.isFinite(value) && value && value > 0 ? `${value} vCPU` : 'Loading…'
+}
+
+function formatPids(value: number | undefined) {
+  return Number.isInteger(value) && value && value > 0 ? value.toLocaleString() : 'Loading…'
+}
+
+function SettingsContent({ title, description, children }: { title: string; description: string; children: ReactNode }) {
+  return (
+    <div>
+      <h3 className="text-2xl font-semibold tracking-[-0.03em] text-[var(--color-text-primary)]">{title}</h3>
+      <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--color-text-muted)]">{description}</p>
+      <div className="mt-8">{children}</div>
     </div>
   )
 }

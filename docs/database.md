@@ -27,6 +27,8 @@ Nebula owns:
 - `nebula_migration`
 - `workspace`
 - `provisioning_job`
+- `usage_event` (migrations 0005–0008)
+- `organization_join_code` and `organization_member_state` (migration 0009)
 
 `workspace.member_id` is unique, enforcing one personal workspace per
 organization membership. Database insert and update guards additionally require
@@ -39,11 +41,11 @@ caller's membership and resolves the row inside an immediate SQLite
 transaction. Repeated requests, page reloads, and duplicate attempts return the
 same workspace identity. They cannot create a second personal workspace.
 
-The table stores only durable product identity and desired lifecycle state.
-Worker credentials, runtime instances, usage, and audit events will receive
-tables only when those features are implemented. Provisioning jobs are the
-first lifecycle records: they persist an idempotent `ensure_running` operation,
-claim leases, retry timing, attempts, and bounded failure details. See
+The tables store durable product identity, desired lifecycle state, usage
+metering, and organization governance. Worker credentials, runtime instances,
+and audit events will receive tables only when those features are implemented.
+Provisioning jobs persist an idempotent `ensure_running` operation, claim
+leases, retry timing, attempts, and bounded failure details. See
 [`provisioning-jobs.md`](provisioning-jobs.md).
 
 ## Runtime settings

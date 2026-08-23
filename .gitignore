@@ -12,5 +12,5 @@ apps/control-plane/data/
 *:Zone.Identifier
 vendor/*
 .codex-tmp/
-docs/
+/docs/
 plan.md

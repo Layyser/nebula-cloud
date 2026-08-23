@@ -63,6 +63,20 @@ export interface RestartWorkspaceResponse {
   state: 'ready'
 }
 
+export interface OperatorRuntimeResponse {
+  workspaceId: string
+  state: string
+  image: string
+  resources: {
+    memoryRequestBytes: number
+    memoryLimitBytes: number
+    cpuRequest: number
+    cpuLimit: number
+    pidsLimit: number
+    diskLimitBytes: number
+  }
+}
+
 export interface UsageTotals {
   modelTurns: number
   inputTokens: number
@@ -116,4 +130,68 @@ export interface OrganizationUsageResponse {
   rangeDays: 7 | 30 | 90
   totals: UsageTotals
   members: OrganizationMemberUsageSummary[]
+}
+
+export type OrganizationRole = 'owner' | 'admin' | 'member'
+
+export interface OrganizationMember {
+  membershipId: string
+  userId: string
+  name: string
+  email: string
+  role: OrganizationRole
+  disabled: boolean
+  joinedAt: number
+}
+
+export interface OrganizationMembersResponse {
+  actorRole: OrganizationRole
+  members: OrganizationMember[]
+}
+
+export interface UpdateOrganizationMemberRequest {
+  disabled: boolean
+}
+
+export interface OrganizationOperator {
+  workspaceId: string | null
+  membershipId: string
+  name: string
+  email: string
+  state: PersonalWorkspaceState | 'not_created'
+  disabled: boolean
+  createdAt: number | null
+  updatedAt: number | null
+}
+
+export interface OrganizationOperatorsResponse {
+  operators: OrganizationOperator[]
+}
+
+export interface OrganizationAdminResponse {
+  organization: {
+    id: string
+    name: string
+    slug: string
+  }
+  actorRole: OrganizationRole
+  joinCode: string | null
+  admins: OrganizationMember[]
+}
+
+export interface RotateOrganizationJoinCodeResponse {
+  joinCode: string
+}
+
+export interface JoinOrganizationRequest {
+  code: string
+}
+
+export interface JoinOrganizationResponse {
+  organizationId: string
+  membershipId: string
+}
+
+export interface UpdateOrganizationRequest {
+  name: string
 }

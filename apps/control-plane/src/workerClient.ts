@@ -34,6 +34,20 @@ interface WorkerRuntimeAccessResponse {
   access_token: string
 }
 
+interface WorkerWorkspaceResponse {
+  id: string
+  observed_state: string
+  image: string
+  resources: {
+    memory_request_bytes: number
+    memory_limit_bytes: number
+    cpu_request: number
+    cpu_limit: number
+    pids_limit: number
+    disk_limit_bytes: number
+  }
+}
+
 export interface WorkerProvisioningResult {
   workspaceId: string
   observedState: string
@@ -44,6 +58,13 @@ export interface WorkerRuntimeAccess {
   network: string
   address: string
   accessToken: string
+}
+
+export interface WorkerWorkspaceInfo {
+  workspaceId: string
+  observedState: string
+  image: string
+  resources: WorkerWorkspaceResponse['resources']
 }
 
 export class WorkerClientError extends Error {
@@ -181,6 +202,39 @@ export class NebulaWorkerClient {
       network: payload.network,
       address: payload.address,
       accessToken: payload.access_token,
+    }
+  }
+
+  async getWorkspace({
+    workspaceId,
+    signal,
+  }: {
+    workspaceId: string
+    signal?: AbortSignal
+  }): Promise<WorkerWorkspaceInfo> {
+    const payload = await this.#request(
+      `/internal/v1/workspaces/${encodeURIComponent(workspaceId)}`,
+      { method: 'GET', signal },
+    ) as WorkerWorkspaceResponse
+    if (
+      payload?.id !== workspaceId
+      || typeof payload.observed_state !== 'string'
+      || typeof payload.image !== 'string'
+      || payload.image.trim() === ''
+      || !payload.resources
+    ) {
+      throw new WorkerClientError({
+        message: 'Worker returned invalid workspace metadata',
+        code: 'worker_invalid_workspace_metadata',
+        retryable: true,
+        status: 502,
+      })
+    }
+    return {
+      workspaceId: payload.id,
+      observedState: payload.observed_state,
+      image: payload.image,
+      resources: payload.resources,
     }
   }
 

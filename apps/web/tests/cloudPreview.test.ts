@@ -9,6 +9,7 @@ import {
 
 test('Cloud preview manifest covers every required baseline state', () => {
   expect(cloudPreviewModes).toEqual([
+    'runtime',
     'login',
     'organization',
     'startup',
@@ -26,7 +27,12 @@ test('Cloud preview transport is deterministic and backend-free', async () => {
   const transport = createCloudPreviewTransport()
 
   expect(await transport.request('/health').then(response => response.json())).toEqual({ ok: true })
-  expect(await transport.request('/chats').then(response => response.json())).toEqual({ chats: [] })
+  expect(await transport.request('/chats').then(response => response.json())).toMatchObject({
+    chats: [
+      { name: 'release-monitoring' },
+      { name: 'frontend-review' },
+    ],
+  })
   expect(await transport.request('/models').then(response => response.json())).toMatchObject({
     default_model: 'gpt-5.2-codex',
   })

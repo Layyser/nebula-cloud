@@ -46,8 +46,8 @@ export function SegmentedControl<T extends string>({
             onClick={() => onValueChange(option.value)}
             className={`relative z-10 flex h-10 cursor-pointer items-center justify-center self-center rounded-full px-4 text-center text-sm leading-none transition-colors duration-[320ms] ${
               selected
-                ? light ? 'text-black' : 'text-white'
-                : 'text-white/45 hover:text-white/80'
+                ? light ? 'text-black' : 'text-[var(--color-text-primary)]'
+                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'
             }`}
           >
             <span className={`flex w-full items-center justify-center ${index === 0 ? 'translate-x-[4%]' : '-translate-x-[4%]'}`}>

@@ -41,14 +41,14 @@ export function AuthPage({ onAuthenticated, onBack, notice }: AuthPageProps) {
   }
 
   return (
-    <div className="relative z-[2] flex min-h-screen items-center justify-center px-5 py-8 text-white">
+    <div className="relative z-[2] flex min-h-screen items-center justify-center px-5 py-8 text-[var(--color-text-primary)]">
       <div className="h-[531px] w-full max-w-[420px]">
         <div className="w-full rounded-2xl bg-[var(--color-surface-auth)] p-6 shadow-[0_32px_100px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:p-8">
           <CloudBrand onSelect={onBack} />
         <h1 className="mt-3 text-3xl font-medium tracking-[-0.04em]">
           {mode === 'sign-in' ? 'Welcome back' : 'Create your workspace'}
         </h1>
-        <p className="mt-2 text-sm leading-6 text-white/45">
+        <p className="mt-2 text-sm leading-6 text-[var(--color-text-muted)]">
           {mode === 'sign-in'
             ? 'Sign in to your organization and personal Linux workspace.'
             : 'Create your account. You can create or join an organization next.'}
@@ -65,7 +65,7 @@ export function AuthPage({ onAuthenticated, onBack, notice }: AuthPageProps) {
 
         <form onSubmit={submit} className="mt-6 space-y-4">
           {notice && (
-            <p role="status" className="rounded-xl bg-amber-300/[0.06] px-3 py-2.5 text-xs leading-5 text-amber-100/70">
+            <p role="status" className="rounded-xl bg-[var(--color-status-warning-surface)] px-3 py-2.5 text-xs leading-5 text-[var(--color-status-warning-strong)]">
               {notice}
             </p>
           )}
@@ -101,7 +101,7 @@ export function AuthPage({ onAuthenticated, onBack, notice }: AuthPageProps) {
           />
 
           {error && (
-            <p role="alert" className="rounded-xl bg-red-400/[0.07] px-3 py-2.5 text-xs leading-5 text-red-200/80">
+            <p role="alert" className="rounded-xl bg-[var(--color-status-danger-surface)] px-3 py-2.5 text-xs leading-5 text-[var(--color-status-danger-strong)]">
               {error}
             </p>
           )}
@@ -109,7 +109,7 @@ export function AuthPage({ onAuthenticated, onBack, notice }: AuthPageProps) {
           <button
             type="submit"
             disabled={submitting}
-            className="group !mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-full bg-white text-sm font-semibold text-black transition hover:bg-white/88 disabled:cursor-not-allowed disabled:opacity-55"
+            className="group !mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-full bg-[var(--color-control-primary)] text-sm font-semibold text-[var(--color-control-on-primary)] transition hover:bg-[var(--color-control-primary-hover)] disabled:cursor-not-allowed disabled:opacity-55"
           >
             {submitting ? (
               <LoaderCircle size={15} className="animate-spin" />
@@ -122,7 +122,7 @@ export function AuthPage({ onAuthenticated, onBack, notice }: AuthPageProps) {
           </button>
         </form>
 
-        <p className="mt-5 text-center text-[11px] leading-5 text-white/25">
+        <p className="mt-5 text-center text-[11px] leading-5 text-[var(--color-text-subtle)]">
           Terms and privacy pages will be added before public launch.
         </p>
         </div>
@@ -154,7 +154,7 @@ function Field({
 }: FieldProps) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-xs font-medium text-white/55">{label}</span>
+      <span className="mb-1.5 block text-xs font-medium text-[var(--color-text-muted)]">{label}</span>
       <input
         type={type}
         value={value}
@@ -163,7 +163,7 @@ function Field({
         placeholder={placeholder}
         required={required}
         minLength={minLength}
-        className="h-11 w-full rounded-xl bg-[var(--color-surface-field)] px-3.5 text-sm text-white outline-none transition placeholder:text-white/35 focus:bg-[var(--color-surface-field-focus)]"
+        className="h-11 w-full rounded-xl bg-[var(--color-surface-field)] px-3.5 text-sm text-[var(--color-text-primary)] outline-none transition placeholder:text-[var(--color-text-subtle)] focus:bg-[var(--color-surface-field-focus)]"
       />
     </label>
   )

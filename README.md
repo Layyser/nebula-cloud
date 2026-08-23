@@ -34,7 +34,7 @@ builds reproducible until it is replaced by a package-registry release.
 - The latest commercial Nebula landing from before the standalone/cloud split
 - Email/password sign-up and sign-in backed by Better Auth
 - Session-protected cloud routes and explicit sign-out
-- Organization creation, selection, memberships, roles, and invitations
+- Organization selection, roles, signed join codes, and member disable/enable
 - Membership-scoped personal workspace resolution with no browser fallback ID
 - The shared runtime workspace as the authenticated application root
 - The exact standalone New Session, Agents, Capabilities, Search, and
@@ -152,7 +152,12 @@ The Web routes remain:
 
 ```text
 /                                  commercial landing
+/plans                             pricing tiers (also /pricing redirect)
+/docs                              product and runtime documentation
+/legal                             policy documents (?document=…)
+/contact                           sales, support, and security contacts
 /login                             sign in or create an account
+/auth/callback/*                   Better Auth session resolution
 /app                               personal Operator and shared runtime UI
 ```
 

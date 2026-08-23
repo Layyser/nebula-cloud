@@ -1,5 +1,6 @@
-import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
-import { ArrowRight, Building2, LoaderCircle, Plus } from 'lucide-react'
+import { useState, type FormEvent, type ReactNode } from 'react'
+import { ArrowRight, Building2, KeyRound, LoaderCircle } from 'lucide-react'
+import type { JoinOrganizationResponse } from '@nebula-cloud/contracts'
 import { authClient } from '../../auth/authClient'
 import { AuthLoading } from '../auth/AuthLoading'
 import { CloudBrand } from '../auth/CloudBrand'
@@ -54,14 +55,9 @@ export function OrganizationSetup({
   onChanged: () => Promise<void>
   onBack: () => void
 }) {
-  const [name, setName] = useState('')
-  const [slug, setSlug] = useState('')
-  const [slugEdited, setSlugEdited] = useState(false)
+  const [code, setCode] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')
-
-  const suggestedSlug = useMemo(() => toSlug(name), [name])
-  const effectiveSlug = slugEdited ? slug : suggestedSlug
 
   const selectOrganization = async (organizationId: string) => {
     setError('')
@@ -75,36 +71,43 @@ export function OrganizationSetup({
     setBusy('')
   }
 
-  const createOrganization = async (event: FormEvent) => {
+  const joinOrganization = async (event: FormEvent) => {
     event.preventDefault()
     setError('')
-    setBusy('create')
-    const result = await authClient.organization.create({
-      name: name.trim(),
-      slug: effectiveSlug,
-    })
-    if (result.error || !result.data) {
-      setError(result.error?.message || 'Could not create the organization')
-    } else {
+    setBusy('join')
+    try {
+      const response = await fetch('/api/organizations/join', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code: code.trim() }),
+      })
+      const body = await response.json().catch(() => null) as (JoinOrganizationResponse & { error?: string }) | null
+      if (!response.ok || !body?.organizationId) {
+        throw new Error(body?.error || 'Could not join the organization')
+      }
       const activation = await authClient.organization.setActive({
-        organizationId: result.data.id,
+        organizationId: body.organizationId,
       })
       if (activation.error) {
-        setError(activation.error.message || 'Organization created, but could not be selected')
+        throw new Error(activation.error.message || 'Organization joined, but could not be selected')
       } else {
         await onChanged()
       }
+    } catch (joinError) {
+      setError(joinError instanceof Error ? joinError.message : 'Could not join the organization')
+    } finally {
+      setBusy('')
     }
-    setBusy('')
   }
 
   return (
     <div className="relative z-[2] flex min-h-screen items-center justify-center px-5 py-12 text-white">
       <div className="w-full max-w-[520px] rounded-2xl bg-[var(--color-surface-auth)] p-6 shadow-[0_32px_100px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:p-8">
         <CloudBrand onSelect={onBack} />
-        <h1 className="mt-7 text-3xl font-medium tracking-[-0.04em]">Choose your organization</h1>
+        <h1 className="mt-7 text-3xl font-medium tracking-[-0.04em]">Join your organization</h1>
         <p className="mt-2 text-sm leading-6 text-white/45">
-          Your organization owns memberships, shared capabilities, governance, and billing.
+          Select an existing membership or enter the access code provided by an administrator.
         </p>
 
         {organizations.length > 0 && (
@@ -134,53 +137,36 @@ export function OrganizationSetup({
 
         <div className="my-6 flex items-center gap-3 text-[10px] uppercase tracking-[0.15em] text-white/20">
           <span className="h-px flex-1 bg-white/[0.07]" />
-          {organizations.length ? 'or create another' : 'create your first organization'}
+          {organizations.length ? 'or join another' : 'organization access'}
           <span className="h-px flex-1 bg-white/[0.07]" />
         </div>
 
-        <form onSubmit={createOrganization} className="space-y-3">
-          <input
-            value={name}
-            onChange={event => setName(event.target.value)}
-            required
-            placeholder="Organization name"
-            className="h-11 w-full rounded-xl bg-[var(--color-surface-field)] px-3.5 text-sm text-white outline-none transition placeholder:text-white/35 focus:bg-[var(--color-surface-field-focus)]"
-          />
-          <div className="flex h-11 items-center rounded-xl bg-[var(--color-surface-field)] px-3.5 text-sm transition focus-within:bg-[var(--color-surface-field-focus)]">
-            <span className="mr-1 text-white/22">nebula.cloud/</span>
+        <form onSubmit={joinOrganization} className="space-y-3">
+          <div className="flex h-11 items-center gap-2.5 rounded-xl bg-[var(--color-surface-field)] px-3.5 text-sm transition focus-within:bg-[var(--color-surface-field-focus)]">
+            <KeyRound size={15} className="shrink-0 text-white/35" />
             <input
-              value={effectiveSlug}
-              onChange={event => {
-                setSlugEdited(true)
-                setSlug(toSlug(event.target.value))
-              }}
+              value={code}
+              onChange={event => setCode(event.target.value.toUpperCase())}
               required
-              placeholder="organization"
-              className="min-w-0 flex-1 bg-transparent text-white outline-none placeholder:text-white/20"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="NBL-XXXXXXXXXXXX-XXXXXXXXXXXX"
+              className="min-w-0 flex-1 bg-transparent font-mono text-white outline-none placeholder:text-white/25"
             />
           </div>
 
-          {error && <p role="alert" className="text-xs leading-5 text-red-200/80">{error}</p>}
+          {error && <p role="alert" className="text-xs leading-5 text-[var(--color-status-danger)]">{error}</p>}
 
           <button
             type="submit"
-            disabled={Boolean(busy) || !name.trim() || !effectiveSlug}
+            disabled={Boolean(busy) || !code.trim()}
             className="flex h-11 w-full items-center justify-center gap-2 rounded-full bg-white text-sm font-semibold text-black transition hover:bg-white/88 disabled:cursor-not-allowed disabled:opacity-55"
           >
-            {busy === 'create' ? <LoaderCircle size={15} className="animate-spin" /> : <Plus size={15} />}
-            Create organization
+            {busy === 'join' ? <LoaderCircle size={15} className="animate-spin" /> : <ArrowRight size={15} />}
+            Join organization
           </button>
         </form>
       </div>
     </div>
   )
-}
-
-function toSlug(value: string): string {
-  return value
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 48)
 }

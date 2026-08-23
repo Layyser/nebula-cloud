@@ -53,7 +53,7 @@ export function WorkspaceStartup({
                   : (
                       <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
                         complete
-                          ? 'border-emerald-300/25 bg-emerald-300/[0.08] text-emerald-300/75'
+                          ? 'border-[var(--color-border-success)] bg-[var(--color-status-success-surface)] text-[var(--color-status-success)]'
                           : 'border-white/[0.08] text-white/18'
                       }`}
                       >

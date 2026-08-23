@@ -11,7 +11,9 @@ Worker and runtime credentials never participate in browser authentication.
   resolution, then continue to `/app` or return to `/login`.
 - `/app` requires a valid session and an active organization.
 - Users without an active organization can select an existing membership or
-  create and activate a new organization.
+  join an organization with a signed join code. There is no in-app
+  organization-creation screen yet; bootstrap and admin flows create
+  organizations out of band.
 - Logout invalidates the Better Auth session and returns to `/login`.
 
 ## Expiration

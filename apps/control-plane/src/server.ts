@@ -5,12 +5,23 @@ import {
   type EnsurePersonalWorkspaceRequest,
   type EnsureWorkspaceRunningResponse,
   type HealthResponse,
+  type OperatorRuntimeResponse,
+  type OrganizationAdminResponse,
+  type OrganizationMembersResponse,
+  type OrganizationOperatorsResponse,
+  type JoinOrganizationRequest,
+  type JoinOrganizationResponse,
   type PersonalWorkspaceResponse,
   type PersonalUsageResponse,
   type OrganizationUsageResponse,
   type RestartWorkspaceResponse,
+  type RotateOrganizationJoinCodeResponse,
+  type UpdateOrganizationMemberRequest,
+  type UpdateOrganizationRequest,
 } from '@nebula-cloud/contracts'
 import {
+  OrganizationAccessDeniedError,
+  OrganizationMemberMutationError,
   UsageAccessDeniedError,
   WorkspaceMembershipNotFoundError,
 } from '@nebula-cloud/database'
@@ -18,6 +29,13 @@ import {
 const service = 'nebula-cloud-control-plane' as const
 const personalUsagePath = '/api/usage/me'
 const organizationUsagePath = /^\/api\/organizations\/([^/]+)\/usage$/
+const organizationMembersPath = /^\/api\/organizations\/([^/]+)\/members$/
+const organizationMemberPath = /^\/api\/organizations\/([^/]+)\/members\/([^/]+)$/
+const organizationOperatorsPath = /^\/api\/organizations\/([^/]+)\/operators$/
+const organizationAdminPath = /^\/api\/organizations\/([^/]+)\/admin$/
+const organizationJoinCodePath = /^\/api\/organizations\/([^/]+)\/admin\/join-code$/
+const organizationPath = /^\/api\/organizations\/([^/]+)$/
+const operatorRuntimePath = /^\/api\/workspaces\/([^/]+)\/operator$/
 
 // Workspace replacement may legitimately run for up to two minutes. Bun's
 // ten-second default would close the request while the worker was converging
@@ -47,6 +65,11 @@ export interface ControlPlaneHandlerOptions {
     userId: string
     organizationId: string
   }) => Promise<RestartWorkspaceResponse | null>
+  getOperatorRuntime?: (input: {
+    workspaceId: string
+    userId: string
+    organizationId: string
+  }) => Promise<OperatorRuntimeResponse | null>
   proxyRuntime?: (input: {
     request: Request
     workspaceId: string
@@ -66,6 +89,37 @@ export interface ControlPlaneHandlerOptions {
     since: number
     rangeDays: 7 | 30 | 90
   }) => OrganizationUsageResponse
+  getOrganizationMembers?: (input: {
+    userId: string
+    organizationId: string
+  }) => OrganizationMembersResponse
+  setOrganizationMemberDisabled?: (input: {
+    userId: string
+    organizationId: string
+    membershipId: string
+    disabled: boolean
+  }) => OrganizationMembersResponse['members'][number]
+  getOrganizationOperators?: (input: {
+    userId: string
+    organizationId: string
+  }) => OrganizationOperatorsResponse
+  getOrganizationAdmin?: (input: {
+    userId: string
+    organizationId: string
+  }) => OrganizationAdminResponse
+  rotateOrganizationJoinCode?: (input: {
+    userId: string
+    organizationId: string
+  }) => RotateOrganizationJoinCodeResponse
+  joinOrganization?: (input: {
+    userId: string
+    code: string
+  }) => JoinOrganizationResponse
+  updateOrganization?: (input: {
+    userId: string
+    organizationId: string
+    name: string
+  }) => void
   reconcileUsage?: (input: {
     userId: string
     organizationId: string
@@ -104,9 +158,17 @@ export function createControlPlaneHandler({
   ensurePersonalWorkspace,
   ensureWorkspaceRunning,
   restartWorkspace,
+  getOperatorRuntime,
   proxyRuntime,
   getPersonalUsage,
   getOrganizationUsage,
+  getOrganizationMembers,
+  setOrganizationMemberDisabled,
+  getOrganizationOperators,
+  getOrganizationAdmin,
+  rotateOrganizationJoinCode,
+  joinOrganization,
+  updateOrganization,
   reconcileUsage,
 }: ControlPlaneHandlerOptions = {}): (request: Request) => Promise<Response> {
   return async request => {
@@ -119,6 +181,158 @@ export function createControlPlaneHandler({
         code: 'auth_unavailable',
         retryable: true,
       } satisfies CloudErrorResponse, 503)
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/organizations/join') {
+      const session = resolveSession ? await resolveSession(request) : null
+      if (!session) {
+        return json({ error: 'authentication required', code: 'authentication_required' } satisfies CloudErrorResponse, 401)
+      }
+      if (!joinOrganization) {
+        return json({ error: 'organization joining is unavailable', code: 'organization_join_unavailable', retryable: true } satisfies CloudErrorResponse, 503)
+      }
+      let body: JoinOrganizationRequest
+      try {
+        body = await request.json() as JoinOrganizationRequest
+      } catch {
+        return json({ error: 'request body must be valid JSON', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+      }
+      if (typeof body.code !== 'string' || !body.code.trim()) {
+        return json({ error: 'organization code is required', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+      }
+      try {
+        return json(joinOrganization({ userId: session.userId, code: body.code }))
+      } catch (error) {
+        if (error instanceof OrganizationMemberMutationError) {
+          return json({ error: error.message, code: error.code } satisfies CloudErrorResponse, 400)
+        }
+        return json({ error: 'organization could not be joined', code: 'organization_join_failed' } satisfies CloudErrorResponse, 500)
+      }
+    }
+
+    const membersMatch = url.pathname.match(organizationMembersPath)
+    const memberMatch = url.pathname.match(organizationMemberPath)
+    const operatorsMatch = url.pathname.match(organizationOperatorsPath)
+    const adminMatch = url.pathname.match(organizationAdminPath)
+    const joinCodeMatch = url.pathname.match(organizationJoinCodePath)
+    const organizationMatch = url.pathname.match(organizationPath)
+    if (
+      membersMatch || memberMatch || operatorsMatch || adminMatch
+      || joinCodeMatch || (organizationMatch && request.method === 'PATCH')
+    ) {
+      const session = resolveSession ? await resolveSession(request) : null
+      if (!session) {
+        return json({ error: 'authentication required', code: 'authentication_required' } satisfies CloudErrorResponse, 401)
+      }
+      const encodedOrganizationId = (
+        membersMatch?.[1] ?? memberMatch?.[1] ?? operatorsMatch?.[1]
+        ?? adminMatch?.[1] ?? joinCodeMatch?.[1] ?? organizationMatch?.[1]
+      )!
+      let organizationId: string
+      try {
+        organizationId = decodeURIComponent(encodedOrganizationId)
+      } catch {
+        return json({ error: 'organization id is invalid', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+      }
+      if (session.activeOrganizationId !== organizationId) {
+        return json({ error: 'organization access denied', code: 'organization_access_denied' } satisfies CloudErrorResponse, 403)
+      }
+      try {
+        if (request.method === 'GET' && membersMatch && getOrganizationMembers) {
+          return json(getOrganizationMembers({ userId: session.userId, organizationId }))
+        }
+        if (request.method === 'PATCH' && memberMatch && setOrganizationMemberDisabled) {
+          let membershipId: string
+          try {
+            membershipId = decodeURIComponent(memberMatch[2])
+          } catch {
+            return json({ error: 'membership id is invalid', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+          }
+          const body = await request.json() as UpdateOrganizationMemberRequest
+          if (typeof body.disabled !== 'boolean') {
+            return json({ error: 'disabled must be a boolean', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+          }
+          return json(setOrganizationMemberDisabled({
+            userId: session.userId,
+            organizationId,
+            membershipId,
+            disabled: body.disabled,
+          }))
+        }
+        if (request.method === 'GET' && operatorsMatch && getOrganizationOperators) {
+          return json(getOrganizationOperators({ userId: session.userId, organizationId }))
+        }
+        if (request.method === 'GET' && adminMatch && getOrganizationAdmin) {
+          return json(getOrganizationAdmin({ userId: session.userId, organizationId }))
+        }
+        if (request.method === 'POST' && joinCodeMatch && rotateOrganizationJoinCode) {
+          return json(rotateOrganizationJoinCode({ userId: session.userId, organizationId }))
+        }
+        if (request.method === 'PATCH' && organizationMatch && updateOrganization) {
+          const body = await request.json() as UpdateOrganizationRequest
+          if (typeof body.name !== 'string') {
+            return json({ error: 'organization name is required', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+          }
+          updateOrganization({ userId: session.userId, organizationId, name: body.name })
+          return json({ organizationId, name: body.name.trim() })
+        }
+        return json({ error: 'route not found', code: 'not_found' } satisfies CloudErrorResponse, 404)
+      } catch (error) {
+        if (error instanceof OrganizationAccessDeniedError) {
+          return json({ error: error.message, code: error.code } satisfies CloudErrorResponse, 403)
+        }
+        if (error instanceof OrganizationMemberMutationError) {
+          return json({ error: error.message, code: error.code } satisfies CloudErrorResponse, 400)
+        }
+        return json({ error: 'organization operation failed', code: 'organization_operation_failed' } satisfies CloudErrorResponse, 500)
+      }
+    }
+
+    const operatorMatch = url.pathname.match(operatorRuntimePath)
+    if (request.method === 'GET' && operatorMatch) {
+      const session = resolveSession ? await resolveSession(request) : null
+      if (!session) {
+        return json({
+          error: 'authentication required',
+          code: 'authentication_required',
+        } satisfies CloudErrorResponse, 401)
+      }
+      if (!session.activeOrganizationId || !getOperatorRuntime) {
+        return json({
+          error: 'operator metadata is unavailable',
+          code: 'operator_metadata_unavailable',
+          retryable: true,
+        } satisfies CloudErrorResponse, 503)
+      }
+      let workspaceId: string
+      try {
+        workspaceId = decodeURIComponent(operatorMatch[1])
+      } catch {
+        return json({
+          error: 'invalid workspace id',
+          code: 'invalid_request',
+        } satisfies CloudErrorResponse, 400)
+      }
+      try {
+        const operator = await getOperatorRuntime({
+          workspaceId,
+          userId: session.userId,
+          organizationId: session.activeOrganizationId,
+        })
+        if (!operator) {
+          return json({
+            error: 'operator not found',
+            code: 'operator_not_found',
+          } satisfies CloudErrorResponse, 404)
+        }
+        return json(operator)
+      } catch {
+        return json({
+          error: 'operator metadata could not be loaded',
+          code: 'operator_metadata_failed',
+          retryable: true,
+        } satisfies CloudErrorResponse, 503)
+      }
     }
 
     if (request.method === 'GET' && url.pathname === personalUsagePath) {

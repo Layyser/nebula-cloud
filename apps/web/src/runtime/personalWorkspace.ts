@@ -1,6 +1,7 @@
 import type {
   CloudErrorResponse,
   EnsureWorkspaceRunningResponse,
+  OperatorRuntimeResponse,
   PersonalWorkspaceResponse,
   RestartWorkspaceResponse,
 } from '@nebula-cloud/contracts'
@@ -96,6 +97,30 @@ export async function restartWorkspace(
   const payload = await response.json() as RestartWorkspaceResponse
   if (payload.workspaceId !== workspaceId || payload.state !== 'ready') {
     throw new Error('Control plane returned an invalid restart response')
+  }
+  return payload
+}
+
+export async function getOperatorRuntime(
+  workspaceId: string,
+  {
+    fetch: request = globalThis.fetch,
+    onSessionExpired = notifySessionExpired,
+  }: CloudRequestOptions = {},
+): Promise<OperatorRuntimeResponse> {
+  const response = observeAuthenticationResponse(await request(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/operator`,
+    { credentials: 'include' },
+  ), onSessionExpired)
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => null) as CloudErrorResponse | null
+    throw new Error(error?.error || `Operator metadata request failed (${response.status})`)
+  }
+
+  const payload = await response.json() as OperatorRuntimeResponse
+  if (!payload.workspaceId || !payload.resources) {
+    throw new Error('Control plane returned invalid operator metadata')
   }
   return payload
 }

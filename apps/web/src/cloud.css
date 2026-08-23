@@ -14,6 +14,99 @@ button:not(:disabled) {
   cursor: pointer;
 }
 
+.public-page-plain {
+  color-scheme: dark light;
+}
+
+.docs-markdown,
+.legal-markdown {
+  color: var(--color-text-secondary);
+}
+
+.legal-markdown > :first-child {
+  margin-top: 0;
+}
+
+.docs-markdown h2 {
+  margin-top: 2.125rem;
+  margin-bottom: 0.7rem;
+  font-size: 1.4rem;
+  line-height: 1.25;
+}
+
+.docs-markdown > h2:first-child {
+  margin-top: 1.75rem;
+}
+
+.docs-markdown h3 {
+  margin-top: 1.6rem;
+  margin-bottom: 0.55rem;
+  font-size: 1.08rem;
+}
+
+@media (min-width: 640px) {
+  .docs-markdown h2 {
+    font-size: 1.55rem;
+  }
+
+  .docs-markdown h3 {
+    font-size: 1.18rem;
+  }
+}
+
+.docs-markdown p + p {
+  margin-top: 1rem;
+}
+
+.docs-markdown p + ul,
+.docs-markdown p + ol {
+  margin-top: 0.75rem;
+}
+
+.docs-markdown ul + p,
+.docs-markdown ol + p {
+  margin-top: 1rem;
+}
+
+.docs-markdown pre,
+.docs-markdown blockquote {
+  margin-top: 1.125rem;
+}
+
+.docs-markdown .markdown-table {
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.legal-markdown h2 {
+  margin-top: 2.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.legal-markdown h3 {
+  margin-top: 1.9rem;
+  margin-bottom: 1rem;
+}
+
+.legal-markdown p + p,
+.legal-markdown p + ul,
+.legal-markdown p + ol,
+.legal-markdown ul + p,
+.legal-markdown ol + p,
+.legal-markdown blockquote {
+  margin-top: 1.35rem;
+}
+
+.legal-markdown pre,
+.legal-markdown .markdown-table {
+  margin-top: 1.5rem;
+}
+
+.legal-markdown hr,
+.docs-markdown hr {
+  margin: 3rem 0;
+}
+
 html:has(.landing-page) {
   scrollbar-color: rgb(178 186 194 / 62%) transparent;
   scrollbar-width: auto;
@@ -41,10 +134,120 @@ html:has(.landing-page)::-webkit-scrollbar-thumb:hover {
   --color-surface-field: rgb(40 40 40 / 50%);
   --color-surface-field-focus: rgb(40 40 40 / 50%);
   --color-surface-field-autofill: rgb(40 40 40 / 50%);
-  --color-surface-segment: rgb(0 0 0 / 25%);
-  --color-surface-segment-selected: #252525;
+  --color-surface-segment: #151515;
+  --color-surface-segment-selected: #2b2b2b;
   --color-surface-diagram-node: #161616;
   --color-surface-diagram-node-hover: #1d1d1d;
+  --color-surface-header-scrolled: rgb(8 9 9 / 72%);
+  --color-surface-footer: #292929;
+  --color-diagram-accent: #7dd3fc;
+  --color-diagram-icon: rgb(224 242 254 / 85%);
+  --color-diagram-active-surface: rgb(186 230 253 / 18%);
+  --color-diagram-active-border: rgb(186 230 253 / 48%);
+  --shadow-diagram-active: 0 18px 70px rgb(56 189 248 / 28%), 0 0 40px rgb(125 211 252 / 26%);
+  --filter-diagram-active-icon: drop-shadow(0 0 14px rgb(56 189 248 / 65%));
+  --color-tui-accent: #5fafff;
+  --color-tui-accent-strong: #afd7ff;
+  --color-tui-hooks: #87d7d7;
+  --color-tui-github: #7aa2c8;
+}
+
+html[data-theme='light'] {
+  --color-surface-segment: #e7e7e7;
+  --color-surface-segment-selected: #ffffff;
+  --color-surface-header-scrolled: rgb(245 245 245 / 82%);
+  --color-surface-footer: #e3e3e3;
+  --color-diagram-accent: #075985;
+  --color-diagram-icon: #075985;
+  --color-diagram-active-surface: rgb(3 105 161 / 13%);
+  --color-diagram-active-border: rgb(3 105 161 / 44%);
+  --shadow-diagram-active: 0 18px 58px rgb(3 105 161 / 18%), 0 0 30px rgb(3 105 161 / 14%);
+  --filter-diagram-active-icon: drop-shadow(0 0 10px rgb(3 105 161 / 30%));
+  --color-tui-accent: #075985;
+  --color-tui-accent-strong: #0c4a6e;
+  --color-tui-hooks: #0f766e;
+  --color-tui-github: #1d4ed8;
+}
+
+.diagram-node-base {
+  background-color: var(--color-surface-diagram-node);
+  color: var(--color-diagram-icon);
+}
+
+.diagram-node-base:hover {
+  border-color: var(--color-diagram-active-border);
+  background-color: var(--color-surface-diagram-node-hover);
+}
+
+.diagram-node-active {
+  border-color: var(--color-diagram-active-border);
+  background-color: var(--color-diagram-active-surface);
+  color: var(--color-diagram-icon);
+  box-shadow: var(--shadow-diagram-active);
+}
+
+.diagram-node-active :is(img, svg) {
+  filter: var(--filter-diagram-active-icon);
+}
+
+.diagram-monochrome-icon {
+  filter: brightness(0) invert(1);
+}
+
+.diagram-node-active .diagram-monochrome-icon {
+  filter: brightness(0) invert(1) var(--filter-diagram-active-icon);
+}
+
+html[data-theme='light'] .diagram-monochrome-icon {
+  filter: brightness(0);
+}
+
+html[data-theme='light'] .diagram-node-active .diagram-monochrome-icon {
+  filter: brightness(0) var(--filter-diagram-active-icon);
+}
+
+.landing-page [stroke="#7dd3fc"] {
+  stroke: var(--color-diagram-accent);
+}
+
+.landing-page [fill="#7dd3fc"] {
+  fill: var(--color-diagram-accent);
+}
+
+.page-shader-vignette {
+  background: radial-gradient(circle at 66% 40%, transparent 0%, rgb(5 6 7 / 8%) 28%, rgb(5 6 7 / 76%) 78%);
+}
+
+.final-cta-copy-blob {
+  background: radial-gradient(
+    ellipse at center,
+    rgb(0 0 0 / 88%) 0%,
+    rgb(0 0 0 / 66%) 36%,
+    rgb(0 0 0 / 24%) 64%,
+    transparent 80%
+  );
+}
+
+/* The shared page shader fades into the document at its bottom edge. This
+   contained CTA is already clipped by its rounded shell, so it must render
+   edge-to-edge instead. */
+.final-cta-shader .nebula-scroll-canvas {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+html[data-theme='light'] .page-shader-vignette {
+  background: radial-gradient(circle at 66% 40%, transparent 0%, rgb(250 250 250 / 20%) 28%, rgb(245 245 245 / 82%) 78%);
+}
+
+html[data-theme='light'] .final-cta-copy-blob {
+  background: radial-gradient(
+    ellipse at center,
+    rgb(255 255 255 / 90%) 0%,
+    rgb(255 255 255 / 68%) 36%,
+    rgb(255 255 255 / 24%) 64%,
+    transparent 80%
+  );
 }
 
 html.runtime-embed-document,
@@ -62,6 +265,13 @@ input:-webkit-autofill:focus {
   transition: background-color 9999s ease-out;
 }
 
+html[data-theme='light'] input:-webkit-autofill,
+html[data-theme='light'] input:-webkit-autofill:hover,
+html[data-theme='light'] input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--color-text-primary);
+  caret-color: var(--color-text-primary);
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
@@ -73,6 +283,12 @@ input:-webkit-autofill:focus {
     linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
   background-size: 48px 48px;
+}
+
+html[data-theme='light'] .cloud-grid {
+  background-image:
+    linear-gradient(rgb(0 0 0 / 2.5%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(0 0 0 / 2.5%) 1px, transparent 1px);
 }
 
 .hero-copy-blob {
@@ -94,6 +310,13 @@ input:-webkit-autofill:focus {
   filter: blur(44px);
   opacity: 0.94;
   transform: rotate(-2deg) scale(1.04);
+}
+
+html[data-theme='light'] .hero-copy-blob::before {
+  background:
+    radial-gradient(ellipse 60% 54% at 28% 30%, rgb(255 255 255 / 96%) 0%, rgb(255 255 255 / 80%) 38%, rgb(255 255 255 / 38%) 68%, transparent 100%),
+    radial-gradient(ellipse 70% 62% at 61% 63%, rgb(255 255 255 / 90%) 0%, rgb(255 255 255 / 66%) 40%, rgb(255 255 255 / 28%) 70%, transparent 100%),
+    radial-gradient(ellipse 42% 48% at 91% 38%, rgb(255 255 255 / 72%) 0%, rgb(255 255 255 / 40%) 44%, rgb(255 255 255 / 14%) 72%, transparent 100%);
 }
 
 .hero-title-accent {
@@ -179,12 +402,16 @@ input:-webkit-autofill:focus {
   );
 }
 
-/* The final CTA clips the shader itself, so it should reach every rounded edge. */
-.final-cta-shader > .nebula-scroll-canvas {
-  -webkit-mask-image: none;
-  mask-image: none;
-  transform: scale(1.55);
-  transform-origin: center;
+html[data-theme='light'] .landing-shader-fade {
+  background: linear-gradient(
+    to top,
+    var(--color-surface-page) 0%,
+    rgb(245 245 245 / 92%) 10%,
+    rgb(245 245 245 / 65%) 23%,
+    rgb(245 245 245 / 25%) 38%,
+    rgb(245 245 245 / 5%) 49%,
+    transparent 65%
+  );
 }
 
 .landing-header::before {
@@ -198,6 +425,15 @@ input:-webkit-autofill:focus {
   background: radial-gradient(ellipse 58% 92% at 50% -18%, rgba(3, 4, 5, 0.82) 0%, rgba(3, 4, 5, 0.46) 52%, transparent 100%);
 }
 
+html[data-theme='light'] .landing-header::before {
+  background: radial-gradient(
+    ellipse 58% 92% at 50% -18%,
+    rgb(255 255 255 / 88%) 0%,
+    rgb(255 255 255 / 54%) 52%,
+    transparent 100%
+  );
+}
+
 /* Keep the no-WebGL fallback anchored like the animated canvas, but give it the same layered depth. */
 .nebula-static-fallback {
   position: absolute;
@@ -208,7 +444,7 @@ input:-webkit-autofill:focus {
   width: 100%;
   height: 100dvh;
   overflow: hidden;
-  background-color: #060708;
+  background-color: #040404;
   background-image:
     radial-gradient(ellipse 13px 1px at 12% 18%, rgba(238, 246, 255, 0.62) 0%, transparent 100%),
     radial-gradient(ellipse 1px 13px at 12% 18%, rgba(238, 246, 255, 0.62) 0%, transparent 100%),

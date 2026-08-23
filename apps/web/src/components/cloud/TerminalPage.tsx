@@ -3,10 +3,15 @@ import {
   Button,
   ContentContainer,
   PageHeader,
+  StatusDot,
+  Tabs,
+  TabsList,
+  TabsTrigger,
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
+  useThemePreference,
 } from '@nebula/runtime-ui'
 import { Plus, RefreshCw, X } from 'lucide-react'
 import { Terminal } from '@xterm/xterm'
@@ -18,6 +23,24 @@ type TerminalStatus = 'connecting' | 'connected' | 'closed' | 'error'
 interface TerminalTab {
   id: string
   label: string
+}
+
+function terminalTheme(theme: 'dark' | 'light') {
+  return theme === 'light'
+    ? {
+        background: '#f5f5f5', foreground: '#2f3438', cursor: '#181818', cursorAccent: '#f5f5f5',
+        selectionBackground: '#cbd5e1', black: '#202124', red: '#b91c1c', green: '#047857',
+        yellow: '#a16207', blue: '#0369a1', magenta: '#7e22ce', cyan: '#0e7490', white: '#e5e7eb',
+        brightBlack: '#6b7280', brightRed: '#dc2626', brightGreen: '#059669', brightYellow: '#ca8a04',
+        brightBlue: '#0284c7', brightMagenta: '#9333ea', brightCyan: '#0891b2', brightWhite: '#ffffff',
+      }
+    : {
+        background: '#080808', foreground: '#d4d4d4', cursor: '#f4f4f5', cursorAccent: '#080808',
+        selectionBackground: '#3f3f46', black: '#18181b', red: '#ef4444', green: '#22c55e',
+        yellow: '#eab308', blue: '#60a5fa', magenta: '#c084fc', cyan: '#22d3ee', white: '#e4e4e7',
+        brightBlack: '#71717a', brightRed: '#f87171', brightGreen: '#4ade80', brightYellow: '#facc15',
+        brightBlue: '#93c5fd', brightMagenta: '#d8b4fe', brightCyan: '#67e8f9', brightWhite: '#fafafa',
+      }
 }
 
 function consoleURL(workspaceId: string, terminalId: string, rows: number, columns: number): string {
@@ -69,8 +92,14 @@ function TerminalSession({
   const terminalRef = useRef<Terminal | null>(null)
   const activeRef = useRef(active)
   const [status, setStatus] = useState<TerminalStatus>('connecting')
+  const { resolvedTheme } = useThemePreference()
+  const initialThemeRef = useRef(resolvedTheme)
 
   useEffect(() => onStatus(status), [onStatus, status])
+
+  useEffect(() => {
+    if (terminalRef.current) terminalRef.current.options.theme = terminalTheme(resolvedTheme)
+  }, [resolvedTheme])
 
   useEffect(() => {
     activeRef.current = active
@@ -96,13 +125,7 @@ function TerminalSession({
       fontWeight: '400',
       lineHeight: 1.25,
       scrollback: 5000,
-      theme: {
-        background: '#080808', foreground: '#d4d4d4', cursor: '#f4f4f5', cursorAccent: '#080808',
-        selectionBackground: '#3f3f46', black: '#18181b', red: '#ef4444', green: '#22c55e',
-        yellow: '#eab308', blue: '#60a5fa', magenta: '#c084fc', cyan: '#22d3ee', white: '#e4e4e7',
-        brightBlack: '#71717a', brightRed: '#f87171', brightGreen: '#4ade80', brightYellow: '#facc15',
-        brightBlue: '#93c5fd', brightMagenta: '#d8b4fe', brightCyan: '#67e8f9', brightWhite: '#fafafa',
-      },
+      theme: terminalTheme(initialThemeRef.current),
     })
     terminalRef.current = terminal
     const fit = new FitAddon()
@@ -185,7 +208,7 @@ function TerminalSession({
   }, [previewOutput, retryToken, terminalId, workspaceId])
 
   return (
-    <div className={`terminal-session absolute inset-0 bg-[#080808] ${active ? 'visible z-10' : 'invisible z-0'}`}>
+    <div className={`terminal-session absolute inset-0 bg-[var(--color-surface-page)] ${active ? 'visible z-10' : 'invisible z-0'}`}>
       <div ref={containerRef} className="h-full w-full" />
     </div>
   )
@@ -241,18 +264,17 @@ export function TerminalPage({
   ])), [tabs])
 
   return (
-    <section className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[#080808] text-white">
+    <section className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[var(--color-surface-page)] text-[var(--color-text-primary)]">
       <ContentContainer gutter="workspace" spacing="none" width="workspace" className="shrink-0 pt-8">
         <PageHeader
           title="Terminal"
-          description="Direct shell access to /home/nebula/workspace."
-          spacing="compact"
+          description="Direct shell access to your persistent environment."
           action={(
             <div className="flex min-h-9 items-center gap-2.5">
-              <span aria-hidden="true" className={`size-1.5 rounded-full ${
-                activeStatus === 'connected' ? 'bg-emerald-400/70'
-                  : activeStatus === 'connecting' ? 'animate-pulse bg-amber-300/65' : 'bg-red-400/65'
-              }`} />
+              <StatusDot
+                tone={activeStatus === 'connected' ? 'success' : activeStatus === 'connecting' ? 'warning' : 'danger'}
+                className={activeStatus === 'connecting' ? 'animate-pulse' : undefined}
+              />
               <span className="text-xs text-white/40">
                 {activeStatus === 'connected' ? 'Connected'
                   : activeStatus === 'connecting' ? 'Connecting' : 'Disconnected'}
@@ -266,61 +288,61 @@ export function TerminalPage({
             </div>
           )}
         />
-        <div className="terminal-tabs mt-5 flex min-w-0 items-end gap-1 overflow-x-auto" role="tablist" aria-label="Terminals">
-          {tabs.map(tab => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={activeId === tab.id}
-              onClick={() => setActiveId(tab.id)}
-              className={`group flex h-9 shrink-0 cursor-pointer items-center gap-2 rounded-t-lg py-0 text-xs transition-colors ${
-                tabs.length > 1 ? 'pl-3 pr-2' : 'px-3'
-              } ${
-                activeId === tab.id ? 'bg-white/[0.09] text-white' : 'text-white/45 hover:bg-white/[0.045] hover:text-white/75'
-              }`}
-            >
-              <span>{tab.label}</span>
-              {tabs.length > 1 && (
-                <span
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`Close ${tab.label}`}
-                  onClick={event => { event.stopPropagation(); closeTerminal(tab.id) }}
-                  onKeyDown={event => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault()
-                      event.stopPropagation()
-                      closeTerminal(tab.id)
-                    }
-                  }}
-                  className="grid size-5 cursor-pointer place-items-center rounded-full text-white/30 transition-colors hover:bg-white/10 hover:text-white/80"
-                >
-                  <X size={12} />
-                </span>
-              )}
-            </button>
-          ))}
-          <TooltipProvider delayDuration={250}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  aria-label="New terminal"
-                  disabled={tabs.length >= 8}
-                  onClick={addTerminal}
-                  className="mb-1 grid size-8 shrink-0 cursor-pointer place-items-center rounded-full text-white/45 transition-colors hover:bg-white/[0.07] hover:text-white disabled:cursor-not-allowed disabled:opacity-25"
-                >
-                  <Plus size={15} />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top">New terminal</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        </div>
+        <Tabs value={activeId} onValueChange={setActiveId}>
+          <TabsList
+            aria-label="Terminals"
+            variant="panel"
+            size="default"
+            className="terminal-tabs mb-5"
+          >
+            {tabs.map(tab => (
+              <TabsTrigger
+                key={tab.id}
+                value={tab.id}
+                className={tabs.length > 1 ? 'gap-1 pl-3 pr-1.5' : 'px-3'}
+              >
+                <span>{tab.label}</span>
+                {tabs.length > 1 && (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Close ${tab.label}`}
+                    onClick={event => { event.stopPropagation(); closeTerminal(tab.id) }}
+                    onKeyDown={event => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        closeTerminal(tab.id)
+                      }
+                    }}
+                    className="grid size-5 cursor-pointer place-items-center rounded-full text-[var(--color-text-disabled)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
+                  >
+                    <X size={12} />
+                  </span>
+                )}
+              </TabsTrigger>
+            ))}
+            <TooltipProvider delayDuration={250}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="New terminal"
+                    disabled={tabs.length >= 8}
+                    onClick={addTerminal}
+                    className="grid h-full w-9 shrink-0 cursor-pointer place-items-center text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-25"
+                  >
+                    <Plus size={15} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">New terminal</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </TabsList>
+        </Tabs>
       </ContentContainer>
-      <ContentContainer gutter="workspace" spacing="none" width="workspace" className="min-h-0 flex-1 pb-8 pt-2">
-        <div className="relative h-full w-full overflow-hidden bg-[#080808]">
+      <ContentContainer gutter="workspace" spacing="none" width="workspace" className="min-h-0 flex-1 pb-8">
+        <div className="relative h-full w-full overflow-hidden bg-[var(--color-surface-page)]">
           {tabs.map(tab => (
             <TerminalSession
               key={tab.id}

@@ -8,6 +8,7 @@ import type {
 import {
   Button,
   ContentContainer,
+  IconButton,
   PageHeader,
   Surface,
   Tabs,
@@ -18,7 +19,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@nebula/runtime-ui'
-import { CircleAlert, RefreshCw } from 'lucide-react'
+import { CircleAlert, RefreshCw, X } from 'lucide-react'
 import { BsAnthropic, BsOpenai } from 'react-icons/bs'
 import { SiX } from 'react-icons/si'
 import { FcGoogle } from 'react-icons/fc'
@@ -29,6 +30,7 @@ interface DashboardProps {
   userKey: string
   organizationId: string
   organizationName: string
+  onClose?: () => void
 }
 
 type ReadyUsageState = {
@@ -47,14 +49,23 @@ type UsageMetric = 'cost' | 'tokens'
 type BreakdownMode = 'model' | 'day' | 'sessions'
 
 const MODEL_COLORS = [
-  '#83c9f4',
-  '#ef8f68',
-  '#9bd27f',
-  '#bba0e8',
-  '#e7c76f',
-  '#70cbc1',
-  '#dc8da9',
+  'var(--color-data-series-1)',
+  'var(--color-data-series-2)',
+  'var(--color-data-series-3)',
+  'var(--color-data-series-4)',
+  'var(--color-data-series-5)',
+  'var(--color-data-series-6)',
+  'var(--color-data-series-7)',
 ] as const
+
+const OpenCodeIcon: IconType = props => (
+  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+    <path
+      d="M19.4004 21H5V3H19.4004V6.59961H8.59961V17.4004H15.7998V13.7998H12.2002V10.2002H19.4004V21Z"
+      fill="currentColor"
+    />
+  </svg>
+)
 
 const usageSnapshotCache = new Map<string, ReadyUsageState>()
 
@@ -62,8 +73,10 @@ function usageSnapshotKey(userKey: string, organizationId: string, rangeDays: Us
   return `${userKey}:${organizationId}:${rangeDays}`
 }
 
-export function Dashboard({ userKey, organizationId, organizationName }: DashboardProps) {
+export function Dashboard({ userKey, organizationId, organizationName, onClose }: DashboardProps) {
   const [rangeDays, setRangeDays] = useState<UsageRange>(30)
+  const [metric, setMetric] = useState<UsageMetric>('tokens')
+  const [breakdownMode, setBreakdownMode] = useState<BreakdownMode>('model')
   const [usage, setUsage] = useState<UsageState>(() => (
     usageSnapshotCache.get(usageSnapshotKey(userKey, organizationId, 30))
       ?? { status: 'loading' }
@@ -169,6 +182,11 @@ export function Dashboard({ userKey, organizationId, organizationName }: Dashboa
                 />
                 Refresh
               </Button>
+              {onClose && (
+                <IconButton label="Back to Dashboard" variant="primary" onClick={onClose}>
+                  <X size={16} />
+                </IconButton>
+              )}
             </div>
           )}
         />
@@ -188,6 +206,10 @@ export function Dashboard({ userKey, organizationId, organizationName }: Dashboa
               personal={usage.personal}
               organization={usage.organization}
               organizationName={organizationName}
+              metric={metric}
+              onMetricChange={setMetric}
+              breakdownMode={breakdownMode}
+              onBreakdownModeChange={setBreakdownMode}
             />
           </motion.div>
         )}
@@ -200,28 +222,33 @@ function UsageOverview({
   personal,
   organization,
   organizationName,
+  metric,
+  onMetricChange,
+  breakdownMode,
+  onBreakdownModeChange,
 }: {
   personal: PersonalUsageResponse
   organization: OrganizationUsageResponse | null
   organizationName: string
+  metric: UsageMetric
+  onMetricChange: (metric: UsageMetric) => void
+  breakdownMode: BreakdownMode
+  onBreakdownModeChange: (mode: BreakdownMode) => void
 }) {
-  const [metric, setMetric] = useState<UsageMetric>('tokens')
-  const [breakdownMode, setBreakdownMode] = useState<BreakdownMode>('model')
-
   return (
     <TooltipProvider delayDuration={250}>
       <div className="space-y-10">
       <section className="grid gap-10 pt-5 lg:h-[360px] lg:grid-cols-[minmax(260px,0.72fr)_minmax(0,1.28fr)]">
         <div className="flex max-h-[430px] min-h-0 flex-col overflow-hidden lg:h-full lg:max-h-none">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-text-subtle)]">
             {metric === 'cost' ? 'Estimated model cost' : 'Processed tokens'}
           </p>
-          <p className="mt-2 text-[clamp(2rem,3.4vw,3rem)] font-medium leading-none tracking-[-0.05em] text-white/95">
+          <p className="mt-2 text-[clamp(2rem,3.4vw,3rem)] font-medium leading-none tracking-[-0.05em] text-[var(--color-text-primary)]">
             {metric === 'cost'
               ? `${formatCurrencyMicrousd(personal.totals.estimatedCostMicrousd)}*`
               : formatCompactNumber(personal.totals.totalTokens)}
           </p>
-          <p className="mt-3 text-xs text-white/38">
+          <p className="mt-3 text-xs text-[var(--color-text-muted)]">
             {metric === 'cost'
               ? '* Estimated at public API rates.'
               : `Across ${formatNumber(personal.sessions.length)} active ${plural(personal.sessions.length, 'session', 'sessions')}`}
@@ -236,7 +263,7 @@ function UsageOverview({
           models={personal.models}
           rangeDays={personal.rangeDays}
           metric={metric}
-          onMetricChange={setMetric}
+          onMetricChange={onMetricChange}
         />
       </section>
 
@@ -247,8 +274,8 @@ function UsageOverview({
 
       <section>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
-          <h2 className="text-base font-semibold text-white/88">Breakdown</h2>
-          <Tabs value={breakdownMode} onValueChange={value => setBreakdownMode(value as BreakdownMode)}>
+          <h2 className="text-base font-semibold text-[var(--color-text-primary)]">Breakdown</h2>
+          <Tabs value={breakdownMode} onValueChange={value => onBreakdownModeChange(value as BreakdownMode)}>
             <TabsList aria-label="Group usage by" variant="panel" size="compact">
               <TabsTrigger value="model" className="min-w-20 px-3">Model</TabsTrigger>
               <TabsTrigger value="day" className="min-w-20 px-3">Day</TabsTrigger>
@@ -262,8 +289,8 @@ function UsageOverview({
       {organization && (
         <section>
           <div className="mb-4">
-            <h2 className="text-base font-semibold text-white/88">{organizationName}</h2>
-            <p className="mt-1 text-xs text-white/38">Usage across organization members.</p>
+            <h2 className="text-base font-semibold text-[var(--color-text-primary)]">{organizationName}</h2>
+            <p className="mt-1 text-xs text-[var(--color-text-muted)]">Usage across organization members.</p>
           </div>
           <MemberTable
             members={organization.members}
@@ -287,7 +314,7 @@ function ModelShares({ models, totals, metric }: {
     <div className="relative mt-8 min-h-0 flex-1 overflow-hidden">
       <div className="h-full space-y-6 overflow-y-auto pb-9 pr-5 [mask-image:linear-gradient(to_bottom,#000_0%,#000_calc(100%-2.25rem),transparent_100%)]">
         {models.length === 0 ? (
-          <p className="text-xs text-white/30">Model distribution will appear after the first turn.</p>
+          <p className="text-xs text-[var(--color-text-subtle)]">Model distribution will appear after the first turn.</p>
         ) : models.map(model => {
           const value = metric === 'cost' ? model.estimatedCostMicrousd : model.totalTokens
           const percentage = total > 0 ? Math.min(100, (value / total) * 100) : 0
@@ -296,19 +323,19 @@ function ModelShares({ models, totals, metric }: {
             <div key={`${model.provider}:${model.model}`}>
               <div className="flex items-center justify-between gap-4 text-sm">
                 <ProviderModelLabel provider={model.provider} model={model.model} />
-                <span className="shrink-0 tabular-nums text-white/88">
+                <span className="shrink-0 tabular-nums text-[var(--color-text-primary)]">
                   {metric === 'cost'
                     ? formatCurrencyMicrousd(value)
                     : formatCompactNumber(value)}
                 </span>
               </div>
-              <div className="mt-2.5 h-1 overflow-hidden rounded-full bg-white/[0.06]">
+              <div className="mt-2.5 h-1 overflow-hidden rounded-full bg-[var(--color-surface-selected)]">
                 <div
                   className="h-full rounded-full transition-[width] duration-300"
                   style={{ width: `${percentage}%`, backgroundColor: color }}
                 />
               </div>
-              <p className="mt-1.5 text-[11px] text-white/35">
+              <p className="mt-1.5 text-[11px] text-[var(--color-text-subtle)]">
                 {percentage.toFixed(1)}% of {metric === 'cost' ? 'cost' : 'processed tokens'}
                 {' · '}{formatCompactNumber(model.totalTokens)} tokens
               </p>
@@ -327,6 +354,13 @@ function providerPresentation(provider: string, model: string): {
 } {
   const providerIdentity = provider.trim().toLowerCase()
   const identity = `${provider} ${model}`.toLowerCase()
+  if (
+    providerIdentity.includes('opencode')
+    || identity.includes('opencode-go/')
+    || identity.includes('opencode go')
+  ) {
+    return { icon: OpenCodeIcon, color: 'var(--color-text-primary)', label: 'OpenCode' }
+  }
   if (identity.includes('anthropic') || identity.includes('claude')) {
     return { icon: BsAnthropic, color: '#d97757', label: 'Anthropic' }
   }
@@ -334,12 +368,12 @@ function providerPresentation(provider: string, model: string): {
     return { icon: FcGoogle, label: 'Google' }
   }
   if (identity.includes('xai') || identity.includes('grok')) {
-    return { icon: SiX, color: '#f2f2f2', label: 'xAI' }
+    return { icon: SiX, color: 'var(--color-text-primary)', label: 'xAI' }
   }
   if (providerIdentity.includes('codex')) {
-    return { icon: BsOpenai, color: '#f2f2f2', label: 'Codex' }
+    return { icon: BsOpenai, color: 'var(--color-text-primary)', label: 'Codex' }
   }
-  return { icon: BsOpenai, color: '#f2f2f2', label: 'OpenAI' }
+  return { icon: BsOpenai, color: 'var(--color-text-primary)', label: 'OpenAI' }
 }
 
 function ProviderModelLabel({ provider, model }: { provider: string; model: string }) {
@@ -347,23 +381,23 @@ function ProviderModelLabel({ provider, model }: { provider: string; model: stri
   const ProviderIcon = presentation.icon
 
   return (
-    <span className="flex min-w-0 items-center gap-2.5 text-white/76">
+    <span className="flex min-w-0 items-center gap-2.5 leading-none text-[var(--color-text-secondary)]">
       <Tooltip>
         <TooltipTrigger asChild>
           <span
-            className="inline-flex size-[15px] shrink-0 items-center justify-center"
+            className="inline-flex size-4 shrink-0 items-center justify-center leading-none"
             aria-label={`${presentation.label} provider`}
           >
             <ProviderIcon
               aria-hidden="true"
-              className="size-[15px]"
+              className="block size-[15px] shrink-0"
               style={presentation.color ? { color: presentation.color } : undefined}
             />
           </span>
         </TooltipTrigger>
         <TooltipContent side="top">{presentation.label}</TooltipContent>
       </Tooltip>
-      <span className="truncate">{displayModelName(model)}</span>
+      <span className="inline-flex min-h-4 items-center truncate leading-4">{displayModelName(model)}</span>
     </span>
   )
 }
@@ -378,7 +412,12 @@ function modelColor(provider: string, model: string): string {
 }
 
 function displayModelName(model: string): string {
-  return model.trim() || 'Unknown model'
+  const normalized = model.trim()
+  if (!normalized) return 'Unknown model'
+  if (normalized.toLowerCase().startsWith('opencode-go/')) {
+    return normalized.slice('opencode-go/'.length)
+  }
+  return normalized
 }
 
 function DailyActivity({ timeline, modelTimeline, models, rangeDays, metric, onMetricChange }: {
@@ -424,7 +463,7 @@ function DailyActivity({ timeline, modelTimeline, models, rangeDays, metric, onM
   return (
     <div className="flex min-w-0 flex-col lg:h-full">
       <div className="flex items-center justify-between gap-4">
-        <h2 className="text-sm font-semibold text-white/78">
+        <h2 className="text-sm font-semibold text-[var(--color-text-secondary)]">
           {metric === 'cost' ? 'Daily cost' : 'Daily tokens'}
         </h2>
         <Tabs value={metric} onValueChange={value => onMetricChange(value as UsageMetric)}>
@@ -436,12 +475,12 @@ function DailyActivity({ timeline, modelTimeline, models, rangeDays, metric, onM
       </div>
       <div className="relative mt-6 h-64 min-w-0 lg:h-auto lg:min-h-0 lg:flex-1">
         {timeline.length === 0 ? (
-          <div className="flex h-full w-full items-center justify-center text-xs text-white/32">
+          <div className="flex h-full w-full items-center justify-center text-xs text-[var(--color-text-subtle)]">
             Usage will appear after the first model turn.
           </div>
         ) : (
           <>
-            <div className="pointer-events-none absolute inset-0 z-10 text-[10px] tabular-nums text-white/30">
+            <div className="pointer-events-none absolute inset-0 z-10 text-[10px] tabular-nums text-[var(--color-text-subtle)]">
               {axisMarks.map(({ y, value, translate }) => (
                 <span
                   key={y}
@@ -479,8 +518,7 @@ function DailyActivity({ timeline, modelTimeline, models, rangeDays, metric, onM
                   x2={chartWidth}
                   y1={y}
                   y2={y}
-                  stroke="white"
-                  strokeOpacity="0.065"
+                  stroke="var(--color-border-subtle)"
                   vectorEffect="non-scaling-stroke"
                 />
               </g>
@@ -523,10 +561,10 @@ function DailyActivity({ timeline, modelTimeline, models, rangeDays, metric, onM
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top">
-                      <span className="font-medium text-white/90">
+                      <span className="font-medium text-[var(--color-text-primary)]">
                         {provider.label} · {displayModelName(item.model)}
                       </span>
-                      <span className="ml-1.5 text-white/55">
+                      <span className="ml-1.5 text-[var(--color-text-muted)]">
                         {formatChartDate(day.date)} · {metric === 'cost'
                           ? formatCurrencyMicrousd(value)
                           : `${formatNumber(value)} tokens`}
@@ -539,7 +577,7 @@ function DailyActivity({ timeline, modelTimeline, models, rangeDays, metric, onM
           </>
         )}
       </div>
-      <div className="mt-2 grid grid-cols-3 text-[9px] uppercase tracking-[0.12em] text-white/28">
+      <div className="mt-2 grid grid-cols-3 text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-subtle)]">
         {labelDates.map((day, index) => (
           <span key={day.date} className={index === 1 ? 'text-center' : index === 2 ? 'text-right' : ''}>
             {formatChartDate(day.date)}
@@ -710,10 +748,10 @@ function MetricStrip({
   return (
     <Surface density="none" radius="surface" variant="panel" className="grid overflow-hidden sm:grid-cols-2 lg:grid-cols-5">
       {metrics.map(([label, value, detail], index) => (
-        <div key={label} className={`min-w-0 px-5 py-4 ${index > 0 ? 'border-t border-white/[0.055] sm:border-l lg:border-t-0' : ''}`}>
-          <p className="text-[13px] text-white/42">{label}</p>
-          <p className="mt-1.5 text-xl font-medium tabular-nums tracking-[-0.025em] text-white/88">{value}</p>
-          <p className="mt-1 text-xs text-white/32">{detail}</p>
+        <div key={label} className={`min-w-0 px-5 py-4 ${index > 0 ? 'border-t border-[var(--color-border-subtle)] sm:border-l lg:border-t-0' : ''}`}>
+          <p className="text-[13px] text-[var(--color-text-muted)]">{label}</p>
+          <p className="mt-1.5 text-xl font-medium tabular-nums tracking-[-0.025em] text-[var(--color-text-primary)]">{value}</p>
+          <p className="mt-1 text-xs text-[var(--color-text-subtle)]">{detail}</p>
         </div>
       ))}
     </Surface>
@@ -748,22 +786,22 @@ function BreakdownTable({ personal, mode, metric }: {
 
   return (
     <div>
-      <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-5 py-2.5 text-xs text-white/38">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-5 py-2.5 text-xs text-[var(--color-text-muted)]">
         <span>{mode === 'model' ? 'Model' : mode === 'day' ? 'Day' : 'Session'}</span>
         <span>Turns</span>
         <span className="min-w-24 text-right">{metric === 'cost' ? 'Cost' : 'Tokens'}</span>
       </div>
       {rows.length === 0 ? <EmptyRow label="No model turns have been recorded yet." /> : rows.map(row => (
-        <div key={row.id} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-5 border-t border-white/[0.055] py-3.5 text-sm">
+        <div key={row.id} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-5 border-t border-[var(--color-border-subtle)] py-3.5 text-sm">
           <div className="min-w-0">
             {mode === 'model' ? (
               <ProviderModelLabel provider={row.detail} model={row.label} />
             ) : (
-              <p className="truncate font-medium text-white/72">{row.label}</p>
+              <p className="truncate font-medium text-[var(--color-text-secondary)]">{row.label}</p>
             )}
           </div>
-          <span className="tabular-nums text-white/45">{formatNumber(row.modelTurns)}</span>
-          <span className="min-w-24 text-right tabular-nums text-white/62">
+          <span className="tabular-nums text-[var(--color-text-muted)]">{formatNumber(row.modelTurns)}</span>
+          <span className="min-w-24 text-right tabular-nums text-[var(--color-text-secondary)]">
             {metric === 'cost' ? formatCurrencyMicrousd(row.estimatedCostMicrousd) : formatNumber(row.totalTokens)}
           </span>
         </div>
@@ -783,19 +821,19 @@ function MemberTable({
 }) {
   return (
     <div>
-      <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-5 py-2.5 text-xs text-white/38">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-5 py-2.5 text-xs text-[var(--color-text-muted)]">
         <span>Member</span><span>Turns</span><span className="min-w-24 text-right">{metric === 'cost' ? 'Cost' : 'Tokens'}</span>
       </div>
       {members.length === 0 ? <EmptyRow label="No organization usage has been recorded yet." /> : members.map(member => (
-        <div key={member.membershipId} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-5 border-t border-white/[0.055] py-3.5 text-sm">
+        <div key={member.membershipId} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-5 border-t border-[var(--color-border-subtle)] py-3.5 text-sm">
           <div className="min-w-0">
-            <p className="truncate font-medium text-white/72">
+            <p className="truncate font-medium text-[var(--color-text-secondary)]">
               {member.name || (member.membershipId === currentMembershipId ? 'You' : 'Unknown member')}
               {member.name && member.membershipId === currentMembershipId ? ' (You)' : ''}
             </p>
           </div>
-          <span className="tabular-nums text-white/45">{formatNumber(member.modelTurns)}</span>
-          <span className="min-w-24 text-right tabular-nums text-white/62">
+          <span className="tabular-nums text-[var(--color-text-muted)]">{formatNumber(member.modelTurns)}</span>
+          <span className="min-w-24 text-right tabular-nums text-[var(--color-text-secondary)]">
             {metric === 'cost' ? formatCurrencyMicrousd(member.estimatedCostMicrousd) : formatNumber(member.totalTokens)}
           </span>
         </div>
@@ -805,7 +843,7 @@ function MemberTable({
 }
 
 function EmptyRow({ label }: { label: string }) {
-  return <div className="border-t border-white/[0.055] py-8 text-center text-xs text-white/32">{label}</div>
+  return <div className="border-t border-[var(--color-border-subtle)] py-8 text-center text-xs text-[var(--color-text-subtle)]">{label}</div>
 }
 
 function DashboardLoading() {
@@ -824,11 +862,11 @@ function DashboardLoading() {
         {Array.from({ length: 5 }, (_, index) => (
           <div
             key={index}
-            className={`min-w-0 px-5 py-4 ${index > 0 ? 'border-t border-white/[0.055] sm:border-l lg:border-t-0' : ''}`}
+            className={`min-w-0 px-5 py-4 ${index > 0 ? 'border-t border-[var(--color-border-subtle)] sm:border-l lg:border-t-0' : ''}`}
           >
-            <div className="h-3 w-20 animate-pulse rounded-full bg-white/[0.07]" />
-            <div className="mt-2.5 h-5 w-24 animate-pulse rounded-full bg-white/[0.09]" />
-            <div className="mt-2 h-3 w-28 max-w-full animate-pulse rounded-full bg-white/[0.05]" />
+            <div className="h-3 w-20 animate-pulse rounded-full bg-[var(--color-surface-selected)]" />
+            <div className="mt-2.5 h-5 w-24 animate-pulse rounded-full bg-[var(--color-surface-hover)]" />
+            <div className="mt-2 h-3 w-28 max-w-full animate-pulse rounded-full bg-[var(--color-surface-selected)]" />
           </div>
         ))}
       </Surface>
@@ -840,9 +878,9 @@ function DashboardError({ message, onRetry }: { message: string; onRetry: () => 
   return (
     <Surface density="comfortable" radius="surface" variant="recessed" className="flex min-h-56 items-center justify-center text-center">
       <div className="max-w-md">
-        <CircleAlert size={20} className="mx-auto text-red-300/70" />
-        <h2 className="mt-4 text-base font-medium text-white/82">Usage could not be loaded.</h2>
-        <p className="mt-2 text-xs leading-5 text-white/38">{message}</p>
+        <CircleAlert size={20} className="mx-auto text-[var(--color-status-danger)]" />
+        <h2 className="mt-4 text-base font-medium text-[var(--color-text-primary)]">Usage could not be loaded.</h2>
+        <p className="mt-2 text-xs leading-5 text-[var(--color-text-muted)]">{message}</p>
         <Button variant="primary" radius="marketing-pill" className="mt-5" onClick={onRetry}>
           Try again
         </Button>

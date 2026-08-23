@@ -55,8 +55,8 @@ queued and running jobs participate in active-job deduplication.
 
 ## Ownership boundary
 
-CLOUD-05 does not contact Docker or `nebula-worker`. CLOUD-06 will add the
-processor that:
+The processor that runs today claims available jobs and drives the worker
+lifecycle API end to end:
 
 1. Claims an available job.
 2. Calls the authenticated worker lifecycle API.

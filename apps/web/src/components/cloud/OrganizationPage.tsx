@@ -86,7 +86,7 @@ export function OrganizationPage({ organization }: { organization: CloudOrganiza
           <p className="mt-2 text-sm text-white/38">Members, roles, and invitations are managed by Better Auth.</p>
         </div>
         <div className="flex items-center gap-2 rounded-xl bg-white/[0.035] px-3 py-2 text-xs text-white/40">
-          <ShieldCheck size={14} className="text-emerald-300/60" />
+          <ShieldCheck size={14} className="text-[var(--color-status-success)]" />
           Organization access active
         </div>
       </div>
@@ -160,8 +160,8 @@ export function OrganizationPage({ organization }: { organization: CloudOrganiza
                 Create invitation
               </button>
             </form>
-            {error && <p role="alert" className="mt-3 text-xs leading-5 text-red-200/75">{error}</p>}
-            {notice && <p className="mt-3 text-xs leading-5 text-emerald-200/60">{notice}</p>}
+            {error && <p role="alert" className="mt-3 text-xs leading-5 text-[var(--color-status-danger)]">{error}</p>}
+            {notice && <p className="mt-3 text-xs leading-5 text-[var(--color-status-success)]">{notice}</p>}
           </section>
 
           {invitations.length > 0 && (

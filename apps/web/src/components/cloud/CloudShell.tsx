@@ -78,14 +78,14 @@ export function CloudShell({
                 >
                   <Building2 size={13} className="text-white/28" />
                   <span className="min-w-0 flex-1 truncate">{organization.name}</span>
-                  {organization.id === activeOrganization.id && <Check size={12} className="text-emerald-300/65" />}
+                  {organization.id === activeOrganization.id && <Check size={12} className="text-[var(--color-status-success)]" />}
                 </button>
               ))}
               <div className="mx-2 my-1 border-t border-white/[0.06]" />
               <button
                 type="button"
                 onClick={() => void onSignOut()}
-                className="flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-xs text-white/45 transition hover:bg-red-400/[0.07] hover:text-red-200/70"
+                className="flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-xs text-[var(--color-status-danger)] transition hover:bg-[var(--color-status-danger-surface-muted)] hover:text-[var(--color-status-danger-strong)]"
               >
                 <LogOut size={13} />
                 Sign out

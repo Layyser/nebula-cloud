@@ -168,6 +168,31 @@ const migrations = [
         ADD COLUMN session_display_name TEXT;
     `,
   },
+  {
+    id: '0009_organization_control_plane',
+    sql: `
+      CREATE TABLE organization_join_code (
+        organization_id TEXT PRIMARY KEY
+          REFERENCES organization(id) ON DELETE CASCADE,
+        lookup_key TEXT NOT NULL UNIQUE,
+        created_by TEXT NOT NULL REFERENCES user(id) ON DELETE RESTRICT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE organization_member_state (
+        member_id TEXT PRIMARY KEY REFERENCES member(id) ON DELETE CASCADE,
+        disabled INTEGER NOT NULL DEFAULT 0 CHECK (disabled IN (0, 1)),
+        disabled_by TEXT REFERENCES user(id) ON DELETE SET NULL,
+        disabled_at INTEGER,
+        updated_at INTEGER NOT NULL,
+        CHECK (
+          (disabled = 0 AND disabled_at IS NULL)
+          OR (disabled = 1 AND disabled_at IS NOT NULL)
+        )
+      );
+    `,
+  },
 ] as const
 
 export type WorkspaceState = 'pending' | 'provisioning' | 'ready' | 'stopped' | 'failed'
@@ -318,11 +343,48 @@ export interface OrganizationUsageSummary {
   members: OrganizationMemberUsageSummary[]
 }
 
+export type OrganizationRole = 'owner' | 'admin' | 'member'
+
+export interface OrganizationMemberSummary {
+  membershipId: string
+  userId: string
+  name: string
+  email: string
+  role: OrganizationRole
+  disabled: boolean
+  joinedAt: number
+}
+
+export interface OrganizationOperatorSummary {
+  workspaceId: string | null
+  membershipId: string
+  name: string
+  email: string
+  state: WorkspaceState | 'not_created'
+  disabled: boolean
+  createdAt: number | null
+  updatedAt: number | null
+}
+
+export interface OrganizationAdminSummary {
+  organizationId: string
+  name: string
+  slug: string
+  actorRole: OrganizationRole
+  joinCodeLookupKey: string | null
+  admins: OrganizationMemberSummary[]
+}
+
 export interface UsageSummaryAccessOptions {
   userId: string
   organizationId: string
   since: number
   rangeDays: 7 | 30 | 90
+}
+
+export interface OrganizationAccessOptions {
+  userId: string
+  organizationId: string
 }
 
 export class WorkspaceMembershipNotFoundError extends Error {
@@ -340,6 +402,25 @@ export class UsageAccessDeniedError extends Error {
   constructor() {
     super('The user cannot inspect organization usage')
     this.name = 'UsageAccessDeniedError'
+  }
+}
+
+export class OrganizationAccessDeniedError extends Error {
+  readonly code = 'organization_access_denied'
+
+  constructor() {
+    super('The user cannot administer this organization')
+    this.name = 'OrganizationAccessDeniedError'
+  }
+}
+
+export class OrganizationMemberMutationError extends Error {
+  readonly code: string
+
+  constructor(code: string, message: string) {
+    super(message)
+    this.name = 'OrganizationMemberMutationError'
+    this.code = code
   }
 }
 
@@ -842,6 +923,302 @@ export function getOrganizationUsageSummary(
       ...toUsageTotals(row),
     })),
   }
+}
+
+function requireOrganizationAdmin(
+  database: Database,
+  { userId, organizationId }: OrganizationAccessOptions,
+): OrganizationRole {
+  const actor = database.query<{ role: OrganizationRole; disabled: number }, [string, string]>(`
+    SELECT member.role,
+      COALESCE(organization_member_state.disabled, 0) AS disabled
+    FROM member
+    LEFT JOIN organization_member_state
+      ON organization_member_state.member_id = member.id
+    WHERE member.userId = ? AND member.organizationId = ?
+    LIMIT 1
+  `).get(userId, organizationId)
+  if (!actor || actor.disabled === 1 || !['owner', 'admin'].includes(actor.role)) {
+    throw new OrganizationAccessDeniedError()
+  }
+  return actor.role
+}
+
+export function isOrganizationMemberEnabled(
+  database: Database,
+  { userId, organizationId }: OrganizationAccessOptions,
+): boolean {
+  const row = database.query<{ enabled: number }, [string, string]>(`
+    SELECT CASE WHEN COALESCE(organization_member_state.disabled, 0) = 0
+      THEN 1 ELSE 0 END AS enabled
+    FROM member
+    LEFT JOIN organization_member_state
+      ON organization_member_state.member_id = member.id
+    WHERE member.userId = ? AND member.organizationId = ?
+    LIMIT 1
+  `).get(userId, organizationId)
+  return row?.enabled === 1
+}
+
+export function getOrganizationMembers(
+  database: Database,
+  options: OrganizationAccessOptions,
+): { actorRole: OrganizationRole; members: OrganizationMemberSummary[] } {
+  const actorRole = requireOrganizationAdmin(database, options)
+  const rows = database.query<{
+    membership_id: string
+    user_id: string
+    name: string
+    email: string
+    role: OrganizationRole
+    disabled: number
+    joined_at: number
+  }, [string]>(`
+    SELECT member.id AS membership_id,
+      member.userId AS user_id,
+      user.name,
+      user.email,
+      member.role,
+      COALESCE(organization_member_state.disabled, 0) AS disabled,
+      member.createdAt AS joined_at
+    FROM member
+    INNER JOIN user ON user.id = member.userId
+    LEFT JOIN organization_member_state
+      ON organization_member_state.member_id = member.id
+    WHERE member.organizationId = ?
+    ORDER BY
+      CASE member.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,
+      user.name COLLATE NOCASE,
+      member.id
+  `).all(options.organizationId)
+  return {
+    actorRole,
+    members: rows.map(row => ({
+      membershipId: row.membership_id,
+      userId: row.user_id,
+      name: row.name,
+      email: row.email,
+      role: row.role,
+      disabled: row.disabled === 1,
+      joinedAt: Number(row.joined_at),
+    })),
+  }
+}
+
+export function setOrganizationMemberDisabled(
+  database: Database,
+  options: OrganizationAccessOptions & {
+    membershipId: string
+    disabled: boolean
+    now?: () => number
+  },
+): OrganizationMemberSummary {
+  requireOrganizationAdmin(database, options)
+  const target = database.query<{
+    user_id: string
+    role: OrganizationRole
+  }, [string, string]>(`
+    SELECT userId AS user_id, role
+    FROM member
+    WHERE id = ? AND organizationId = ?
+    LIMIT 1
+  `).get(options.membershipId, options.organizationId)
+  if (!target) {
+    throw new OrganizationMemberMutationError('member_not_found', 'Organization member not found')
+  }
+  if (target.role === 'owner') {
+    throw new OrganizationMemberMutationError('owner_protected', 'The organization owner cannot be disabled')
+  }
+  if (target.user_id === options.userId) {
+    throw new OrganizationMemberMutationError('self_protected', 'You cannot disable your own membership')
+  }
+  const timestamp = (options.now ?? Date.now)()
+  database.prepare(`
+    INSERT INTO organization_member_state (
+      member_id, disabled, disabled_by, disabled_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(member_id) DO UPDATE SET
+      disabled = excluded.disabled,
+      disabled_by = excluded.disabled_by,
+      disabled_at = excluded.disabled_at,
+      updated_at = excluded.updated_at
+  `).run(
+    options.membershipId,
+    options.disabled ? 1 : 0,
+    options.disabled ? options.userId : null,
+    options.disabled ? timestamp : null,
+    timestamp,
+  )
+  const member = getOrganizationMembers(database, options).members.find(
+    candidate => candidate.membershipId === options.membershipId,
+  )
+  if (!member) throw new Error('Organization member could not be reloaded')
+  return member
+}
+
+export function getOrganizationOperators(
+  database: Database,
+  options: OrganizationAccessOptions,
+): OrganizationOperatorSummary[] {
+  requireOrganizationAdmin(database, options)
+  const rows = database.query<{
+    workspace_id: string | null
+    membership_id: string
+    name: string
+    email: string
+    workspace_state: WorkspaceState | null
+    disabled: number
+    created_at: number | null
+    updated_at: number | null
+  }, [string]>(`
+    SELECT workspace.id AS workspace_id,
+      member.id AS membership_id,
+      user.name,
+      user.email,
+      workspace.state AS workspace_state,
+      COALESCE(organization_member_state.disabled, 0) AS disabled,
+      workspace.created_at,
+      workspace.updated_at
+    FROM member
+    INNER JOIN user ON user.id = member.userId
+    LEFT JOIN workspace ON workspace.member_id = member.id
+    LEFT JOIN organization_member_state
+      ON organization_member_state.member_id = member.id
+    WHERE member.organizationId = ?
+    ORDER BY user.name COLLATE NOCASE, member.id
+  `).all(options.organizationId)
+  return rows.map(row => ({
+    workspaceId: row.workspace_id,
+    membershipId: row.membership_id,
+    name: row.name,
+    email: row.email,
+    state: row.workspace_state ?? 'not_created',
+    disabled: row.disabled === 1,
+    createdAt: row.created_at === null ? null : Number(row.created_at),
+    updatedAt: row.updated_at === null ? null : Number(row.updated_at),
+  }))
+}
+
+export function getOrganizationAdminSummary(
+  database: Database,
+  options: OrganizationAccessOptions,
+): OrganizationAdminSummary {
+  const actorRole = requireOrganizationAdmin(database, options)
+  const organization = database.query<{
+    name: string
+    slug: string
+    lookup_key: string | null
+  }, [string]>(`
+    SELECT organization.name,
+      organization.slug,
+      organization_join_code.lookup_key
+    FROM organization
+    LEFT JOIN organization_join_code
+      ON organization_join_code.organization_id = organization.id
+    WHERE organization.id = ?
+    LIMIT 1
+  `).get(options.organizationId)
+  if (!organization) throw new OrganizationAccessDeniedError()
+  const admins = getOrganizationMembers(database, options).members.filter(
+    member => member.role === 'owner' || member.role === 'admin',
+  )
+  return {
+    organizationId: options.organizationId,
+    name: organization.name,
+    slug: organization.slug,
+    actorRole,
+    joinCodeLookupKey: organization.lookup_key,
+    admins,
+  }
+}
+
+export function rotateOrganizationJoinCode(
+  database: Database,
+  options: OrganizationAccessOptions & { lookupKey: string; now?: () => number },
+): string {
+  requireOrganizationAdmin(database, options)
+  const timestamp = (options.now ?? Date.now)()
+  database.prepare(`
+    INSERT INTO organization_join_code (
+      organization_id, lookup_key, created_by, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(organization_id) DO UPDATE SET
+      lookup_key = excluded.lookup_key,
+      created_by = excluded.created_by,
+      updated_at = excluded.updated_at
+  `).run(
+    options.organizationId,
+    options.lookupKey,
+    options.userId,
+    timestamp,
+    timestamp,
+  )
+  return options.lookupKey
+}
+
+export function resolveOrganizationJoinCode(
+  database: Database,
+  lookupKey: string,
+): { organizationId: string; lookupKey: string } | null {
+  const row = database.query<{
+    organization_id: string
+    lookup_key: string
+  }, [string]>(`
+    SELECT organization_id, lookup_key
+    FROM organization_join_code
+    WHERE lookup_key = ?
+    LIMIT 1
+  `).get(lookupKey)
+  return row
+    ? { organizationId: row.organization_id, lookupKey: row.lookup_key }
+    : null
+}
+
+export function joinOrganizationById(
+  database: Database,
+  {
+    userId,
+    organizationId,
+    createId = randomUUID,
+    now = Date.now,
+  }: OrganizationAccessOptions & { createId?: () => string; now?: () => number },
+): string {
+  const user = database.query<{ id: string }, [string]>(
+    'SELECT id FROM user WHERE id = ? LIMIT 1',
+  ).get(userId)
+  if (!user) throw new OrganizationMemberMutationError('user_not_found', 'User not found')
+  const organization = database.query<{ id: string }, [string]>(
+    'SELECT id FROM organization WHERE id = ? LIMIT 1',
+  ).get(organizationId)
+  if (!organization) {
+    throw new OrganizationMemberMutationError('organization_not_found', 'Organization not found')
+  }
+  const existing = database.query<{ id: string }, [string, string]>(`
+    SELECT id FROM member WHERE userId = ? AND organizationId = ? LIMIT 1
+  `).get(userId, organizationId)
+  if (existing) return existing.id
+  const membershipId = createId()
+  database.prepare(`
+    INSERT INTO member (id, organizationId, userId, role, createdAt)
+    VALUES (?, ?, ?, 'member', ?)
+  `).run(membershipId, organizationId, userId, now())
+  return membershipId
+}
+
+export function updateOrganizationName(
+  database: Database,
+  options: OrganizationAccessOptions & { name: string },
+): void {
+  requireOrganizationAdmin(database, options)
+  const name = options.name.trim()
+  if (!name || name.length > 120) {
+    throw new OrganizationMemberMutationError(
+      'invalid_organization_name',
+      'Organization name must contain between 1 and 120 characters',
+    )
+  }
+  database.prepare('UPDATE organization SET name = ? WHERE id = ?')
+    .run(name, options.organizationId)
 }
 
 export function ensureWorkspaceRunning(

@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef } from 'react'
 import { LayoutDashboard, Terminal } from 'lucide-react'
 import {
   RuntimeWorkspace,
+  setThemePreference,
   type RuntimeNavigationItem,
 } from '@nebula/runtime-ui'
 import { PageBackground, SettingsWindow } from '../App'
 import { AuthPage } from '../components/auth/AuthPage'
-import { Dashboard } from '../components/cloud/Dashboard'
+import { OrganizationDashboard } from '../components/cloud/OrganizationDashboard'
 import { TerminalPage } from '../components/cloud/TerminalPage'
 import { WorkspaceStartup } from '../components/cloud/WorkspaceStartup'
 import { OrganizationSetup } from '../components/organization/OrganizationGate'
@@ -34,6 +35,7 @@ function WorkspacePreview({ view }: { view: 'dashboard' | 'terminal' }) {
       id: 'terminal',
       label: 'Terminal',
       icon: <Terminal size={15} />,
+      background: 'plain',
       keepMounted: true,
       onSelect: () => {},
       content: (
@@ -47,10 +49,11 @@ function WorkspacePreview({ view }: { view: 'dashboard' | 'terminal' }) {
       id: 'dashboard',
       label: 'Dashboard',
       icon: <LayoutDashboard size={15} />,
+      background: 'shader',
       onSelect: () => {},
-      content: (
-        <div className="min-w-0 flex-1 overflow-y-auto bg-[#080808]">
-          <Dashboard
+      content: () => (
+        <div className="min-w-0 flex-1 overflow-y-auto bg-transparent">
+          <OrganizationDashboard
             userName={cloudPreviewUser.name}
             userKey={cloudPreviewUser.email}
             organizationId={cloudPreviewOrganization.id}
@@ -133,6 +136,18 @@ function SettingsPreview() {
 }
 
 export function CloudPreview({ mode }: { mode: CloudPreviewMode }) {
+  useEffect(() => {
+    const handleThemeMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return
+      if (event.data?.type !== 'nebula-preview-theme') return
+      if (event.data.theme !== 'dark' && event.data.theme !== 'light') return
+      setThemePreference(event.data.theme)
+    }
+
+    window.addEventListener('message', handleThemeMessage)
+    return () => window.removeEventListener('message', handleThemeMessage)
+  }, [])
+
   let content
   if (mode === 'runtime') {
     content = <RuntimePreview />
