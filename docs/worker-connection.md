@@ -28,6 +28,7 @@ NEBULA_WORKER_URL
 NEBULA_WORKER_TOKEN
 NEBULA_WORKER_ID
 NEBULA_WORKER_CREDENTIAL_KEY_ID
+NEBULA_WORKER_CREDENTIALS_FILE
 NEBULA_WORKSPACE_IMAGE
 ```
 
@@ -38,8 +39,35 @@ development.
 
 The legacy URL/token pair now seeds a durable `worker_host` registry entry.
 Cloud stores only the credential key ID with that host; the secret remains in
-the process environment. Additional capacity and placement settings are listed
-in `apps/control-plane/.env.example`.
+the process environment. Additional workers resolve their key IDs from a
+root-readable JSON object supplied through `NEBULA_WORKER_CREDENTIALS_FILE`:
+
+```json
+{
+  "worker-fsn1-a-token": "a-random-secret-containing-at-least-32-characters",
+  "worker-hel1-a-token": "a-different-random-secret-containing-at-least-32-characters"
+}
+```
+
+The file is read once at startup. Rotate it atomically and restart the control
+plane; never commit it or place its values in the database. A deployment secret
+manager may materialize the same file. Additional capacity, polling, timeout,
+and placement settings are listed in `apps/control-plane/.env.example`.
+
+## Authenticated fleet health
+
+The control plane polls every registered host through the HMAC-authenticated
+`GET /internal/v1/status` endpoint. The worker reports readiness and aggregate
+total/reserved memory, CPU, disk, and workspace slots from durable desired
+state. Cloud rejects a worker whose reported ceilings differ from its
+registered ceilings, persists a bounded 1,000-sample history per host, and
+emits structured `worker_unavailable`, `worker_recovered`, and
+`worker_heartbeat_stale` events. Failed connections do not advance the last
+authenticated heartbeat.
+
+Forward those JSON events from the service journal to the production alerting
+sink. Health polling is defense in depth and does not replace private worker
+networking or the canary checks required before beta.
 
 ## Fleet administration
 

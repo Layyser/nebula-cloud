@@ -8,6 +8,7 @@ import {
 } from '@nebula-cloud/database'
 import {
   NebulaWorkerClient,
+  type WorkerStatus,
   type WorkerProvisioningResult,
   type WorkerRuntimeAccess,
   type WorkerWorkspaceInfo,
@@ -40,6 +41,7 @@ export interface WorkerClientFactoryOptions {
 }
 
 export interface RoutedWorkerClient {
+  getStatus(input?: { signal?: AbortSignal }): Promise<WorkerStatus>
   ensureWorkspaceRunning(input: {
     workspaceId: string
     jobId: string

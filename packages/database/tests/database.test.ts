@@ -49,7 +49,7 @@ test('applies the minimal application schema idempotently', () => {
     expect(tables).toContain('workspace')
     expect(database.query<{ count: number }, []>(
       'SELECT COUNT(*) AS count FROM nebula_migration',
-    ).get()?.count).toBe(11)
+    ).get()?.count).toBe(12)
   } finally {
     database.close()
   }
@@ -800,6 +800,59 @@ test('keeps assignments sticky and excludes draining, stale, and full workers', 
       requirements,
       now: () => 121,
     })).toThrow(WorkerPlacementUnavailableError)
+  } finally {
+    database.close()
+  }
+})
+
+test('persists worker-reported capacity in bounded health history', () => {
+  const database = openCloudDatabase({ path: ':memory:' })
+  try {
+    database.exec(`
+      CREATE TABLE user (id TEXT PRIMARY KEY);
+      CREATE TABLE organization (id TEXT PRIMARY KEY);
+      CREATE TABLE member (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL REFERENCES user(id),
+        organizationId TEXT NOT NULL REFERENCES organization(id),
+        role TEXT NOT NULL DEFAULT 'member'
+      );
+    `)
+    migrateCloudSchema(database)
+    upsertWorkerHost(database, {
+      id: 'worker-a', name: 'Worker A', provider: 'local', region: 'local',
+      baseURL: 'http://worker-a:7780', credentialKeyId: 'worker-a-token',
+      totalMemoryBytes: 4096, totalCpuMillis: 4000,
+      totalDiskBytes: 8192, totalWorkspaceSlots: 2,
+    })
+    recordWorkerHealth(database, {
+      workerHostId: 'worker-a', state: 'healthy', now: () => 100,
+      capacity: {
+        totalMemoryBytes: 4096, reservedMemoryBytes: 1024,
+        totalCpuMillis: 4000, reservedCpuMillis: 1000,
+        totalDiskBytes: 8192, reservedDiskBytes: 2048,
+        totalWorkspaceSlots: 2, reservedWorkspaceSlots: 1,
+      },
+    })
+    expect(database.query<{
+      total_memory_bytes: number
+      reserved_memory_bytes: number
+      total_cpu_millis: number
+      reserved_cpu_millis: number
+      total_disk_bytes: number
+      reserved_disk_bytes: number
+      total_workspace_slots: number
+      reserved_workspace_slots: number
+    }, []>('SELECT * FROM worker_health_sample').get()).toMatchObject({
+      total_memory_bytes: 4096,
+      reserved_memory_bytes: 1024,
+      total_cpu_millis: 4000,
+      reserved_cpu_millis: 1000,
+      total_disk_bytes: 8192,
+      reserved_disk_bytes: 2048,
+      total_workspace_slots: 2,
+      reserved_workspace_slots: 1,
+    })
   } finally {
     database.close()
   }

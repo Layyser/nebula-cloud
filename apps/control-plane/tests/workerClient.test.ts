@@ -12,6 +12,35 @@ test('rejects a weak worker signing secret', () => {
   })).toThrow('at least 32 characters')
 })
 
+test('reads authenticated worker status and capacity', async () => {
+  const requests: Request[] = []
+  const client = new NebulaWorkerClient({
+    baseURL: 'http://worker.test',
+    token: 'service-token-0123456789abcdef0123456789',
+    workspaceImage: 'nebula-workspace:test',
+    fetch: async (input, init) => {
+      requests.push(new Request(input, init))
+      return Response.json({
+        service: 'nebula-worker', api_version: 'v1', version: 'test', commit: 'abc123', ready: true,
+        capabilities: ['workspace_lifecycle'],
+        capacity: {
+          total_memory_bytes: 4096, reserved_memory_bytes: 1024,
+          total_cpu_millis: 4000, reserved_cpu_millis: 1000,
+          total_disk_bytes: 8192, reserved_disk_bytes: 2048,
+          total_workspace_slots: 2, reserved_workspace_slots: 1,
+        },
+      })
+    },
+  })
+
+  await expect(client.getStatus()).resolves.toMatchObject({
+    service: 'nebula-worker', ready: true,
+    capacity: { totalMemoryBytes: 4096, reservedWorkspaceSlots: 1 },
+  })
+  expect(new URL(requests[0]!.url).pathname).toBe('/internal/v1/status')
+  expect(requests[0]?.headers.get('authorization')).toStartWith('Nebula-HMAC v1.')
+})
+
 test('creates and ensures a workspace with durable worker idempotency keys', async () => {
   const requests: Request[] = []
   const client = new NebulaWorkerClient({

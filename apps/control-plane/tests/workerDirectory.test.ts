@@ -54,6 +54,16 @@ test('routes provisioning through the worker selected by the durable directory',
     })
     const calls: Array<{ hostId: string; workspaceId: string }> = []
     const client: RoutedWorkerClient = {
+      getStatus: async () => ({
+        service: 'nebula-worker', apiVersion: 'v1', version: 'test', commit: 'test', ready: true,
+        capabilities: [],
+        capacity: {
+          totalMemoryBytes: 4096, reservedMemoryBytes: 0,
+          totalCpuMillis: 4000, reservedCpuMillis: 0,
+          totalDiskBytes: 8192, reservedDiskBytes: 0,
+          totalWorkspaceSlots: 2, reservedWorkspaceSlots: 0,
+        },
+      }),
       ensureWorkspaceRunning: async input => {
         calls.push({ hostId: 'worker-a', workspaceId: input.workspaceId })
         return { workspaceId: input.workspaceId, observedState: 'ready' }

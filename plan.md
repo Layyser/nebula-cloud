@@ -129,12 +129,12 @@ complete:
 - [x] Deterministic Frontend and Cloud preview states cover the primary runtime,
       auth, startup, settings, terminal, and dashboard surfaces.
 
-Still open on the beta critical path: verified email and recovery, durable
-invitations, entitlements and Stripe projection, the multi-worker registry,
-nested-container and publication boundaries, complete audit events, backups and
-restore evidence, production infrastructure, reviewed legal copy, and real
-customer validation. Placeholder pages and local dashboards must not be counted
-as completing those launch gates.
+Still open on the beta critical path: production email delivery and durable
+invitations, entitlements and Stripe projection, private networking plus real
+worker nodes, nested-container and publication boundaries, complete audit-event
+coverage, backups and restore evidence, production infrastructure, reviewed
+legal copy, and real customer validation. Placeholder pages and local
+dashboards must not be counted as completing those launch gates.
 
 ### G1 — Validate demand through closed demos (start now; decide within two weeks)
 
@@ -487,11 +487,13 @@ worker_health_sample         # short retention
 - [ ] Connect control plane to workers through private networking (for example
       WireGuard between hosts). Keep worker APIs off the public internet. Retain
       request authentication and replay protection even on the private network.
-- [ ] Poll authenticated status/capacity, persist last-known health, and alert on
+- [x] Poll authenticated status/capacity, persist last-known health, and alert on
       staleness. Do not trust provider labels supplied by the browser.
-      The local compatibility path now polls readiness and persists bounded
-      health samples; authenticated capacity reporting, retention, and alerts
-      remain before production.
+      Every registered host is polled through its request-bound HMAC client;
+      worker-reported totals are checked against registered ceilings, durable
+      reservations are sampled with bounded retention, failed polls do not
+      advance the heartbeat, and structured transition/staleness events are
+      emitted for the deployment alert collector.
 - [x] Placement filters to enabled + schedulable + recently healthy hosts, checks
       hard workspace/resource/disk ceilings, then chooses the least-loaded valid
       host. Tie-break deterministically.

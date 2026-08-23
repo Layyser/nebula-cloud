@@ -317,6 +317,23 @@ const migrations = [
         ON worker_health_sample(worker_host_id, observed_at DESC);
     `,
   },
+  {
+    id: '0012_worker_health_reported_capacity',
+    sql: `
+      ALTER TABLE worker_health_sample
+        ADD COLUMN total_memory_bytes INTEGER NOT NULL DEFAULT 0
+        CHECK (total_memory_bytes >= 0);
+      ALTER TABLE worker_health_sample
+        ADD COLUMN total_cpu_millis INTEGER NOT NULL DEFAULT 0
+        CHECK (total_cpu_millis >= 0);
+      ALTER TABLE worker_health_sample
+        ADD COLUMN total_disk_bytes INTEGER NOT NULL DEFAULT 0
+        CHECK (total_disk_bytes >= 0);
+      ALTER TABLE worker_health_sample
+        ADD COLUMN total_workspace_slots INTEGER NOT NULL DEFAULT 0
+        CHECK (total_workspace_slots >= 0);
+    `,
+  },
 ] as const
 
 export type WorkspaceState = 'pending' | 'provisioning' | 'ready' | 'stopped' | 'failed'
@@ -382,6 +399,17 @@ export interface RecordWorkerHealthInput {
   workerHostId: string
   state: Extract<WorkerHostState, 'healthy' | 'unavailable'>
   errorCode?: string | null
+  heartbeatObserved?: boolean
+  capacity?: {
+    totalMemoryBytes: number
+    reservedMemoryBytes: number
+    totalCpuMillis: number
+    reservedCpuMillis: number
+    totalDiskBytes: number
+    reservedDiskBytes: number
+    totalWorkspaceSlots: number
+    reservedWorkspaceSlots: number
+  }
   now?: () => number
 }
 
@@ -1100,16 +1128,36 @@ export function recordWorkerHealth(
   input: RecordWorkerHealthInput,
 ): WorkerHost {
   const timestamp = (input.now ?? Date.now)()
+  const heartbeatObserved = input.heartbeatObserved ?? true
   const errorCode = input.errorCode?.trim().slice(0, 64) || null
+  const reportedCapacity = input.capacity
+    ? {
+        totalMemoryBytes: nonNegativeInteger(input.capacity.totalMemoryBytes, 'totalMemoryBytes'),
+        reservedMemoryBytes: nonNegativeInteger(input.capacity.reservedMemoryBytes, 'reservedMemoryBytes'),
+        totalCpuMillis: nonNegativeInteger(input.capacity.totalCpuMillis, 'totalCpuMillis'),
+        reservedCpuMillis: nonNegativeInteger(input.capacity.reservedCpuMillis, 'reservedCpuMillis'),
+        totalDiskBytes: nonNegativeInteger(input.capacity.totalDiskBytes, 'totalDiskBytes'),
+        reservedDiskBytes: nonNegativeInteger(input.capacity.reservedDiskBytes, 'reservedDiskBytes'),
+        totalWorkspaceSlots: nonNegativeInteger(input.capacity.totalWorkspaceSlots, 'totalWorkspaceSlots'),
+        reservedWorkspaceSlots: nonNegativeInteger(input.capacity.reservedWorkspaceSlots, 'reservedWorkspaceSlots'),
+      }
+    : null
   return database.transaction(() => {
     const result = database.prepare(`
       UPDATE worker_host
       SET state = CASE WHEN state = 'draining' THEN state ELSE ? END,
-          last_heartbeat_at = ?,
+          last_heartbeat_at = CASE WHEN ? THEN ? ELSE last_heartbeat_at END,
           last_error_code = ?,
           updated_at = ?
       WHERE id = ?
-    `).run(input.state, timestamp, errorCode, timestamp, input.workerHostId)
+    `).run(
+      input.state,
+      heartbeatObserved ? 1 : 0,
+      timestamp,
+      errorCode,
+      timestamp,
+      input.workerHostId,
+    )
     if (result.changes !== 1) throw new Error('Worker host was not found')
     const host = database.query<WorkerHostRow, [string]>(
       'SELECT * FROM worker_host WHERE id = ?',
@@ -1119,17 +1167,23 @@ export function recordWorkerHealth(
       INSERT INTO worker_health_sample (
         worker_host_id, observed_at, state,
         reserved_memory_bytes, reserved_cpu_millis, reserved_disk_bytes,
-        reserved_workspace_slots, error_code
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        reserved_workspace_slots, error_code,
+        total_memory_bytes, total_cpu_millis, total_disk_bytes,
+        total_workspace_slots
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       host.id,
       timestamp,
       input.state,
-      host.reserved_memory_bytes,
-      host.reserved_cpu_millis,
-      host.reserved_disk_bytes,
-      host.reserved_workspace_slots,
+      reportedCapacity?.reservedMemoryBytes ?? host.reserved_memory_bytes,
+      reportedCapacity?.reservedCpuMillis ?? host.reserved_cpu_millis,
+      reportedCapacity?.reservedDiskBytes ?? host.reserved_disk_bytes,
+      reportedCapacity?.reservedWorkspaceSlots ?? host.reserved_workspace_slots,
       errorCode,
+      reportedCapacity?.totalMemoryBytes ?? host.total_memory_bytes,
+      reportedCapacity?.totalCpuMillis ?? host.total_cpu_millis,
+      reportedCapacity?.totalDiskBytes ?? host.total_disk_bytes,
+      reportedCapacity?.totalWorkspaceSlots ?? host.total_workspace_slots,
     )
     database.prepare(`
       DELETE FROM worker_health_sample

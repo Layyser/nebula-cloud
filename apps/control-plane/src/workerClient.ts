@@ -48,6 +48,25 @@ interface WorkerWorkspaceResponse {
   }
 }
 
+interface WorkerStatusResponse {
+  service: string
+  api_version: string
+  version: string
+  commit: string
+  ready: boolean
+  capabilities: string[]
+  capacity: {
+    total_memory_bytes: number
+    reserved_memory_bytes: number
+    total_cpu_millis: number
+    reserved_cpu_millis: number
+    total_disk_bytes: number
+    reserved_disk_bytes: number
+    total_workspace_slots: number
+    reserved_workspace_slots: number
+  }
+}
+
 export interface WorkerProvisioningResult {
   workspaceId: string
   observedState: string
@@ -65,6 +84,27 @@ export interface WorkerWorkspaceInfo {
   observedState: string
   image: string
   resources: WorkerWorkspaceResponse['resources']
+}
+
+export interface WorkerCapacity {
+  totalMemoryBytes: number
+  reservedMemoryBytes: number
+  totalCpuMillis: number
+  reservedCpuMillis: number
+  totalDiskBytes: number
+  reservedDiskBytes: number
+  totalWorkspaceSlots: number
+  reservedWorkspaceSlots: number
+}
+
+export interface WorkerStatus {
+  service: string
+  apiVersion: string
+  version: string
+  commit: string
+  ready: boolean
+  capabilities: string[]
+  capacity: WorkerCapacity
 }
 
 export class WorkerClientError extends Error {
@@ -118,6 +158,65 @@ export class NebulaWorkerClient {
       throw new Error('Worker service signing secret must contain at least 32 characters')
     }
     if (!this.#workspaceImage) throw new Error('Workspace image is required')
+  }
+
+  async getStatus({ signal }: { signal?: AbortSignal } = {}): Promise<WorkerStatus> {
+    const payload = await this.#request('/internal/v1/status', {
+      method: 'GET',
+      signal,
+    }) as WorkerStatusResponse
+    const capacity = payload?.capacity
+    const capacityValues = capacity && [
+      capacity.total_memory_bytes,
+      capacity.reserved_memory_bytes,
+      capacity.total_cpu_millis,
+      capacity.reserved_cpu_millis,
+      capacity.total_disk_bytes,
+      capacity.reserved_disk_bytes,
+      capacity.total_workspace_slots,
+      capacity.reserved_workspace_slots,
+    ]
+    if (
+      payload?.service !== 'nebula-worker'
+      || payload.api_version !== 'v1'
+      || typeof payload.ready !== 'boolean'
+      || !Array.isArray(payload.capabilities)
+      || !capacityValues
+      || capacityValues.some(value => !Number.isSafeInteger(value) || value < 0)
+      || capacity.total_memory_bytes <= 0
+      || capacity.total_cpu_millis <= 0
+      || capacity.total_disk_bytes <= 0
+      || capacity.total_workspace_slots <= 0
+      || capacity.reserved_memory_bytes > capacity.total_memory_bytes
+      || capacity.reserved_cpu_millis > capacity.total_cpu_millis
+      || capacity.reserved_disk_bytes > capacity.total_disk_bytes
+      || capacity.reserved_workspace_slots > capacity.total_workspace_slots
+    ) {
+      throw new WorkerClientError({
+        message: 'Worker returned invalid status or capacity metadata',
+        code: 'worker_invalid_status',
+        retryable: true,
+        status: 502,
+      })
+    }
+    return {
+      service: payload.service,
+      apiVersion: payload.api_version,
+      version: payload.version,
+      commit: payload.commit,
+      ready: payload.ready,
+      capabilities: payload.capabilities,
+      capacity: {
+        totalMemoryBytes: capacity.total_memory_bytes,
+        reservedMemoryBytes: capacity.reserved_memory_bytes,
+        totalCpuMillis: capacity.total_cpu_millis,
+        reservedCpuMillis: capacity.reserved_cpu_millis,
+        totalDiskBytes: capacity.total_disk_bytes,
+        reservedDiskBytes: capacity.reserved_disk_bytes,
+        totalWorkspaceSlots: capacity.total_workspace_slots,
+        reservedWorkspaceSlots: capacity.reserved_workspace_slots,
+      },
+    }
   }
 
   async ensureWorkspaceRunning({
