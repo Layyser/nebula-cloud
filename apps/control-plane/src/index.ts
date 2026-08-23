@@ -23,6 +23,7 @@ import {
   setOrganizationMemberDisabled,
   updateOrganizationName,
 } from '@nebula-cloud/database'
+import { createFilesystemEmailSender } from '@nebula-cloud/auth'
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { NebulaWorkerClient } from './workerClient'
 import { ProvisioningProcessor } from './provisioningProcessor'
@@ -42,6 +43,17 @@ const version = process.env.NEBULA_CLOUD_VERSION || 'dev'
 const databasePath = process.env.NEBULA_CLOUD_DATABASE_PATH?.trim() || './data/nebula-cloud.sqlite'
 const authBaseURL = process.env.BETTER_AUTH_URL?.trim() || `http://${hostname}:${port}`
 const authSecret = process.env.BETTER_AUTH_SECRET?.trim() || ''
+const publicAppURL = process.env.NEBULA_PUBLIC_APP_URL?.trim()
+  || 'http://localhost:5173'
+const emailTransport = process.env.NEBULA_EMAIL_TRANSPORT?.trim().toLowerCase()
+  || 'disabled'
+const emailOutboxDirectory = process.env.NEBULA_EMAIL_OUTBOX_DIR?.trim()
+  || './data/email-outbox'
+const requireEmailVerification = parseBooleanEnvironment(
+  'NEBULA_REQUIRE_EMAIL_VERIFICATION',
+  process.env.NEBULA_REQUIRE_EMAIL_VERIFICATION,
+  false,
+)
 const organizationCodeSecret = process.env.NEBULA_ORGANIZATION_CODE_SECRET?.trim()
   || authSecret
 const trustedOrigins = (process.env.NEBULA_CLOUD_TRUSTED_ORIGINS
@@ -79,12 +91,22 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 if (authSecret.length < 32) {
   throw new Error('BETTER_AUTH_SECRET must contain at least 32 characters')
 }
+if (emailTransport !== 'disabled' && emailTransport !== 'filesystem') {
+  throw new Error('NEBULA_EMAIL_TRANSPORT must be disabled or filesystem')
+}
+
+const emailSender = emailTransport === 'filesystem'
+  ? createFilesystemEmailSender({ directory: emailOutboxDirectory })
+  : undefined
 
 const { database, auth } = await initializePersistence({
   databasePath,
   authSecret,
   authBaseURL,
+  appBaseURL: publicAppURL,
   trustedOrigins,
+  emailSender,
+  requireEmailVerification,
 })
 
 if (Boolean(workerURL) !== Boolean(workerToken)) {
@@ -123,6 +145,18 @@ const consoleGateway = workerClient
       resolveWorkspace: input => resolveWorkspaceAccess(database, input),
     })
   : null
+
+function parseBooleanEnvironment(
+  name: string,
+  value: string | undefined,
+  fallback: boolean,
+): boolean {
+  if (value === undefined || value.trim() === '') return fallback
+  const normalized = value.trim().toLowerCase()
+  if (normalized === 'true' || normalized === '1') return true
+  if (normalized === 'false' || normalized === '0') return false
+  throw new Error(`${name} must be true, false, 1, or 0`)
+}
 
 const controlPlaneHandler = createControlPlaneHandler({
   version,

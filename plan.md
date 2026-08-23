@@ -318,6 +318,10 @@ sending.
 - [ ] Verify `send.nubols.com` with the provider-supplied DKIM and SPF records.
 - [ ] Publish DMARC in monitoring mode, review reports, then move toward
       quarantine/reject once every legitimate sender is aligned.
+- [x] Add a provider-neutral transactional email interface, branded plain-text
+      and HTML templates, and a private filesystem outbox for local verification,
+      password-reset, and organization-invitation testing without buying an
+      email service. Production transport and delivery diagnostics remain open.
 - [ ] Implement Better Auth `sendVerificationEmail`, send on signup, and require
       verification before creating/provisioning a workspace.
 - [ ] Implement forgot/reset password, reset completion, resend verification,
@@ -886,8 +890,11 @@ Continue locally without purchasing infrastructure in this order:
    beginning with organization membership/access-code changes and Operator
    lifecycle requests. Completed locally on 23 August; the remaining event
    families stay explicitly open in G6.
-2. Complete the honest G6 dashboard minimum from persisted events; do not add
-   synthetic operator-health or task-completion figures.
+2. [ ] Complete the honest G6 dashboard minimum from persisted events; do not
+   add synthetic operator-health or task-completion figures. The persisted
+   personal/organization usage views and member/operator subviews are already
+   implemented. Entitled-member, provisioning-failure, and worker-health cards
+   remain blocked on the entitlement and worker-registry contracts below.
 3. Implement verified email, password recovery, and invitation delivery behind
    a provider interface that can use a local test transport before DNS/email
    service purchase.

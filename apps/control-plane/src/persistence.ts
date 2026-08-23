@@ -1,18 +1,28 @@
-import { createCloudAuth, migrateCloudAuthSchema } from '@nebula-cloud/auth'
+import {
+  createCloudAuth,
+  migrateCloudAuthSchema,
+  type TransactionalEmailSender,
+} from '@nebula-cloud/auth'
 import { migrateCloudSchema, openCloudDatabase } from '@nebula-cloud/database'
 
 export interface InitializePersistenceOptions {
   databasePath: string
   authSecret: string
   authBaseURL: string
+  appBaseURL?: string
   trustedOrigins?: string[]
+  emailSender?: TransactionalEmailSender
+  requireEmailVerification?: boolean
 }
 
 export async function initializePersistence({
   databasePath,
   authSecret,
   authBaseURL,
+  appBaseURL,
   trustedOrigins,
+  emailSender,
+  requireEmailVerification,
 }: InitializePersistenceOptions) {
   const database = openCloudDatabase({ path: databasePath })
 
@@ -21,7 +31,10 @@ export async function initializePersistence({
       database,
       secret: authSecret,
       baseURL: authBaseURL,
+      appBaseURL,
       trustedOrigins,
+      emailSender,
+      requireEmailVerification,
     })
     await migrateCloudAuthSchema(auth)
     migrateCloudSchema(database)
