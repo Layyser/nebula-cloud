@@ -77,7 +77,10 @@ credentials, usage, and audit tables remain deferred until their owning
 features exist. See [`docs/database.md`](docs/database.md) and
 [`docs/provisioning-jobs.md`](docs/provisioning-jobs.md). The worker connection,
 retry boundary, and local-host setup are documented in
-[`docs/worker-connection.md`](docs/worker-connection.md).
+[`docs/worker-connection.md`](docs/worker-connection.md). Platform operators can
+register, update, drain, resume, and disable worker hosts through that
+separately authenticated internal API. Organization administrators cannot
+access worker credentials or fleet control.
 The browser-to-runtime security and streaming boundary is documented in
 [`docs/runtime-gateway.md`](docs/runtime-gateway.md).
 The browser-to-PTY security and WebSocket boundary is documented in

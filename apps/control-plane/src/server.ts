@@ -17,8 +17,12 @@ import {
   type OrganizationUsageResponse,
   type RestartWorkspaceResponse,
   type RotateOrganizationJoinCodeResponse,
+  type RegisterWorkerHostRequest,
+  type UpdateWorkerHostRequest,
   type UpdateOrganizationMemberRequest,
   type UpdateOrganizationRequest,
+  type WorkerHostsResponse,
+  type WorkerHostSummary,
 } from '@nebula-cloud/contracts'
 import {
   OrganizationAccessDeniedError,
@@ -38,6 +42,8 @@ const organizationAuditPath = /^\/api\/organizations\/([^/]+)\/audit$/
 const organizationJoinCodePath = /^\/api\/organizations\/([^/]+)\/admin\/join-code$/
 const organizationPath = /^\/api\/organizations\/([^/]+)$/
 const operatorRuntimePath = /^\/api\/workspaces\/([^/]+)\/operator$/
+const workerAdministrationPath = '/internal/v1/workers'
+const workerAdministrationMemberPath = /^\/internal\/v1\/workers\/([^/]+)$/
 
 // Workspace replacement may legitimately run for up to two minutes. Bun's
 // ten-second default would close the request while the worker was converging
@@ -132,6 +138,15 @@ export interface ControlPlaneHandlerOptions {
     userId: string
     organizationId: string
   }) => Promise<void>
+  authorizeWorkerAdministration?: (
+    request: Request,
+  ) => boolean | Promise<boolean>
+  listWorkerHosts?: () => WorkerHostsResponse
+  registerWorkerHost?: (input: RegisterWorkerHostRequest) => WorkerHostSummary
+  updateWorkerHost?: (input: {
+    workerHostId: string
+    update: UpdateWorkerHostRequest
+  }) => WorkerHostSummary | null
 }
 
 function json(value: unknown, status = 200): Response {
@@ -158,6 +173,68 @@ function usageRange(url: URL): { days: 7 | 30 | 90; since: number } | Response {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
+  const allowedKeys = new Set(allowed)
+  return Object.keys(value).every(key => allowedKeys.has(key))
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) > 0
+}
+
+function isWorkerCapacity(
+  value: unknown,
+  partial = false,
+): value is RegisterWorkerHostRequest['capacity'] {
+  if (!isRecord(value)) return false
+  const keys = ['memoryBytes', 'cpuMillis', 'diskBytes', 'workspaceSlots'] as const
+  if (!hasOnlyKeys(value, keys)) return false
+  if (partial && Object.keys(value).length === 0) return false
+  return keys.every(key => {
+    const field = value[key]
+    return partial && field === undefined ? true : isPositiveSafeInteger(field)
+  })
+}
+
+function isRegisterWorkerHostRequest(value: unknown): value is RegisterWorkerHostRequest {
+  if (!isRecord(value)) return false
+  if (!hasOnlyKeys(value, [
+    'id', 'name', 'provider', 'region', 'baseURL', 'credentialKeyId',
+    'capacity', 'enabled', 'schedulable',
+  ])) return false
+  return isNonEmptyString(value.id)
+    && isNonEmptyString(value.name)
+    && isNonEmptyString(value.provider)
+    && isNonEmptyString(value.region)
+    && isNonEmptyString(value.baseURL)
+    && isNonEmptyString(value.credentialKeyId)
+    && isWorkerCapacity(value.capacity)
+    && (value.enabled === undefined || typeof value.enabled === 'boolean')
+    && (value.schedulable === undefined || typeof value.schedulable === 'boolean')
+}
+
+function isUpdateWorkerHostRequest(value: unknown): value is UpdateWorkerHostRequest {
+  if (!isRecord(value) || Object.keys(value).length === 0) return false
+  if (!hasOnlyKeys(value, [
+    'name', 'provider', 'region', 'baseURL', 'credentialKeyId', 'capacity', 'action',
+  ])) return false
+  for (const key of ['name', 'provider', 'region', 'baseURL', 'credentialKeyId'] as const) {
+    if (value[key] !== undefined && !isNonEmptyString(value[key])) return false
+  }
+  if (value.capacity !== undefined && !isWorkerCapacity(value.capacity, true)) return false
+  return value.action === undefined || [
+    'enable', 'disable', 'drain', 'resume',
+  ].includes(String(value.action))
+}
+
 export function createControlPlaneHandler({
   version = 'dev',
   isReady = () => true,
@@ -179,9 +256,101 @@ export function createControlPlaneHandler({
   joinOrganization,
   updateOrganization,
   reconcileUsage,
+  authorizeWorkerAdministration,
+  listWorkerHosts,
+  registerWorkerHost,
+  updateWorkerHost,
 }: ControlPlaneHandlerOptions = {}): (request: Request) => Promise<Response> {
   return async request => {
     const url = new URL(request.url)
+
+    const workerMemberMatch = url.pathname.match(workerAdministrationMemberPath)
+    if (url.pathname === workerAdministrationPath || workerMemberMatch) {
+      if (!authorizeWorkerAdministration) {
+        return json({
+          error: 'worker administration is unavailable',
+          code: 'worker_administration_unavailable',
+          retryable: true,
+        } satisfies CloudErrorResponse, 503)
+      }
+      if (!await authorizeWorkerAdministration(request)) {
+        return json({
+          error: 'worker administrator authentication required',
+          code: 'worker_administrator_authentication_required',
+        } satisfies CloudErrorResponse, 401)
+      }
+
+      if (request.method === 'GET' && url.pathname === workerAdministrationPath) {
+        return listWorkerHosts
+          ? json(listWorkerHosts())
+          : json({
+              error: 'worker administration is unavailable',
+              code: 'worker_administration_unavailable',
+              retryable: true,
+            } satisfies CloudErrorResponse, 503)
+      }
+
+      if (request.method === 'POST' && url.pathname === workerAdministrationPath) {
+        if (!registerWorkerHost) {
+          return json({
+            error: 'worker registration is unavailable',
+            code: 'worker_registration_unavailable',
+            retryable: true,
+          } satisfies CloudErrorResponse, 503)
+        }
+        try {
+          const body = await request.json() as RegisterWorkerHostRequest
+          if (!isRegisterWorkerHostRequest(body)) {
+            return json({
+              error: 'worker registration is invalid',
+              code: 'invalid_request',
+            } satisfies CloudErrorResponse, 400)
+          }
+          return json(registerWorkerHost(body), 201)
+        } catch (error) {
+          return json({
+            error: error instanceof Error ? error.message : 'worker registration failed',
+            code: 'invalid_request',
+          } satisfies CloudErrorResponse, 400)
+        }
+      }
+
+      if (request.method === 'PATCH' && workerMemberMatch) {
+        if (!updateWorkerHost) {
+          return json({
+            error: 'worker updates are unavailable',
+            code: 'worker_update_unavailable',
+            retryable: true,
+          } satisfies CloudErrorResponse, 503)
+        }
+        let workerHostId: string
+        try {
+          workerHostId = decodeURIComponent(workerMemberMatch[1])
+        } catch {
+          return json({ error: 'worker id is invalid', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+        }
+        try {
+          const update = await request.json() as UpdateWorkerHostRequest
+          if (!isUpdateWorkerHostRequest(update)) {
+            return json({
+              error: 'worker update is invalid',
+              code: 'invalid_request',
+            } satisfies CloudErrorResponse, 400)
+          }
+          const worker = updateWorkerHost({ workerHostId, update })
+          return worker
+            ? json(worker)
+            : json({ error: 'worker host not found', code: 'not_found' } satisfies CloudErrorResponse, 404)
+        } catch (error) {
+          return json({
+            error: error instanceof Error ? error.message : 'worker update failed',
+            code: 'invalid_request',
+          } satisfies CloudErrorResponse, 400)
+        }
+      }
+
+      return json({ error: 'route not found', code: 'not_found' } satisfies CloudErrorResponse, 404)
+    }
 
     if (url.pathname.startsWith('/api/auth/')) {
       if (authHandler) return await authHandler(request)

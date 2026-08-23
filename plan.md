@@ -478,7 +478,10 @@ worker_health_sample         # short retention
 
 - [x] Introduce `WorkerDirectory` and `WorkerClientFactory`; gateway, Console,
       restart, and provisioning resolve the workspace's assigned worker.
-- [ ] Add admin-only worker registration/update/disable/drain operations.
+- [x] Add admin-only worker registration/update/disable/drain operations.
+      The internal fleet API uses a separate deployment bearer credential,
+      stores only worker credential key references, defaults registrations to
+      unschedulable, and preserves sticky assignments while draining.
 - [x] Keep worker credentials in deployment secrets or an encrypted secret
       store. The database should reference a key ID, not expose bearer/HMAC keys.
 - [ ] Connect control plane to workers through private networking (for example

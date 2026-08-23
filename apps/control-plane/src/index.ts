@@ -43,6 +43,7 @@ import {
   type ConsoleBridgeData,
 } from './consoleGateway'
 import { prepareConsoleUpgrade } from './consoleUpgrade'
+import { WorkerAdministration } from './workerAdministration'
 
 const hostname = process.env.NEBULA_CLOUD_BIND?.trim() || '127.0.0.1'
 const port = Number.parseInt(process.env.NEBULA_CLOUD_PORT || '7790', 10)
@@ -75,6 +76,7 @@ const workspaceImage = process.env.NEBULA_WORKSPACE_IMAGE?.trim()
 const workerId = process.env.NEBULA_WORKER_ID?.trim() || 'local-worker'
 const workerCredentialKeyId = process.env.NEBULA_WORKER_CREDENTIAL_KEY_ID?.trim()
   || 'local-worker-token'
+const platformAdminToken = process.env.NEBULA_PLATFORM_ADMIN_TOKEN?.trim() || ''
 
 function positiveIntegerEnvironment(name: string, fallback: number): number {
   const raw = process.env[name]?.trim()
@@ -127,6 +129,9 @@ if (authSecret.length < 32) {
 }
 if (emailTransport !== 'disabled' && emailTransport !== 'filesystem') {
   throw new Error('NEBULA_EMAIL_TRANSPORT must be disabled or filesystem')
+}
+if (platformAdminToken && platformAdminToken.length < 32) {
+  throw new Error('NEBULA_PLATFORM_ADMIN_TOKEN must contain at least 32 characters')
 }
 
 const emailSender = emailTransport === 'filesystem'
@@ -239,6 +244,7 @@ const consoleGateway = workerDirectory
       resolveWorkspace: input => resolveWorkspaceAccess(database, input),
     })
   : null
+const workerAdministration = new WorkerAdministration(database)
 
 function parseBooleanEnvironment(
   name: string,
@@ -254,6 +260,19 @@ function parseBooleanEnvironment(
 
 const controlPlaneHandler = createControlPlaneHandler({
   version,
+  authorizeWorkerAdministration: platformAdminToken
+    ? request => {
+        const authorization = request.headers.get('authorization') ?? ''
+        const prefix = 'Bearer '
+        return authorization.startsWith(prefix)
+          && safeEqual(authorization.slice(prefix.length), platformAdminToken)
+      }
+    : undefined,
+  listWorkerHosts: () => ({ workers: workerAdministration.list() }),
+  registerWorkerHost: input => workerAdministration.register(input),
+  updateWorkerHost: ({ workerHostId, update }) => (
+    workerAdministration.update(workerHostId, update)
+  ),
   reconcileUsage: runtimeGateway
     ? async ({ userId, organizationId }) => {
         const workspace = ensurePersonalWorkspace(database, {

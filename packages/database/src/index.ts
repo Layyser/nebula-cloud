@@ -981,6 +981,18 @@ export function upsertWorkerHost(
     'totalWorkspaceSlots',
   )
   if (totalWorkspaceSlots === 0) throw new Error('totalWorkspaceSlots must be positive')
+  const existing = getWorkerHost(database, id)
+  if (
+    existing
+    && (
+      totalMemoryBytes < existing.reservedMemoryBytes
+      || totalCpuMillis < existing.reservedCpuMillis
+      || totalDiskBytes < existing.reservedDiskBytes
+      || totalWorkspaceSlots < existing.reservedWorkspaceSlots
+    )
+  ) {
+    throw new Error('Worker capacity cannot be lower than its current reservations')
+  }
   let parsedURL: URL
   try {
     parsedURL = new URL(baseURL)

@@ -41,6 +41,96 @@ test('publishes an intentionally empty versioned status contract', async () => {
   })
 })
 
+test('protects worker administration with a separate platform credential', async () => {
+  let listCalls = 0
+  const handler = createControlPlaneHandler({
+    authorizeWorkerAdministration: request => (
+      request.headers.get('authorization') === 'Bearer platform-secret'
+    ),
+    listWorkerHosts: () => {
+      listCalls += 1
+      return { workers: [] }
+    },
+  })
+
+  const denied = await handler(new Request('http://control-plane.test/internal/v1/workers'))
+  expect(denied.status).toBe(401)
+  expect(listCalls).toBe(0)
+
+  const allowed = await handler(new Request(
+    'http://control-plane.test/internal/v1/workers',
+    { headers: { authorization: 'Bearer platform-secret' } },
+  ))
+  expect(allowed.status).toBe(200)
+  expect(await allowed.json()).toEqual({ workers: [] })
+  expect(listCalls).toBe(1)
+})
+
+test('registers and drains workers through the internal administration API', async () => {
+  const registrations: unknown[] = []
+  const updates: unknown[] = []
+  const worker = {
+    id: 'worker-a',
+    name: 'Worker A',
+    provider: 'local',
+    region: 'local',
+    baseURL: 'http://127.0.0.1:7780',
+    credentialKeyId: 'worker-a-token',
+    enabled: true,
+    schedulable: false,
+    state: 'unknown' as const,
+    capacity: { memoryBytes: 4096, cpuMillis: 4000, diskBytes: 8192, workspaceSlots: 2 },
+    reserved: { memoryBytes: 0, cpuMillis: 0, diskBytes: 0, workspaceSlots: 0 },
+    lastHeartbeatAt: null,
+    lastErrorCode: null,
+    createdAt: 1,
+    updatedAt: 1,
+  }
+  const handler = createControlPlaneHandler({
+    authorizeWorkerAdministration: () => true,
+    registerWorkerHost: input => {
+      registrations.push(input)
+      return worker
+    },
+    updateWorkerHost: input => {
+      updates.push(input)
+      return { ...worker, state: 'draining', schedulable: false }
+    },
+  })
+  const registered = await handler(new Request(
+    'http://control-plane.test/internal/v1/workers',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: 'worker-a',
+        name: 'Worker A',
+        provider: 'local',
+        region: 'local',
+        baseURL: 'http://127.0.0.1:7780',
+        credentialKeyId: 'worker-a-token',
+        capacity: { memoryBytes: 4096, cpuMillis: 4000, diskBytes: 8192, workspaceSlots: 2 },
+      }),
+    },
+  ))
+  expect(registered.status).toBe(201)
+  expect(registrations).toHaveLength(1)
+
+  const drained = await handler(new Request(
+    'http://control-plane.test/internal/v1/workers/worker-a',
+    {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'drain' }),
+    },
+  ))
+  expect(drained.status).toBe(200)
+  expect(updates).toEqual([{
+    workerHostId: 'worker-a',
+    update: { action: 'drain' },
+  }])
+})
+
 test('does not pretend later authentication or organization routes exist', async () => {
   const handler = createControlPlaneHandler()
   const response = await handler(new Request('http://control-plane.test/api/organizations'))

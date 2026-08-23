@@ -41,6 +41,52 @@ Cloud stores only the credential key ID with that host; the secret remains in
 the process environment. Additional capacity and placement settings are listed
 in `apps/control-plane/.env.example`.
 
+## Fleet administration
+
+Worker registration and lifecycle changes use the internal operational API,
+not organization-admin sessions. Configure a separate deployment secret in
+`NEBULA_PLATFORM_ADMIN_TOKEN`, keep the endpoint on the private control-plane
+network, and send the secret as a bearer credential.
+
+```bash
+curl --fail --request POST http://127.0.0.1:7790/internal/v1/workers \
+  --header "Authorization: Bearer $NEBULA_PLATFORM_ADMIN_TOKEN" \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "id": "worker-fsn1-a",
+    "name": "FSN1 worker A",
+    "provider": "hetzner",
+    "region": "fsn1",
+    "baseURL": "https://worker-fsn1-a.internal:7780",
+    "credentialKeyId": "worker-fsn1-a-token",
+    "capacity": {
+      "memoryBytes": 68719476736,
+      "cpuMillis": 16000,
+      "diskBytes": 536870912000,
+      "workspaceSlots": 12
+    }
+  }'
+```
+
+Registration is unschedulable by default. After private connectivity and the
+credential key have been verified, resume the host explicitly:
+
+```bash
+curl --fail --request PATCH \
+  http://127.0.0.1:7790/internal/v1/workers/worker-fsn1-a \
+  --header "Authorization: Bearer $NEBULA_PLATFORM_ADMIN_TOKEN" \
+  --header 'Content-Type: application/json' \
+  --data '{"action":"resume"}'
+```
+
+The same endpoint accepts `drain`, `disable`, and `enable`. Draining rejects new
+placements without moving or deleting assigned workspaces. Enabling leaves a
+host unschedulable until it is explicitly resumed. A configuration patch may
+change the name, provider, region, URL, credential key reference, or capacity;
+capacity cannot be reduced below existing reservations. List redacted registry
+state with `GET /internal/v1/workers`. Worker secrets are never accepted by or
+returned from these APIs.
+
 ## Processing guarantees
 
 - SQLite leases allow only one processor to own a job at a time.

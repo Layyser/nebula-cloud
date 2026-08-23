@@ -14,6 +14,68 @@ export interface ControlPlaneStatus {
   capabilities: string[]
 }
 
+export type WorkerHostState = 'unknown' | 'healthy' | 'draining' | 'unavailable'
+
+export interface WorkerHostSummary {
+  id: string
+  name: string
+  provider: string
+  region: string
+  baseURL: string
+  credentialKeyId: string
+  enabled: boolean
+  schedulable: boolean
+  state: WorkerHostState
+  capacity: {
+    memoryBytes: number
+    cpuMillis: number
+    diskBytes: number
+    workspaceSlots: number
+  }
+  reserved: {
+    memoryBytes: number
+    cpuMillis: number
+    diskBytes: number
+    workspaceSlots: number
+  }
+  lastHeartbeatAt: number | null
+  lastErrorCode: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface WorkerHostsResponse {
+  workers: WorkerHostSummary[]
+}
+
+export interface RegisterWorkerHostRequest {
+  id: string
+  name: string
+  provider: string
+  region: string
+  baseURL: string
+  credentialKeyId: string
+  capacity: WorkerHostSummary['capacity']
+  enabled?: boolean
+  schedulable?: boolean
+}
+
+export type WorkerHostLifecycleAction =
+  | 'enable'
+  | 'disable'
+  | 'drain'
+  | 'resume'
+
+export interface UpdateWorkerHostRequest {
+  name?: string
+  provider?: string
+  region?: string
+  baseURL?: string
+  credentialKeyId?: string
+  capacity?: Partial<WorkerHostSummary['capacity']>
+  action?: WorkerHostLifecycleAction
+}
+
 export interface CloudErrorResponse {
   error: string
   code: string
