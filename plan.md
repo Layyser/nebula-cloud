@@ -45,8 +45,9 @@ support documentation, and billing:
 - Chat and Console operate on the same workspace.
 - Organization owners can invite members and inspect basic usage.
 - Nubols can place new workspaces on more than one registered worker host.
-- Operators can run workspace-owned Docker containers without access to the
-  host Docker daemon or another workspace's containers.
+- Operators can run development processes inside their isolated workspace and
+  explicitly publish an approved listening port. Docker compatibility is not a
+  beta promise.
 - An Operator can explicitly publish an approved HTTP or TCP service through a
   Nubols-managed hostname/port and ingress policy.
 - Provider-neutral runtime: the workspace is not tied to one model vendor.
@@ -57,8 +58,10 @@ support documentation, and billing:
 - Moving a live workspace automatically between worker hosts.
 - Kubernetes, automatic cloud autoscaling, or active-active control planes.
 - Enterprise SSO/SCIM, formal SLA, procurement integrations, or annual contracts.
-- Unrestricted host-port publishing, direct worker exposure, privileged nested
-  containers, or access to another workspace's container runtime/network.
+- Docker-in-Docker, microVM workspaces, Worker-managed customer service
+  containers, or Docker Compose compatibility.
+- Unrestricted host-port publishing, direct worker exposure, or access to
+  another workspace's processes, filesystem, runtime, or network.
 - A polished fleet dashboard with every metric shown on the landing mockup.
 - Unrestricted self-service signup with unlimited provisioning.
 
@@ -72,7 +75,7 @@ The beta may open only when every P0 gate below is green.
 | Entitlement | An unentitled member cannot provision or access an Operator; an entitled member can own exactly one |
 | Billing | Stripe sandbox and live-mode webhook paths tested; duplicate/reordered events are safe; invoices expose legal and tax IDs |
 | Compute | At least two worker hosts can be registered, health-checked, capacity-scored, and assigned deterministically |
-| Isolation | Existing worker security tests pass; outer and nested resource, disk, PID, network, and concurrency limits are enforced |
+| Isolation | Existing worker security tests pass; workspace resource, disk, PID, network, and concurrency limits are enforced |
 | Published services | Workspace-owned HTTP/TCP services use explicit policy, scoped routing, TLS where applicable, abuse controls, and revocation; workers expose no arbitrary host ports |
 | Recovery | Control-plane database and workspace data have automated backups and a completed restore drill |
 | Observability | Alerts exist for API failure, provisioning backlog, worker health, disk pressure, failed payments, and email delivery |
@@ -131,7 +134,7 @@ complete:
 
 Still open on the beta critical path: production email delivery and durable
 invitations, entitlements and Stripe projection, private networking plus real
-worker nodes, nested-container and publication boundaries, complete audit-event
+worker nodes, workspace-isolation and publication boundaries, complete audit-event
 coverage, backups and restore evidence, production infrastructure, reviewed
 legal copy, and real customer validation. Placeholder pages and local
 dashboards must not be counted as completing those launch gates.
@@ -239,12 +242,12 @@ production cannot start with filesystem email or verification disabled.
 the role inbox exactly once, can be tracked without inspecting production logs,
 and abusive submissions are throttled without allowing arbitrary email relay.
 
-#### 3. Workspace-owned Docker with strict isolation
+#### 3. Keep the current workspace-container boundary
 
-The target is one Firecracker microVM per Operator, with a normal Docker daemon
-inside the guest. The user gets a private Linux kernel, process tree, filesystem,
-Docker socket, and root-equivalent control inside that machine without receiving
-the host Docker socket or privileges in the Worker host.
+The pre-outreach product keeps one Worker-owned Docker container per Operator.
+The workspace receives Nebula, a shell, development tools, persistent home
+storage, resource limits, and private networking. It does not receive a Docker
+daemon, the host Docker socket, or privileges in the Worker host.
 
 - [x] Record the first hardened local probe. Plain rootless DinD failed under
       `cap-drop ALL` plus `no-new-privileges`, matching Docker's documented use
@@ -258,37 +261,33 @@ the host Docker socket or privileges in the Worker host.
       RAM and used about 313 MiB at warm idle; a 1 GiB guest reached health in
       3.27 seconds and used about 324 MiB at warm idle. The reproducible fixture
       and full interpretation live in `nebula-worker/benchmarks/firecracker/`.
-- [ ] Add a deliberately small Worker microVM prototype: Firecracker jailer,
-      immutable kernel/root image, one writable workspace disk, one TAP device,
-      one host cgroup, serial/vsock console, and start/stop/delete operations.
-      Do not build fleet rollout, snapshots, or a general scheduler in this
-      first slice.
-- [ ] Run Nebula as an unprivileged guest service while allowing the customer
-      normal root/sudo and Docker privileges inside the guest. Never mount a host
-      runtime socket, Worker path, control-plane credential, or another
-      Operator's disk into the microVM.
-- [ ] Enforce the non-bypassable host envelope around each Firecracker process:
-      configured guest RAM plus VMM/cache headroom, CPU bandwidth, PIDs, disk and
-      I/O, open files, logs, and network egress. Treat the full configured guest
-      memory as committed capacity even when warm-idle RSS is lower.
-- [ ] Use ballooning only for cooperative idle reclamation, never as the sole
-      memory limit or admission-control guarantee. Suspend or snapshot idle
-      Operators and distinguish provisioned seats from simultaneously active
-      machines in capacity planning.
+- [x] Decide against Firecracker as the default beta runtime. The measured
+      realistic guest used roughly five times the warm-idle memory of the current
+      workspace plus browser sidecar and adds guest-image, disk, network, jail,
+      and lifecycle work before product validation.
+- [ ] Keep the existing nested-runtime/OCI-runtime feasibility plumbing disabled.
+      Do not add Docker-in-Docker, Sysbox, a Firecracker launcher, or
+      Worker-managed customer service containers in this phase.
+- [ ] Preserve the non-bypassable host envelope around the existing workspace:
+      memory, CPU, PIDs, disk and I/O, open files, logs, and network egress.
 - [ ] Add two-workspace adversarial tests proving workspace A cannot enumerate,
       inspect, signal, ptrace, read `/proc` details for, mount, or network-reach
-      workspace B's daemon, processes, images, containers, volumes, or secrets.
+      workspace B's processes, filesystem, volumes, runtime, or secrets.
 - [ ] Test fork bombs, memory pressure, disk/image/build-cache exhaustion,
-      restart persistence, daemon crash recovery, and workspace deletion.
+      restart persistence, runtime crash recovery, and workspace deletion.
 
-**Acceptance:** a normal Docker CLI workflow works inside each Operator, while
-all isolation tests pass on the production kernel and guest workloads cannot
-make the Firecracker process exceed its host-enforced envelope.
+**Acceptance:** the current shell and agent workflow passes the isolation suite
+on the production kernel and cannot exceed its host-enforced envelope. Docker
+and Compose compatibility are explicitly not promised for this beta.
 
 #### 4. Controlled HTTP and TCP publication
 
 - [ ] Implement durable workspace-owned `published_service` desired state and
       audit events before changing DNS or exposing any Worker port.
+- [ ] Add a narrow CLI flow such as `nubols expose 3000`,
+      `nubols expose api 3000`, and `nubols unexpose api`. It publishes only a
+      process already listening inside the caller's workspace; it does not start
+      a container or accept host routing details.
 - [ ] Add a workspace-scoped broker that accepts only protocol, service target,
       target port, visibility/auth policy, and bounded TTL; it cannot accept a
       Worker, host IP, host port, DNS zone, or another workspace ID.
@@ -318,8 +317,7 @@ closed.
 ```text
 mailbox + transactional adapter
   -> Contact Sales intake
-  -> Firecracker + Docker feasibility proof
-  -> microVM prototype and isolation suite
+  -> workspace isolation suite
   -> publication desired state and broker
   -> HTTP/TLS ingress
   -> raw-TCP ingress
@@ -328,9 +326,9 @@ mailbox + transactional adapter
 ```
 
 Contact Sales depends on working notification mail. Publication depends on the
-workspace network and ownership boundary established by the microVM. Raw TCP
-follows HTTP because its abuse, allocation, and revocation surface is larger. Do
-not parallelize by weakening these dependencies.
+existing workspace network and ownership boundary. Raw TCP follows HTTP because
+its abuse, allocation, and revocation surface is larger. Do not parallelize by
+weakening these dependencies.
 
 **Gate:** before the first outreach batch, submit the production Contact Sales
 form, receive and reply from `sales@nubols.com`, run a bounded containerized API,
@@ -593,7 +591,7 @@ silently become permanent.
 closes Checkout, webhooks are replayed, events arrive out of order, or Stripe is
 temporarily unavailable.
 
-### G5 — Multi-worker placement, nested containers, and controlled ingress (13–27 August)
+### G5 — Multi-worker placement and controlled ingress (13–27 August)
 
 Keep one Web/control-plane deployment for beta. It may continue using SQLite on
 a durable encrypted volume if backups and single-instance operation are
@@ -613,11 +611,12 @@ Browser
                     -> one persistent container per entitled member
 ```
 
-The detailed security and routing contract is documented in
-`docs/nested-containers-and-ingress.md`. The key boundary is that an Operator
-may control Docker-compatible containers inside its own workspace, but it never
-receives the host Docker socket, Worker credentials, host networking, privileged
-mode, or visibility into objects owned by another workspace.
+The current runtime decision is documented in the Worker's
+`docs/workspace-runtime-decision.md`; the older nested-container design remains
+historical research only. The key boundary is that an Operator controls
+processes inside its own workspace but never receives the host Docker socket,
+Worker credentials, host networking, privileged mode, or visibility into
+another workspace.
 
 #### Required data model
 
@@ -684,24 +683,17 @@ worker_health_sample         # short retention
 - [ ] Enforce outbound abuse controls and rate/connection limits. Block cloud
       metadata endpoints, private control networks, SMTP abuse, crypto mining,
       scanning, and privilege escalation. Publish an AUP.
-- [ ] Package a workspace-scoped, rootless Docker-compatible daemon. Its daemon
-      socket exists only inside the Operator and cannot address the host daemon.
-- [ ] Put the nested daemon data root (images, layers, build cache, volumes, and
-      writable container layers) below `/home/nebula` so the existing hard XFS
-      project quota includes every nested-container byte.
-- [ ] Keep nested processes beneath the outer workspace cgroup. Prove aggregate
-      nested memory, CPU, PID, and disk consumption cannot exceed the Operator's
-      hard limits; fail the feature closed on hosts without the required cgroup
-      v2/user-namespace support.
-- [ ] Reject nested resource reservations whose aggregate exceeds the parent
-      workspace envelope. Regardless of inner declarations, the outer cgroup and
-      XFS quota remain the non-bypassable enforcement boundary.
-- [ ] Preserve one network namespace and one nested daemon per workspace. Reject
-      host networking, privileged mode, host PID/IPC namespaces, devices,
-      arbitrary mounts, and cross-workspace networks.
+- [ ] Keep the existing workspace process tree beneath its outer cgroup and all
+      persistent data beneath its XFS project quota. Prove memory, CPU, PID, and
+      disk consumption cannot exceed those limits.
+- [ ] Keep Docker-in-Docker, alternate OCI runtimes, microVM launchers, and
+      Worker-managed customer service containers disabled for this phase.
 - [ ] Add a workspace-scoped service-publication broker. The runtime can request
-      publication only for its own service and target port; it never receives
-      Worker, DNS-provider, or ingress credentials.
+      publication only for a port already listening inside its own workspace;
+      it never receives Worker, DNS-provider, or ingress credentials.
+- [ ] Add a narrow runtime CLI such as `nubols expose api 3000` and
+      `nubols unexpose api`. The control plane derives workspace ownership from
+      authentication and the Worker chooses all host-side routing details.
 - [ ] Add durable `published_service` state with workspace ownership, protocol,
       internal target, public hostname/allocated TCP port, visibility, auth
       policy, status, expiry, timestamps, and audit actor.
@@ -718,9 +710,10 @@ worker_health_sample         # short retention
 - [ ] Add per-organization service/port/bandwidth limits, abuse detection, and
       emergency revocation. Block SMTP, metadata/private control networks,
       reflection/amplification patterns, scanning, and prohibited workloads.
-- [ ] Integration-test two workspaces on one worker: each can build/run/list only
-      its own nested containers, each hits only its own quota, and neither can
-      connect to or inspect the other's daemon, containers, volumes, or network.
+- [ ] Integration-test two workspaces on one worker: each can run and publish a
+      small HTTP process, each hits only its own quota, and neither can connect
+      to or inspect the other's processes, filesystem, volumes, or private
+      network.
 - [ ] End-to-end test one HTTPS service and one raw TCP service from the public
       internet, including restart persistence, certificate issuance, routing to
       the correct worker, credential rotation, expiry, deletion, and worker drain.
@@ -729,11 +722,10 @@ worker_health_sample         # short retention
 - [ ] Define idle/suspend policy without killing active parallel chats.
 
 **Acceptance:** two members can provision concurrently onto different healthy
-workers; all later Runtime, Console, nested-container, and published-service
-traffic resolves to the recorded host; draining one host sends only new work
-elsewhere; a worker outage never creates a second empty workspace. Nested
-containers remain inside their parent resource/quota envelope, and public routes
-can reach only the exact workspace-owned service recorded by the control plane.
+workers; all later Runtime, Console, and published-service traffic resolves to
+the recorded host; draining one host sends only new work elsewhere; a worker
+outage never creates a second empty workspace. Public routes can reach only the
+exact workspace-owned listening port recorded by the control plane.
 
 ### G6 — Real organization dashboard, usage, cost, and audit (17–27 August)
 
@@ -796,10 +788,10 @@ rejects cross-organization access.
 - [ ] Threat-model browser → control plane → worker → container → model provider,
       including malicious members, prompt/tool abuse, SSRF, container escape,
       credential theft, webhook forgery, and cross-organization ID guessing.
-- [ ] Extend the threat model through nested daemon → nested container → ingress,
-      including Docker API abuse, namespace/cgroup escape, image/build attacks,
-      disk exhaustion, cross-workspace discovery, exposed databases, DDoS,
-      malware hosting, scanning, and abandoned DNS/route takeover.
+- [ ] Extend the threat model through workspace process → publication broker →
+      ingress, including SSRF, quota exhaustion, cross-workspace discovery,
+      exposed databases, DDoS, malware hosting, scanning, and abandoned
+      DNS/route takeover.
 - [ ] Run dependency, secret, container image, and host configuration scans.
 - [ ] Rotate production secrets; keep dev/bootstrap credentials out of prod.
 - [ ] Encrypt disks/volumes and backups; document who can access workspace data.
@@ -1082,14 +1074,18 @@ Continue locally without purchasing infrastructure in this order:
    copy next.
 5. [x] Add the worker registry and deterministic placement contracts with two
    local worker fixtures before renting a second host.
-6. [x] Replace the nested-container direction with a Firecracker feasibility
-   decision. The local KVM benchmark proved normal Docker and the real Nebula
-   runtime can boot inside a microVM with acceptable warm-idle memory. Next,
-   build only the small Worker prototype described in G1A and repeat its
-   isolation/capacity tests on the intended production Linux host.
+6. [x] Close the nested-runtime decision for the beta. The local benchmark proved
+   Firecracker works but costs roughly five times the current warm-idle memory;
+   retain the current Worker-owned workspace containers and do not implement
+   DinD, microVMs, or Worker-managed customer service containers now.
 7. Implement publication desired state and workspace ownership checks only
-   after the microVM network/runtime boundary passes; deliver HTTP/TLS before
-   allocated raw TCP.
+   after the current workspace isolation boundary passes. Expose an already
+   listening workspace port through a narrow `nubols expose` command; deliver
+   HTTP/TLS before allocated raw TCP.
+8. Treat bounded Docker Compose translation as future discovery work only. If
+   beta evidence justifies it, translate a safe subset into Worker-owned desired
+   state without exposing Docker sockets, privileged mode, host namespaces,
+   devices, arbitrary bind mounts, or arbitrary host ports.
 
 ## 7. Source checklist
 
