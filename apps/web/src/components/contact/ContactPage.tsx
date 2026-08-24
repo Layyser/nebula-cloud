@@ -155,7 +155,7 @@ export function ContactPage({ onLaunch }: { onLaunch: () => void }) {
                   ) : submitState === 'error' ? (
                     <p className="text-[var(--color-danger)]">We couldn’t deliver that message. Please retry or email hello@nubols.com.</p>
                   ) : (
-                    <p>By submitting, you agree to our <a href="/legal?document=privacy" className="underline underline-offset-2 hover:text-[var(--color-text-primary)]">Privacy Policy</a>.</p>
+                    <p>See our <a href="/legal?document=privacy" className="underline underline-offset-2 hover:text-[var(--color-text-primary)]">Privacy Notice</a>. Accepted requests are kept for up to 730 days; rejected and honeypot submissions are not stored in the contact database.</p>
                   )}
                 </div>
                 <Button type="submit" variant="primary" size="hero" radius="marketing-pill" disabled={submitState === 'pending' || submitState === 'success'}>

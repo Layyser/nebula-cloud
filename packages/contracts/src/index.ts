@@ -100,6 +100,33 @@ export interface ContactResponse {
   status: 'received'
 }
 
+export type ContactRequestStatus = 'new' | 'contacted' | 'qualified' | 'closed'
+export type ContactNotificationStatus = 'pending' | 'sent' | 'failed'
+
+export interface ContactRequestRecord {
+  id: string
+  name: string
+  email: string
+  organization: string | null
+  topic: ContactTopic
+  message: string
+  status: ContactRequestStatus
+  notificationStatus: ContactNotificationStatus
+  providerMessageId: string | null
+  privacyVersion: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface ContactRequestsResponse {
+  requests: ContactRequestRecord[]
+  nextCursor: string | null
+}
+
+export interface UpdateContactRequestRequest {
+  status: ContactRequestStatus
+}
+
 export type PersonalWorkspaceState =
   | 'pending'
   | 'provisioning'

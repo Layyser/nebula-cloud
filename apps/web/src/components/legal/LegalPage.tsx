@@ -22,33 +22,33 @@ const LEGAL_DOCUMENTS: LegalDocument[] = [
     id: 'privacy',
     icon: EyeOff,
     label: 'Privacy',
-    title: 'Privacy Policy',
-    effective: 'Effective date placeholder',
-    sections: ['Overview', 'Information we collect', 'How we use information', 'Sharing and retention', 'Your choices', 'Contact'],
+    title: 'Privacy Notice',
+    effective: 'Draft updated 24 August 2026',
+    sections: ['Status and scope', 'Contact requests', 'Purpose and legal basis', 'Recipients and transfers', 'Retention', 'Your rights'],
     markdown: `
-## Overview
+## Status and scope
 
-This placeholder Privacy Policy describes the intended structure of Nubols' privacy disclosures. It is not final legal language and must be reviewed before public launch.
+This pre-launch notice currently covers the public Nubols contact form. The controller's complete legal identity and address, plus the wider service privacy terms, must be added and reviewed before external outreach. Questions can be sent to hello@nubols.com.
 
-## Information we collect
+## Contact requests
 
-We may describe account information, workspace metadata, usage records, support communications, and technical logs in this section.
+When you submit the form, Nubols receives your name, work email, organization if supplied, selected topic, message, the notice version, and submission timestamps. The application stores a keyed one-way identifier derived from the request source address for abuse throttling; the contact record does not store the raw source address. Please do not submit passwords, API keys, or other secrets.
 
-## How we use information
+## Purpose and legal basis
 
-Placeholder purposes include providing the service, securing workspaces, supporting customers, measuring reliability, and complying with applicable law.
+The information is used to answer the request, route it to the appropriate role mailbox, manage follow-up, prevent abuse, and protect the service. The intended bases are taking steps at your request and Nubols' legitimate interests in responding to requested business communications and securing the form. These bases require legal review before launch.
 
-## Sharing and retention
+## Recipients and transfers
 
-This section will identify processors, retention periods, international transfers, and the circumstances in which information may be disclosed.
+Access is limited to the founder or authorized platform operators and service providers needed to host the application and deliver the notification email. The final notice will name the providers, processing locations, safeguards, and any international transfer mechanism before production data is sent to them. Contact details are not sold and user input cannot select an arbitrary notification recipient.
 
-## Your choices
+## Retention
 
-Final copy will explain access, correction, deletion, portability, objection, and other applicable rights.
+Invalid, origin-blocked, rate-limited, and honeypot submissions are not intentionally added to the contact database. Accepted contact records are automatically deleted from that database after 730 days. Copies delivered to the role mailbox must follow the same deletion schedule; deployment operations must configure and verify that mailbox retention before outreach. Infrastructure security logs may have a separate, shorter schedule that the final notice will disclose.
 
-## Contact
+## Your rights
 
-Privacy contact details and the relevant legal entity will be added before launch.
+You may ask to access, correct, or delete contact-form information by emailing hello@nubols.com. The final notice will provide the controller identity, the complete set of applicable rights, and the competent supervisory-authority information after legal review.
 `,
   },
   {

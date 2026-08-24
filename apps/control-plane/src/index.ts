@@ -6,6 +6,7 @@ import { initializePersistence } from './persistence'
 import {
   assignWorkspaceWorker,
   createContactRequest,
+  deleteContactRequestsCreatedBefore,
   ensurePersonalWorkspace,
   ensureWorkspaceRunning,
   getOrganizationAdminSummary,
@@ -15,6 +16,7 @@ import {
   getPersonalUsageSummary,
   isOrganizationMemberEnabled,
   joinOrganizationById,
+  listContactRequests,
   listOrganizationAuditEvents,
   OrganizationMemberMutationError,
   recordAuditEvent,
@@ -25,6 +27,7 @@ import {
   setOrganizationMemberDisabled,
   setContactNotificationResult,
   upsertWorkerHost,
+  updateContactRequestStatus,
   updateOrganizationName,
 } from '@nebula-cloud/database'
 import {
@@ -128,6 +131,13 @@ const workerHeartbeatStaleMs = positiveIntegerEnvironment(
   'NEBULA_WORKER_HEARTBEAT_STALE_MS',
   30000,
 )
+const contactRetentionDays = positiveIntegerEnvironment(
+  'NEBULA_CONTACT_RETENTION_DAYS',
+  730,
+)
+if (contactRetentionDays > 36500) {
+  throw new Error('NEBULA_CONTACT_RETENTION_DAYS must not exceed 36500')
+}
 
 function organizationCodeSignature(organizationId: string, lookupKey: string): string {
   return createHmac('sha256', organizationCodeSecret)
@@ -146,6 +156,14 @@ function safeEqual(left: string, right: string): boolean {
   const rightBuffer = Buffer.from(right)
   return leftBuffer.length === rightBuffer.length
     && timingSafeEqual(leftBuffer, rightBuffer)
+}
+
+function authorizePlatformAdministration(request: Request): boolean {
+  const authorization = request.headers.get('authorization') ?? ''
+  const prefix = 'Bearer '
+  return Boolean(platformAdminToken)
+    && authorization.startsWith(prefix)
+    && safeEqual(authorization.slice(prefix.length), platformAdminToken)
 }
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -190,6 +208,23 @@ const { database, auth } = await initializePersistence({
   emailSender,
   requireEmailVerification,
 })
+
+function purgeExpiredContactRequests(): number {
+  const retentionMs = contactRetentionDays * 24 * 60 * 60 * 1000
+  return deleteContactRequestsCreatedBefore(
+    database,
+    Math.max(0, Date.now() - retentionMs),
+  )
+}
+
+const expiredContactRequests = purgeExpiredContactRequests()
+if (expiredContactRequests > 0) {
+  console.info(JSON.stringify({
+    event: 'expired_contact_requests_deleted',
+    count: expiredContactRequests,
+    retentionDays: contactRetentionDays,
+  }))
+}
 
 if (Boolean(workerURL) !== Boolean(workerToken)) {
   database.close()
@@ -291,18 +326,33 @@ function parseBooleanEnvironment(
 const controlPlaneHandler = createControlPlaneHandler({
   version,
   authorizeWorkerAdministration: platformAdminToken
-    ? request => {
-        const authorization = request.headers.get('authorization') ?? ''
-        const prefix = 'Bearer '
-        return authorization.startsWith(prefix)
-          && safeEqual(authorization.slice(prefix.length), platformAdminToken)
-      }
+    ? authorizePlatformAdministration
     : undefined,
   listWorkerHosts: () => ({ workers: workerAdministration.list() }),
   registerWorkerHost: input => workerAdministration.register(input),
   updateWorkerHost: ({ workerHostId, update }) => (
     workerAdministration.update(workerHostId, update)
   ),
+  authorizeContactAdministration: platformAdminToken
+    ? authorizePlatformAdministration
+    : undefined,
+  listContactRequests: input => {
+    purgeExpiredContactRequests()
+    const result = listContactRequests(database, input)
+    return {
+      requests: result.requests.map(request => {
+        const { sourceHash: _sourceHash, ...record } = request
+        return record
+      }),
+      nextCursor: result.nextCursor,
+    }
+  },
+  updateContactRequestStatus: input => {
+    const request = updateContactRequestStatus(database, input)
+    if (!request) return null
+    const { sourceHash: _sourceHash, ...record } = request
+    return record
+  },
   reconcileUsage: runtimeGateway
     ? async ({ userId, organizationId }) => {
         const workspace = ensurePersonalWorkspace(database, {
@@ -536,6 +586,7 @@ const controlPlaneHandler = createControlPlaneHandler({
   trustedContactOrigins: trustedOrigins,
   submitContact: emailSender
     ? async input => {
+        purgeExpiredContactRequests()
         const sourceHash = createHmac('sha256', contactSourceHashSecret)
           .update(input.sourceAddress || 'unavailable')
           .digest('hex')

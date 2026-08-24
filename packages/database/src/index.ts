@@ -708,6 +708,17 @@ export interface CreateContactRequestInput {
   maximumPerEmail?: number
 }
 
+export interface ContactRequestCursor {
+  createdAt: number
+  id: string
+}
+
+export interface ListContactRequestsOptions {
+  status?: ContactRequestStatus
+  limit?: number
+  before?: ContactRequestCursor | null
+}
+
 export class ContactRateLimitError extends Error {
   readonly code = 'contact_rate_limited'
 
@@ -1073,6 +1084,80 @@ export function setContactNotificationResult(
   const request = getContactRequestById(database, input.requestId)
   if (!request) throw new Error('Contact request disappeared')
   return request
+}
+
+export function listContactRequests(
+  database: Database,
+  options: ListContactRequestsOptions = {},
+): { requests: ContactRequest[]; nextCursor: ContactRequestCursor | null } {
+  const limit = Math.min(Math.max(Math.trunc(options.limit ?? 50), 1), 200)
+  const before = options.before ?? null
+  const rows = options.status
+    ? database.query<ContactRequestRow, [ContactRequestStatus, number, number, string, number]>(`
+        SELECT *
+        FROM contact_request
+        WHERE status = ?
+          AND (created_at < ? OR (created_at = ? AND id < ?))
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?
+      `).all(
+        options.status,
+        before?.createdAt ?? Number.MAX_SAFE_INTEGER,
+        before?.createdAt ?? Number.MAX_SAFE_INTEGER,
+        before?.id ?? '\uffff',
+        limit + 1,
+      )
+    : database.query<ContactRequestRow, [number, number, string, number]>(`
+        SELECT *
+        FROM contact_request
+        WHERE created_at < ? OR (created_at = ? AND id < ?)
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?
+      `).all(
+        before?.createdAt ?? Number.MAX_SAFE_INTEGER,
+        before?.createdAt ?? Number.MAX_SAFE_INTEGER,
+        before?.id ?? '\uffff',
+        limit + 1,
+      )
+  const hasMore = rows.length > limit
+  const requests = rows.slice(0, limit).map(toContactRequest)
+  const last = hasMore ? requests.at(-1) : undefined
+  return {
+    requests,
+    nextCursor: last ? { createdAt: last.createdAt, id: last.id } : null,
+  }
+}
+
+export function updateContactRequestStatus(
+  database: Database,
+  input: {
+    requestId: string
+    status: ContactRequestStatus
+    now?: () => number
+  },
+): ContactRequest | null {
+  if (!['new', 'contacted', 'qualified', 'closed'].includes(input.status)) {
+    throw new Error('Contact request status is invalid')
+  }
+  const result = database.prepare(`
+    UPDATE contact_request
+    SET status = ?, updated_at = ?
+    WHERE id = ?
+  `).run(input.status, (input.now ?? Date.now)(), input.requestId)
+  if (result.changes !== 1) return null
+  return getContactRequestById(database, input.requestId)
+}
+
+export function deleteContactRequestsCreatedBefore(
+  database: Database,
+  before: number,
+): number {
+  if (!Number.isSafeInteger(before) || before < 0) {
+    throw new Error('Contact retention cutoff must be a non-negative safe integer')
+  }
+  return Number(database.prepare(
+    'DELETE FROM contact_request WHERE created_at < ?',
+  ).run(before).changes)
 }
 
 export function ensurePersonalWorkspace(

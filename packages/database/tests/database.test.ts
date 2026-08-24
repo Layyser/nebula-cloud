@@ -4,6 +4,7 @@ import {
   claimProvisioningJob,
   ContactRateLimitError,
   createContactRequest,
+  deleteContactRequestsCreatedBefore,
   ensurePersonalWorkspace,
   ensureWorkspaceRunning,
   finishProvisioningJob,
@@ -12,6 +13,7 @@ import {
   getOrganizationMembers,
   getPersonalUsageSummary,
   listOrganizationAuditEvents,
+  listContactRequests,
   migrateCloudSchema,
   openCloudDatabase,
   ProvisioningJobLeaseLostError,
@@ -22,6 +24,7 @@ import {
   resolveWorkspaceAccess,
   setWorkerHostScheduling,
   setContactNotificationResult,
+  updateContactRequestStatus,
   upsertWorkerHost,
   UsageAccessDeniedError,
   WorkspaceMembershipNotFoundError,
@@ -109,6 +112,72 @@ test('persists idempotent contact requests and enforces durable source and email
       ...base,
       id: 'request-3',
     })).toThrow(ContactRateLimitError)
+  } finally {
+    database.close()
+  }
+})
+
+test('lists, advances, filters, updates, and expires contact requests', () => {
+  const database = openCloudDatabase({ path: ':memory:' })
+  try {
+    database.exec(`
+      CREATE TABLE user (id TEXT PRIMARY KEY);
+      CREATE TABLE organization (id TEXT PRIMARY KEY);
+      CREATE TABLE member (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL REFERENCES user(id),
+        organizationId TEXT NOT NULL REFERENCES organization(id),
+        role TEXT NOT NULL DEFAULT 'member'
+      );
+    `)
+    migrateCloudSchema(database)
+    const create = (id: string, timestamp: number) => createContactRequest(database, {
+      id,
+      name: 'Ada Lovelace',
+      email: `${id}@example.test`,
+      topic: 'sales',
+      message: 'We need isolated build environments for our team.',
+      sourceHash: `source-hash-that-is-long-enough-${id}`,
+      privacyVersion: '2026-08-24',
+      now: () => timestamp,
+      maximumPerSource: 10,
+      maximumPerEmail: 10,
+    })
+    create('request-a', 100)
+    create('request-b', 200)
+    create('request-c', 200)
+
+    const firstPage = listContactRequests(database, { limit: 2 })
+    expect(firstPage.requests.map(request => request.id)).toEqual([
+      'request-c', 'request-b',
+    ])
+    expect(firstPage.nextCursor).toEqual({ createdAt: 200, id: 'request-b' })
+    expect(listContactRequests(database, {
+      limit: 2,
+      before: firstPage.nextCursor,
+    }).requests.map(request => request.id)).toEqual(['request-a'])
+
+    expect(updateContactRequestStatus(database, {
+      requestId: 'request-b',
+      status: 'qualified',
+      now: () => 250,
+    })).toMatchObject({ id: 'request-b', status: 'qualified', updatedAt: 250 })
+    expect(listContactRequests(database, {
+      status: 'qualified',
+    }).requests.map(request => request.id)).toEqual(['request-b'])
+    expect(updateContactRequestStatus(database, {
+      requestId: 'missing',
+      status: 'closed',
+    })).toBeNull()
+    expect(() => updateContactRequestStatus(database, {
+      requestId: 'request-b',
+      status: 'deleted' as 'closed',
+    })).toThrow('status is invalid')
+
+    expect(deleteContactRequestsCreatedBefore(database, 150)).toBe(1)
+    expect(listContactRequests(database).requests.map(request => request.id)).toEqual([
+      'request-c', 'request-b',
+    ])
   } finally {
     database.close()
   }

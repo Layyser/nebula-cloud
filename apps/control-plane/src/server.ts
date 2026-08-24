@@ -2,6 +2,9 @@ import {
   CONTROL_PLANE_API_VERSION,
   type CloudErrorResponse,
   type ContactRequest,
+  type ContactRequestRecord,
+  type ContactRequestsResponse,
+  type ContactRequestStatus,
   type ContactResponse,
   type ControlPlaneStatus,
   type EnsurePersonalWorkspaceRequest,
@@ -37,6 +40,9 @@ import {
 const service = 'nebula-cloud-control-plane' as const
 const personalUsagePath = '/api/usage/me'
 const contactPath = '/api/contact'
+const contactAdministrationPath = '/internal/v1/contact-requests'
+const contactAdministrationExportPath = '/internal/v1/contact-requests/export.csv'
+const contactAdministrationMemberPath = /^\/internal\/v1\/contact-requests\/([^/]+)$/
 const organizationUsagePath = /^\/api\/organizations\/([^/]+)\/usage$/
 const organizationMembersPath = /^\/api\/organizations\/([^/]+)\/members$/
 const organizationMemberPath = /^\/api\/organizations\/([^/]+)\/members\/([^/]+)$/
@@ -151,6 +157,21 @@ export interface ControlPlaneHandlerOptions {
     workerHostId: string
     update: UpdateWorkerHostRequest
   }) => WorkerHostSummary | null
+  authorizeContactAdministration?: (
+    request: Request,
+  ) => boolean | Promise<boolean>
+  listContactRequests?: (input: {
+    status?: ContactRequestStatus
+    limit: number
+    before: { createdAt: number; id: string } | null
+  }) => {
+    requests: ContactRequestRecord[]
+    nextCursor: { createdAt: number; id: string } | null
+  }
+  updateContactRequestStatus?: (input: {
+    requestId: string
+    status: ContactRequestStatus
+  }) => ContactRequestRecord | null
   trustedContactOrigins?: string[]
   submitContact?: (input: ContactRequest & {
     sourceAddress: string | null
@@ -248,7 +269,75 @@ function isUpdateWorkerHostRequest(value: unknown): value is UpdateWorkerHostReq
 }
 
 const contactTopics = new Set(['sales', 'support', 'security', 'partnerships', 'other'])
+const contactStatuses = new Set<ContactRequestStatus>([
+  'new', 'contacted', 'qualified', 'closed',
+])
 const contactRequestMaximumBytes = 16 * 1024
+const contactAdministrationMaximumBytes = 1024
+const contactExportMaximumRows = 5000
+
+function contactStatus(value: string | null): ContactRequestStatus | undefined | null {
+  if (value === null || value === '') return undefined
+  return contactStatuses.has(value as ContactRequestStatus)
+    ? value as ContactRequestStatus
+    : null
+}
+
+function encodeContactCursor(cursor: { createdAt: number; id: string }): string {
+  return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url')
+}
+
+function decodeContactCursor(value: string | null): {
+  createdAt: number
+  id: string
+} | null | undefined {
+  if (value === null || value === '') return null
+  if (value.length > 512) return undefined
+  try {
+    const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as unknown
+    if (
+      !isRecord(parsed)
+      || !hasOnlyKeys(parsed, ['createdAt', 'id'])
+      || !Number.isSafeInteger(parsed.createdAt)
+      || Number(parsed.createdAt) < 0
+      || typeof parsed.id !== 'string'
+      || parsed.id.length < 1
+      || parsed.id.length > 128
+    ) return undefined
+    return { createdAt: Number(parsed.createdAt), id: parsed.id }
+  } catch {
+    return undefined
+  }
+}
+
+function csvCell(value: string | number | null): string {
+  let text = value === null ? '' : String(value)
+  if (/^[=+\-@]/.test(text)) text = `'${text}`
+  return `"${text.replaceAll('"', '""')}"`
+}
+
+function contactRequestsCSV(requests: ContactRequestRecord[]): string {
+  const header = [
+    'id', 'created_at', 'updated_at', 'status', 'notification_status',
+    'provider_message_id', 'topic', 'name', 'email', 'organization',
+    'message', 'privacy_version',
+  ]
+  const rows = requests.map(request => [
+    request.id,
+    new Date(request.createdAt).toISOString(),
+    new Date(request.updatedAt).toISOString(),
+    request.status,
+    request.notificationStatus,
+    request.providerMessageId,
+    request.topic,
+    request.name,
+    request.email,
+    request.organization,
+    request.message,
+    request.privacyVersion,
+  ].map(csvCell).join(','))
+  return `${header.map(csvCell).join(',')}\r\n${rows.join('\r\n')}\r\n`
+}
 
 async function readBoundedJSON(request: Request, maximumBytes: number): Promise<unknown> {
   const declaredLength = Number(request.headers.get('content-length'))
@@ -350,6 +439,9 @@ export function createControlPlaneHandler({
   listWorkerHosts,
   registerWorkerHost,
   updateWorkerHost,
+  authorizeContactAdministration,
+  listContactRequests,
+  updateContactRequestStatus,
   trustedContactOrigins = [],
   submitContact,
 }: ControlPlaneHandlerOptions = {}): (
@@ -414,6 +506,109 @@ export function createControlPlaneHandler({
           retryable: true,
         } satisfies CloudErrorResponse, 503)
       }
+    }
+
+    const contactMemberMatch = url.pathname.match(contactAdministrationMemberPath)
+    if (
+      url.pathname === contactAdministrationPath
+      || url.pathname === contactAdministrationExportPath
+      || contactMemberMatch
+    ) {
+      if (!authorizeContactAdministration) {
+        return json({
+          error: 'contact administration is unavailable',
+          code: 'contact_administration_unavailable',
+          retryable: true,
+        } satisfies CloudErrorResponse, 503)
+      }
+      if (!await authorizeContactAdministration(request)) {
+        return json({
+          error: 'contact administrator authentication required',
+          code: 'contact_administrator_authentication_required',
+        } satisfies CloudErrorResponse, 401)
+      }
+      if (!listContactRequests || !updateContactRequestStatus) {
+        return json({
+          error: 'contact administration is unavailable',
+          code: 'contact_administration_unavailable',
+          retryable: true,
+        } satisfies CloudErrorResponse, 503)
+      }
+
+      const status = contactStatus(url.searchParams.get('status'))
+      if (status === null) {
+        return json({
+          error: 'contact request status is invalid',
+          code: 'invalid_request',
+        } satisfies CloudErrorResponse, 400)
+      }
+
+      if (request.method === 'GET' && url.pathname === contactAdministrationPath) {
+        const limit = Number(url.searchParams.get('limit') ?? '50')
+        const before = decodeContactCursor(url.searchParams.get('cursor'))
+        if (!Number.isInteger(limit) || limit < 1 || limit > 200 || before === undefined) {
+          return json({
+            error: 'contact request pagination is invalid',
+            code: 'invalid_request',
+          } satisfies CloudErrorResponse, 400)
+        }
+        const result = listContactRequests({ status, limit, before })
+        return json({
+          requests: result.requests,
+          nextCursor: result.nextCursor ? encodeContactCursor(result.nextCursor) : null,
+        } satisfies ContactRequestsResponse)
+      }
+
+      if (request.method === 'GET' && url.pathname === contactAdministrationExportPath) {
+        const requests: ContactRequestRecord[] = []
+        let before: { createdAt: number; id: string } | null = null
+        let nextCursor: { createdAt: number; id: string } | null = null
+        do {
+          const result = listContactRequests({ status, limit: 200, before })
+          requests.push(...result.requests)
+          nextCursor = result.nextCursor
+          before = nextCursor
+        } while (nextCursor && requests.length < contactExportMaximumRows)
+        return new Response(contactRequestsCSV(requests), {
+          headers: {
+            'cache-control': 'no-store',
+            'content-disposition': 'attachment; filename="nubols-contact-requests.csv"',
+            'content-type': 'text/csv; charset=utf-8',
+            ...(nextCursor ? { 'x-nubols-export-truncated': 'true' } : {}),
+          },
+        })
+      }
+
+      if (request.method === 'PATCH' && contactMemberMatch) {
+        let requestId: string
+        try {
+          requestId = decodeURIComponent(contactMemberMatch[1])
+        } catch {
+          return json({ error: 'contact request id is invalid', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+        }
+        let body: unknown
+        try {
+          body = await readBoundedJSON(request, contactAdministrationMaximumBytes)
+        } catch {
+          return json({ error: 'request body must be valid JSON', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+        }
+        const requestedStatus = isRecord(body) && typeof body.status === 'string'
+          ? contactStatus(body.status)
+          : null
+        if (
+          !isRecord(body)
+          || !hasOnlyKeys(body, ['status'])
+          || requestedStatus == null
+        ) {
+          return json({ error: 'contact request update is invalid', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+        }
+        const contact = updateContactRequestStatus({ requestId, status: requestedStatus })
+        return contact
+          ? json(contact)
+          : json({ error: 'contact request not found', code: 'not_found' } satisfies CloudErrorResponse, 404)
+      }
+
+      return json({ error: 'route not found', code: 'not_found' } satisfies CloudErrorResponse, 404)
     }
 
     const workerMemberMatch = url.pathname.match(workerAdministrationMemberPath)

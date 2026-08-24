@@ -242,6 +242,129 @@ test('contact requests reject cross-origin, oversized, and honeypot traffic safe
   expect(calls).toBe(0)
 })
 
+test('protects and operates contact requests through the platform credential', async () => {
+  const calls: unknown[] = []
+  const contact = {
+    id: 'request-1',
+    name: '=Ada Lovelace',
+    email: 'ada@example.test',
+    organization: 'Analytical Engines',
+    topic: 'sales' as const,
+    message: 'We need isolated build environments.',
+    status: 'new' as const,
+    notificationStatus: 'sent' as const,
+    providerMessageId: 'provider-1',
+    privacyVersion: '2026-08-24',
+    createdAt: 100,
+    updatedAt: 110,
+  }
+  const handler = createControlPlaneHandler({
+    authorizeContactAdministration: request => (
+      request.headers.get('authorization') === 'Bearer platform-secret'
+    ),
+    listContactRequests: input => {
+      calls.push({ operation: 'list', input })
+      return {
+        requests: [contact],
+        nextCursor: input.before ? null : { createdAt: 100, id: 'request-1' },
+      }
+    },
+    updateContactRequestStatus: input => {
+      calls.push({ operation: 'update', input })
+      return { ...contact, status: input.status }
+    },
+  })
+
+  const denied = await handler(new Request(
+    'http://control-plane.test/internal/v1/contact-requests',
+  ))
+  expect(denied.status).toBe(401)
+  expect(calls).toHaveLength(0)
+
+  const firstPage = await handler(new Request(
+    'http://control-plane.test/internal/v1/contact-requests?status=new&limit=25',
+    { headers: { authorization: 'Bearer platform-secret' } },
+  ))
+  expect(firstPage.status).toBe(200)
+  const firstBody = await firstPage.json()
+  expect(firstBody.requests).toEqual([contact])
+  expect(typeof firstBody.nextCursor).toBe('string')
+
+  const secondPage = await handler(new Request(
+    `http://control-plane.test/internal/v1/contact-requests?cursor=${encodeURIComponent(firstBody.nextCursor)}`,
+    { headers: { authorization: 'Bearer platform-secret' } },
+  ))
+  expect(secondPage.status).toBe(200)
+  expect(calls[1]).toEqual({
+    operation: 'list',
+    input: {
+      status: undefined,
+      limit: 50,
+      before: { createdAt: 100, id: 'request-1' },
+    },
+  })
+
+  const updated = await handler(new Request(
+    'http://control-plane.test/internal/v1/contact-requests/request-1',
+    {
+      method: 'PATCH',
+      headers: {
+        authorization: 'Bearer platform-secret',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ status: 'qualified' }),
+    },
+  ))
+  expect(updated.status).toBe(200)
+  expect((await updated.json()).status).toBe('qualified')
+})
+
+test('exports bounded contact CSV safely and rejects invalid administration input', async () => {
+  const contact = {
+    id: 'request-1',
+    name: '=2+2',
+    email: 'ada@example.test',
+    organization: null,
+    topic: 'sales' as const,
+    message: 'A message with "quotes" and, commas.',
+    status: 'new' as const,
+    notificationStatus: 'pending' as const,
+    providerMessageId: null,
+    privacyVersion: '2026-08-24',
+    createdAt: 100,
+    updatedAt: 100,
+  }
+  const handler = createControlPlaneHandler({
+    authorizeContactAdministration: () => true,
+    listContactRequests: () => ({ requests: [contact], nextCursor: null }),
+    updateContactRequestStatus: () => contact,
+  })
+  const exported = await handler(new Request(
+    'http://control-plane.test/internal/v1/contact-requests/export.csv',
+  ))
+  expect(exported.status).toBe(200)
+  expect(exported.headers.get('content-type')).toBe('text/csv; charset=utf-8')
+  expect(exported.headers.get('content-disposition')).toContain('attachment')
+  const csv = await exported.text()
+  expect(csv).toContain('"\'=2+2"')
+  expect(csv).toContain('"A message with ""quotes"" and, commas."')
+
+  const invalidStatus = await handler(new Request(
+    'http://control-plane.test/internal/v1/contact-requests?status=deleted',
+  ))
+  expect(invalidStatus.status).toBe(400)
+
+  const invalidUpdate = await handler(new Request(
+    'http://control-plane.test/internal/v1/contact-requests/request-1',
+    {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ status: 'deleted' }),
+    },
+  ))
+  expect(invalidUpdate.status).toBe(400)
+})
+
 test('serves personal usage only for the active organization', async () => {
   const handler = createControlPlaneHandler({
     resolveSession: async () => ({

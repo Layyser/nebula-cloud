@@ -233,10 +233,14 @@ production cannot start with filesystem email or verification disabled.
       the message body or email address in request logs.
 - [x] Notify the correct fixed role mailbox, set a safe reply-to address, and
       show deterministic pending/success/error states without duplicate submits.
-- [ ] Add an owner-only export or operational query and a simple follow-up state
+- [x] Add an owner-only export or operational query and a simple follow-up state
       (`new`, `contacted`, `qualified`, `closed`) before outreach starts.
-- [ ] Link the real privacy notice beside the submit action and define retention
-      for rejected and accepted requests.
+- [x] Link the contact-specific privacy draft beside the submit action and
+      enforce the documented retention boundary: rejected/honeypot submissions
+      are not persisted; accepted database records expire after 730 days.
+- [ ] Replace the privacy draft with counsel-reviewed language, the controller's
+      complete legal identity/address, named production processors/transfers,
+      and verified 730-day role-mailbox deletion before outreach.
 
 **Acceptance:** a real external submission survives a process restart, reaches
 the role inbox exactly once, can be tracked without inspecting production logs,

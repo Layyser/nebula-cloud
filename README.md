@@ -49,6 +49,7 @@ builds reproducible until it is replaced by a package-registry release.
 
 - A separately buildable Bun process
 - Liveness, readiness, and versioned status endpoints
+- A platform-admin-only contact-request query, CSV export, and follow-up-state API
 - SQLite initialization before the process becomes ready
 - Better Auth HTTP routes mounted under `/api/auth/*`
 - Authenticated personal-workspace resolution under `/api/workspaces/personal`
@@ -197,6 +198,9 @@ The control-plane scaffold listens on `127.0.0.1:7790` by default:
 GET /health/live
 GET /health/ready
 GET /internal/v1/status
+GET /internal/v1/contact-requests
+GET /internal/v1/contact-requests/export.csv
+PATCH /internal/v1/contact-requests/:id
 ALL /api/auth/*                    Better Auth handler
 POST /api/workspaces/personal     Resolve the signed-in member's workspace
 POST /api/workspaces/personal/ensure-running
@@ -212,6 +216,16 @@ Its default development database is
 `NEBULA_CLOUD_TRUSTED_ORIGINS` is a comma-separated allowlist for browser
 origins. The development default accepts Vite on `localhost:5173` and
 `127.0.0.1:5173`.
+
+Contact administration uses `NEBULA_PLATFORM_ADMIN_TOKEN`, never a browser or
+organization-owner session. The list accepts `status`, `limit`, and opaque
+`cursor` query parameters; the export accepts the optional `status` filter and
+is capped at 5,000 rows per download. Status updates accept only `new`,
+`contacted`, `qualified`, or `closed`. CSV cells are quoted and values that
+spreadsheet software could interpret as formulas are neutralized. The
+application deletes accepted contact records after
+`NEBULA_CONTACT_RETENTION_DAYS` (730 by default); rejected and honeypot
+submissions are not persisted.
 
 ## Authentication scope
 
