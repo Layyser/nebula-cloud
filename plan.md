@@ -241,29 +241,40 @@ and abusive submissions are throttled without allowing arbitrary email relay.
 
 #### 3. Workspace-owned Docker with strict isolation
 
-This is Docker-in-Docker for the user experience, implemented as one rootless
-daemon per outer workspace. It is never the host daemon and never privileged.
+The target is one Firecracker microVM per Operator, with a normal Docker daemon
+inside the guest. The user gets a private Linux kernel, process tree, filesystem,
+Docker socket, and root-equivalent control inside that machine without receiving
+the host Docker socket or privileges in the Worker host.
 
-- [ ] Complete a host/kernel feasibility probe for rootless Docker under the
-      exact production outer-container profile: user namespaces, cgroup v2
-      delegation, seccomp/AppArmor, overlay/fuse-overlayfs, networking, and XFS
-      project quotas. Fail closed if the profile cannot enforce every boundary.
 - [x] Record the first hardened local probe. Plain rootless DinD failed under
       `cap-drop ALL` plus `no-new-privileges`, matching Docker's documented use
       of a privileged outer container. The Worker now supports an explicit,
       validated workspace-only OCI runtime in desired state, and ships a
-      fail-closed host prerequisite probe. A Sysbox/exclusive-UID or stronger
-      candidate still must pass on the production kernel before this item is
-      complete.
-- [ ] Give every workspace a distinct PID, mount, IPC, user, cgroup, and network
-      namespace plus a private daemon socket and data root under
-      `/home/nebula/.local/share/docker`.
-- [ ] Preserve outer hard limits as the non-bypassable aggregate boundary for
-      the daemon and every nested process: memory, CPU, PIDs, disk, open files,
-      logs, build concurrency, and network egress.
-- [ ] Block privileged mode, host PID/IPC/network, devices, arbitrary bind
-      mounts, host runtime sockets, kernel-module operations, and access to
-      Worker/control-plane/metadata networks regardless of Docker CLI options.
+      fail-closed host prerequisite probe. Do not continue toward Sysbox or a
+      privileged outer Docker workspace as the production customer boundary.
+- [x] Run a local Firecracker 1.16.1 feasibility benchmark under KVM. Docker
+      started normally and ran a nested container. The actual Nebula workspace
+      image plus Docker reached health in 4.40 seconds with 512 MiB configured
+      RAM and used about 313 MiB at warm idle; a 1 GiB guest reached health in
+      3.27 seconds and used about 324 MiB at warm idle. The reproducible fixture
+      and full interpretation live in `nebula-worker/benchmarks/firecracker/`.
+- [ ] Add a deliberately small Worker microVM prototype: Firecracker jailer,
+      immutable kernel/root image, one writable workspace disk, one TAP device,
+      one host cgroup, serial/vsock console, and start/stop/delete operations.
+      Do not build fleet rollout, snapshots, or a general scheduler in this
+      first slice.
+- [ ] Run Nebula as an unprivileged guest service while allowing the customer
+      normal root/sudo and Docker privileges inside the guest. Never mount a host
+      runtime socket, Worker path, control-plane credential, or another
+      Operator's disk into the microVM.
+- [ ] Enforce the non-bypassable host envelope around each Firecracker process:
+      configured guest RAM plus VMM/cache headroom, CPU bandwidth, PIDs, disk and
+      I/O, open files, logs, and network egress. Treat the full configured guest
+      memory as committed capacity even when warm-idle RSS is lower.
+- [ ] Use ballooning only for cooperative idle reclamation, never as the sole
+      memory limit or admission-control guarantee. Suspend or snapshot idle
+      Operators and distinguish provisioned seats from simultaneously active
+      machines in capacity planning.
 - [ ] Add two-workspace adversarial tests proving workspace A cannot enumerate,
       inspect, signal, ptrace, read `/proc` details for, mount, or network-reach
       workspace B's daemon, processes, images, containers, volumes, or secrets.
@@ -271,8 +282,8 @@ daemon per outer workspace. It is never the host daemon and never privileged.
       restart persistence, daemon crash recovery, and workspace deletion.
 
 **Acceptance:** a normal Docker CLI workflow works inside each Operator, while
-all isolation tests pass on the production kernel and nested workloads cannot
-make the outer workspace exceed its enforced envelope.
+all isolation tests pass on the production kernel and guest workloads cannot
+make the Firecracker process exceed its host-enforced envelope.
 
 #### 4. Controlled HTTP and TCP publication
 
@@ -307,8 +318,8 @@ closed.
 ```text
 mailbox + transactional adapter
   -> Contact Sales intake
-  -> rootless nested-runtime feasibility proof
-  -> nested-runtime implementation and isolation suite
+  -> Firecracker + Docker feasibility proof
+  -> microVM prototype and isolation suite
   -> publication desired state and broker
   -> HTTP/TLS ingress
   -> raw-TCP ingress
@@ -317,9 +328,9 @@ mailbox + transactional adapter
 ```
 
 Contact Sales depends on working notification mail. Publication depends on the
-workspace network and ownership boundary established by nested containers. Raw
-TCP follows HTTP because its abuse, allocation, and revocation surface is larger.
-Do not parallelize by weakening these dependencies.
+workspace network and ownership boundary established by the microVM. Raw TCP
+follows HTTP because its abuse, allocation, and revocation surface is larger. Do
+not parallelize by weakening these dependencies.
 
 **Gate:** before the first outreach batch, submit the production Contact Sales
 form, receive and reply from `sales@nubols.com`, run a bounded containerized API,
@@ -1071,13 +1082,13 @@ Continue locally without purchasing infrastructure in this order:
    copy next.
 5. [x] Add the worker registry and deterministic placement contracts with two
    local worker fixtures before renting a second host.
-6. Continue the nested-container feasibility gate on a dedicated Linux test
-   host. Plain rootless DinD is rejected under the current profile; install and
-   evaluate a dedicated OCI runtime with exclusive per-workspace UID/GID maps,
-   then implement the inner daemon only if the two-workspace adversarial suite
-   passes without privileged mode or a host runtime socket.
+6. [x] Replace the nested-container direction with a Firecracker feasibility
+   decision. The local KVM benchmark proved normal Docker and the real Nebula
+   runtime can boot inside a microVM with acceptable warm-idle memory. Next,
+   build only the small Worker prototype described in G1A and repeat its
+   isolation/capacity tests on the intended production Linux host.
 7. Implement publication desired state and workspace ownership checks only
-   after the nested network/runtime boundary passes; deliver HTTP/TLS before
+   after the microVM network/runtime boundary passes; deliver HTTP/TLS before
    allocated raw TCP.
 
 ## 7. Source checklist
@@ -1135,6 +1146,10 @@ Official/current references used to prepare this plan:
 - Sysbox Docker-in-Docker and security boundary:
   <https://github.com/nestybox/sysbox/blob/master/docs/user-guide/dind.md>
   <https://github.com/nestybox/sysbox/blob/master/docs/user-guide/security.md>
+- Firecracker design, production setup, and memory ballooning:
+  <https://github.com/firecracker-microvm/firecracker/blob/main/docs/design.md>
+  <https://github.com/firecracker-microvm/firecracker/blob/main/docs/prod-host-setup.md>
+  <https://github.com/firecracker-microvm/firecracker/blob/main/docs/ballooning.md>
 
 Re-check legal, tax, Stripe, and vendor requirements immediately before launch;
 dates, product behavior, and official guidance can change.
