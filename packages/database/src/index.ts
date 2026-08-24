@@ -334,6 +334,36 @@ const migrations = [
         CHECK (total_workspace_slots >= 0);
     `,
   },
+  {
+    id: '0013_contact_request',
+    sql: `
+      CREATE TABLE contact_request (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL,
+        organization TEXT,
+        topic TEXT NOT NULL
+          CHECK (topic IN ('sales', 'support', 'security', 'partnerships', 'other')),
+        message TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'new'
+          CHECK (status IN ('new', 'contacted', 'qualified', 'closed')),
+        notification_status TEXT NOT NULL DEFAULT 'pending'
+          CHECK (notification_status IN ('pending', 'sent', 'failed')),
+        provider_message_id TEXT,
+        source_hash TEXT NOT NULL,
+        privacy_version TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX contact_request_source_time_idx
+        ON contact_request(source_hash, created_at DESC);
+      CREATE INDEX contact_request_email_time_idx
+        ON contact_request(email, created_at DESC);
+      CREATE INDEX contact_request_status_time_idx
+        ON contact_request(status, created_at DESC);
+    `,
+  },
 ] as const
 
 export type WorkspaceState = 'pending' | 'provisioning' | 'ready' | 'stopped' | 'failed'
@@ -643,6 +673,50 @@ export interface ListOrganizationAuditEventsOptions extends OrganizationAccessOp
   before?: number | null
 }
 
+export type ContactTopic = 'sales' | 'support' | 'security' | 'partnerships' | 'other'
+export type ContactRequestStatus = 'new' | 'contacted' | 'qualified' | 'closed'
+export type ContactNotificationStatus = 'pending' | 'sent' | 'failed'
+
+export interface ContactRequest {
+  id: string
+  name: string
+  email: string
+  organization: string | null
+  topic: ContactTopic
+  message: string
+  status: ContactRequestStatus
+  notificationStatus: ContactNotificationStatus
+  providerMessageId: string | null
+  sourceHash: string
+  privacyVersion: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface CreateContactRequestInput {
+  id: string
+  name: string
+  email: string
+  organization?: string | null
+  topic: ContactTopic
+  message: string
+  sourceHash: string
+  privacyVersion: string
+  now?: () => number
+  windowMs?: number
+  maximumPerSource?: number
+  maximumPerEmail?: number
+}
+
+export class ContactRateLimitError extends Error {
+  readonly code = 'contact_rate_limited'
+
+  constructor() {
+    super('Too many contact requests')
+    this.name = 'ContactRateLimitError'
+  }
+}
+
 export class WorkspaceMembershipNotFoundError extends Error {
   readonly code = 'workspace_membership_not_found'
 
@@ -735,6 +809,22 @@ interface ProvisioningJobRow {
   completed_at: number | null
 }
 
+interface ContactRequestRow {
+  id: string
+  name: string
+  email: string
+  organization: string | null
+  topic: ContactTopic
+  message: string
+  status: ContactRequestStatus
+  notification_status: ContactNotificationStatus
+  provider_message_id: string | null
+  source_hash: string
+  privacy_version: string
+  created_at: number
+  updated_at: number
+}
+
 function toPersonalWorkspace(row: WorkspaceRow): PersonalWorkspace {
   return {
     id: row.id,
@@ -796,6 +886,24 @@ function toProvisioningJob(row: ProvisioningJobRow): ProvisioningJob {
   }
 }
 
+function toContactRequest(row: ContactRequestRow): ContactRequest {
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    organization: row.organization,
+    topic: row.topic,
+    message: row.message,
+    status: row.status,
+    notificationStatus: row.notification_status,
+    providerMessageId: row.provider_message_id,
+    sourceHash: row.source_hash,
+    privacyVersion: row.privacy_version,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
 export interface OpenCloudDatabaseOptions {
   path: string
 }
@@ -839,6 +947,132 @@ export function migrateCloudSchema(database: Database): void {
       insert.run(migration.id, Date.now())
     })()
   }
+}
+
+function boundedContactText(
+  value: string,
+  field: string,
+  minimum: number,
+  maximum: number,
+): string {
+  const normalized = value.trim()
+  if (normalized.length < minimum || normalized.length > maximum) {
+    throw new Error(`${field} must contain between ${minimum} and ${maximum} characters`)
+  }
+  return normalized
+}
+
+export function getContactRequestById(
+  database: Database,
+  requestId: string,
+): ContactRequest | null {
+  const row = database.query<ContactRequestRow, [string]>(
+    'SELECT * FROM contact_request WHERE id = ?',
+  ).get(requestId)
+  return row ? toContactRequest(row) : null
+}
+
+export function createContactRequest(
+  database: Database,
+  input: CreateContactRequestInput,
+): { request: ContactRequest; created: boolean } {
+  const id = boundedContactText(input.id, 'id', 1, 128)
+  const name = boundedContactText(input.name, 'name', 1, 120)
+  const email = boundedContactText(input.email, 'email', 3, 254).toLowerCase()
+  const organization = input.organization?.trim().slice(0, 160) || null
+  const message = boundedContactText(input.message, 'message', 10, 4000)
+  const sourceHash = boundedContactText(input.sourceHash, 'sourceHash', 16, 128)
+  const privacyVersion = boundedContactText(
+    input.privacyVersion,
+    'privacyVersion',
+    1,
+    64,
+  )
+  const now = input.now ?? Date.now
+  const windowMs = input.windowMs ?? 60 * 60 * 1000
+  const maximumPerSource = input.maximumPerSource ?? 5
+  const maximumPerEmail = input.maximumPerEmail ?? 3
+  if (!Number.isSafeInteger(windowMs) || windowMs <= 0) {
+    throw new Error('Contact rate-limit window must be a positive integer')
+  }
+  if (!Number.isSafeInteger(maximumPerSource) || maximumPerSource <= 0) {
+    throw new Error('Contact source limit must be a positive integer')
+  }
+  if (!Number.isSafeInteger(maximumPerEmail) || maximumPerEmail <= 0) {
+    throw new Error('Contact email limit must be a positive integer')
+  }
+
+  return database.transaction(() => {
+    const existing = getContactRequestById(database, id)
+    if (existing) return { request: existing, created: false }
+
+    const timestamp = now()
+    const since = timestamp - windowMs
+    const counts = database.query<{
+      source_count: number
+      email_count: number
+    }, [string, number, string, number]>(`
+      SELECT
+        (SELECT COUNT(*) FROM contact_request
+          WHERE source_hash = ? AND created_at >= ?) AS source_count,
+        (SELECT COUNT(*) FROM contact_request
+          WHERE email = ? AND created_at >= ?) AS email_count
+    `).get(sourceHash, since, email, since)
+    if (
+      (counts?.source_count ?? 0) >= maximumPerSource
+      || (counts?.email_count ?? 0) >= maximumPerEmail
+    ) {
+      throw new ContactRateLimitError()
+    }
+
+    database.prepare(`
+      INSERT INTO contact_request (
+        id, name, email, organization, topic, message, source_hash,
+        privacy_version, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      name,
+      email,
+      organization,
+      input.topic,
+      message,
+      sourceHash,
+      privacyVersion,
+      timestamp,
+      timestamp,
+    )
+    const request = getContactRequestById(database, id)
+    if (!request) throw new Error('Contact request could not be resolved')
+    return { request, created: true }
+  }).immediate()
+}
+
+export function setContactNotificationResult(
+  database: Database,
+  input: {
+    requestId: string
+    status: Extract<ContactNotificationStatus, 'sent' | 'failed'>
+    providerMessageId?: string | null
+    now?: () => number
+  },
+): ContactRequest {
+  const result = database.prepare(`
+    UPDATE contact_request
+    SET notification_status = ?,
+        provider_message_id = ?,
+        updated_at = ?
+    WHERE id = ?
+  `).run(
+    input.status,
+    input.providerMessageId?.trim() || null,
+    (input.now ?? Date.now)(),
+    input.requestId,
+  )
+  if (result.changes !== 1) throw new Error('Contact request was not found')
+  const request = getContactRequestById(database, input.requestId)
+  if (!request) throw new Error('Contact request disappeared')
+  return request
 }
 
 export function ensurePersonalWorkspace(

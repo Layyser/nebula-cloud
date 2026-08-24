@@ -171,6 +171,161 @@ or confidential files. Use synthetic data and founder-controlled systems.
 problem, two commit time to a real next step, one identifies buyer/budget, and the
 founder can state the initial customer, workflow, and measurable outcome clearly.
 
+### G1A — Pre-outreach product gate (24 August reconciliation)
+
+Do not begin cold sales outreach until the four capabilities below can be shown
+reliably in a founder-controlled demo. This gate does not require unrestricted
+public signup, paid billing, or production customer data. It does require the
+same security boundaries that the beta will use; the demo must not depend on a
+host Docker socket, privileged workspace, arbitrary host-port publication, or a
+contact form that silently drops submissions.
+
+#### 1. Domain mail and transactional delivery
+
+Human mailboxes and application-generated mail are separate systems:
+
+| Need | Shortlist | Decision rule |
+|---|---|---|
+| Human inboxes and aliases | Proton Mail for Business, Fastmail, Google Workspace, Microsoft 365, Zoho Mail | Use one real founder mailbox plus role aliases; choose the suite based on privacy, calendar/docs needs, and cost |
+| Verification, reset, invitations, and form notifications | Resend, Postmark, Brevo, Scaleway TEM | Use the existing provider-neutral sender; require API delivery IDs, webhooks, suppression handling, and a reviewed DPA/subprocessor location |
+| Later shared support queue | Plain mailbox initially; Help Scout/Zendesk/Front only when volume requires ownership/SLA workflow | Do not buy a ticketing system for a one-person beta |
+
+**Recommended starting combination:** Proton Mail Essentials for one human
+mailbox with `hello@`, `sales@`, `support@`, `security@`, `privacy@`, and
+`billing@` aliases, plus a transactional provider on `send.nubols.com`. Resend
+is the quickest adapter to ship, but its EU sending region does not provide EU
+data residency for account metadata/logs; review that transfer and DPA before
+production. If strict EU residency is required, evaluate Brevo or Scaleway TEM
+against the same sender contract instead of coupling auth code to one vendor.
+
+- [ ] Create the mailbox administrator account with hardware-backed MFA and
+      recovery codes stored in the Nubols vault.
+- [ ] Configure the real founder mailbox and role aliases; verify sending and
+      replies from each customer-facing identity.
+- [ ] Configure MX, SPF, DKIM, and DMARC for human mail on `nubols.com` and keep
+      transactional sending isolated on `send.nubols.com`.
+- [x] Add one production transactional adapter to the existing sender interface,
+      with secret validation, request timeout, provider message ID capture, and
+      fail-closed production configuration. The Resend adapter and production
+      startup guards were completed locally on 24 August; credentials, DNS, and
+      delivery webhooks remain deployment work.
+- [ ] Persist delivery attempts/status without storing message bodies; process
+      signed delivered, delayed, bounced, complained, and suppressed webhooks.
+- [ ] Complete verification, password-reset, invitation, and reply-path tests in
+      Gmail, Outlook, and Apple/iCloud before enabling required verification.
+
+**Acceptance:** all role addresses can send and receive replies; application
+emails pass SPF/DKIM/DMARC; a bounce is visible and suppresses unsafe retries;
+production cannot start with filesystem email or verification disabled.
+
+#### 2. Wire Contact Sales end to end
+
+- [x] Replace the `/contact` placeholder with a real controlled form posting to
+      a same-origin control-plane endpoint.
+- [x] Validate and bound name, work email, organization, topic, and message;
+      include a hidden honeypot, per-IP/per-address throttles, maximum body size,
+      and generic responses that do not disclose internal routing.
+- [x] Persist a minimal contact request with status, timestamps, source hash,
+      consent/privacy version, and transactional provider message ID. Never log
+      the message body or email address in request logs.
+- [x] Notify the correct fixed role mailbox, set a safe reply-to address, and
+      show deterministic pending/success/error states without duplicate submits.
+- [ ] Add an owner-only export or operational query and a simple follow-up state
+      (`new`, `contacted`, `qualified`, `closed`) before outreach starts.
+- [ ] Link the real privacy notice beside the submit action and define retention
+      for rejected and accepted requests.
+
+**Acceptance:** a real external submission survives a process restart, reaches
+the role inbox exactly once, can be tracked without inspecting production logs,
+and abusive submissions are throttled without allowing arbitrary email relay.
+
+#### 3. Workspace-owned Docker with strict isolation
+
+This is Docker-in-Docker for the user experience, implemented as one rootless
+daemon per outer workspace. It is never the host daemon and never privileged.
+
+- [ ] Complete a host/kernel feasibility probe for rootless Docker under the
+      exact production outer-container profile: user namespaces, cgroup v2
+      delegation, seccomp/AppArmor, overlay/fuse-overlayfs, networking, and XFS
+      project quotas. Fail closed if the profile cannot enforce every boundary.
+- [x] Record the first hardened local probe. Plain rootless DinD failed under
+      `cap-drop ALL` plus `no-new-privileges`, matching Docker's documented use
+      of a privileged outer container. The Worker now supports an explicit,
+      validated workspace-only OCI runtime in desired state, and ships a
+      fail-closed host prerequisite probe. A Sysbox/exclusive-UID or stronger
+      candidate still must pass on the production kernel before this item is
+      complete.
+- [ ] Give every workspace a distinct PID, mount, IPC, user, cgroup, and network
+      namespace plus a private daemon socket and data root under
+      `/home/nebula/.local/share/docker`.
+- [ ] Preserve outer hard limits as the non-bypassable aggregate boundary for
+      the daemon and every nested process: memory, CPU, PIDs, disk, open files,
+      logs, build concurrency, and network egress.
+- [ ] Block privileged mode, host PID/IPC/network, devices, arbitrary bind
+      mounts, host runtime sockets, kernel-module operations, and access to
+      Worker/control-plane/metadata networks regardless of Docker CLI options.
+- [ ] Add two-workspace adversarial tests proving workspace A cannot enumerate,
+      inspect, signal, ptrace, read `/proc` details for, mount, or network-reach
+      workspace B's daemon, processes, images, containers, volumes, or secrets.
+- [ ] Test fork bombs, memory pressure, disk/image/build-cache exhaustion,
+      restart persistence, daemon crash recovery, and workspace deletion.
+
+**Acceptance:** a normal Docker CLI workflow works inside each Operator, while
+all isolation tests pass on the production kernel and nested workloads cannot
+make the outer workspace exceed its enforced envelope.
+
+#### 4. Controlled HTTP and TCP publication
+
+- [ ] Implement durable workspace-owned `published_service` desired state and
+      audit events before changing DNS or exposing any Worker port.
+- [ ] Add a workspace-scoped broker that accepts only protocol, service target,
+      target port, visibility/auth policy, and bounded TTL; it cannot accept a
+      Worker, host IP, host port, DNS zone, or another workspace ID.
+- [ ] Route HTTP/HTTPS through wildcard TLS on `*.apps.nubols.com`; issue one
+      unpredictable hostname per publication and revoke it independently of the
+      workspace lifecycle.
+- [ ] Route raw TCP through an ingress-owned allocated port on
+      `*.tcp.nubols.com`. Add optional SRV records for protocols such as
+      Minecraft; never imply that generic DNS carries a TCP port.
+- [ ] Keep databases private by default. Public database routes require TLS,
+      generated credentials, bounded expiry, connection limits, and preferably
+      source-IP allowlists.
+- [ ] Enforce service-count, port, connection, bandwidth, and egress limits plus
+      global/per-worker kill switches, expiry reconciliation, and immediate
+      route revocation.
+- [ ] Prove one HTTPS API, one database route under its stricter policy, and one
+      Minecraft/raw-TCP route from the public internet, including restart,
+      expiry, deletion, wrong-workspace targeting, and worker outage.
+
+**Acceptance:** the displayed endpoint reaches only the exact recorded target;
+revocation/expiry closes it promptly; no route reveals a Worker address or opens
+an arbitrary host port; cross-workspace and stale-generation routing tests fail
+closed.
+
+#### Required order and outreach gate
+
+```text
+mailbox + transactional adapter
+  -> Contact Sales intake
+  -> rootless nested-runtime feasibility proof
+  -> nested-runtime implementation and isolation suite
+  -> publication desired state and broker
+  -> HTTP/TLS ingress
+  -> raw-TCP ingress
+  -> founder-controlled end-to-end demo
+  -> sales outreach
+```
+
+Contact Sales depends on working notification mail. Publication depends on the
+workspace network and ownership boundary established by nested containers. Raw
+TCP follows HTTP because its abuse, allocation, and revocation surface is larger.
+Do not parallelize by weakening these dependencies.
+
+**Gate:** before the first outreach batch, submit the production Contact Sales
+form, receive and reply from `sales@nubols.com`, run a bounded containerized API,
+publish it over managed HTTPS, publish and revoke one raw-TCP demo service, and
+attach the two-workspace isolation test report to the release checklist.
+
 ### G1B — Form Nubols correctly in Spain (after validation; finish before charging)
 
 **Recommendation:** create a **Sociedad de Responsabilidad Limitada (S.L.)**,
@@ -906,13 +1061,24 @@ Continue locally without purchasing infrastructure in this order:
    personal/organization usage views and member/operator subviews are already
    implemented. Entitled-member, provisioning-failure, and worker-health cards
    remain blocked on the entitlement and worker-registry contracts below.
-3. Implement verified email, password recovery, and invitation delivery behind
-   a provider interface that can use a local test transport before DNS/email
-   service purchase.
-4. Add the worker registry and deterministic placement contracts with two local
-   worker fixtures before renting a second host.
-5. Implement and adversarially test the nested-container quota/isolation
-   contract before any public service publication work.
+3. [x] Implement verified email, password recovery, and invitation delivery
+   behind a provider interface that can use a local test transport before
+   DNS/email service purchase. A production Resend adapter now exists; provider
+   webhooks, delivery diagnostics, and real DNS/client tests remain open in G1A.
+4. [x] Wire the public Contact form through bounded validation, durable
+   idempotent storage, persisted source/address throttles, and a fixed-recipient
+   email notification. Add owner export/follow-up state UI and reviewed privacy
+   copy next.
+5. [x] Add the worker registry and deterministic placement contracts with two
+   local worker fixtures before renting a second host.
+6. Continue the nested-container feasibility gate on a dedicated Linux test
+   host. Plain rootless DinD is rejected under the current profile; install and
+   evaluate a dedicated OCI runtime with exclusive per-workspace UID/GID maps,
+   then implement the inner daemon only if the two-workspace adversarial suite
+   passes without privileged mode or a host runtime socket.
+7. Implement publication desired state and workspace ownership checks only
+   after the nested network/runtime boundary passes; deliver HTTP/TLS before
+   allocated raw TCP.
 
 ## 7. Source checklist
 
@@ -955,6 +1121,20 @@ Official/current references used to prepare this plan:
   <https://docs.stripe.com/security/guide>
 - Email domain authentication overview:
   <https://www.cloudflare.com/learning/email-security/dmarc-dkim-spf/>
+- Proton Mail custom-domain business email:
+  <https://proton.me/business/mail/custom-email-domain>
+- Fastmail custom domains and aliases:
+  <https://www.fastmail.com/features/domains/>
+- Google Workspace business email plans:
+  <https://workspace.google.com/pricing.html>
+- Resend sending regions and data-residency limitation:
+  <https://resend.com/docs/dashboard/domains/regions>
+- Docker rootless prerequisites and rootless DinD guidance:
+  <https://docs.docker.com/engine/security/rootless/>
+  <https://docs.docker.com/engine/security/rootless/tips/>
+- Sysbox Docker-in-Docker and security boundary:
+  <https://github.com/nestybox/sysbox/blob/master/docs/user-guide/dind.md>
+  <https://github.com/nestybox/sysbox/blob/master/docs/user-guide/security.md>
 
 Re-check legal, tax, Stripe, and vendor requirements immediately before launch;
 dates, product behavior, and official guidance can change.

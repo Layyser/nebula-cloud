@@ -107,28 +107,6 @@ button:not(:disabled) {
   margin: 3rem 0;
 }
 
-html:has(.landing-page) {
-  scrollbar-color: rgb(178 186 194 / 62%) transparent;
-  scrollbar-width: auto;
-}
-
-html:has(.landing-page)::-webkit-scrollbar {
-  width: 13px;
-}
-
-html:has(.landing-page)::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-html:has(.landing-page)::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: rgb(178 186 194 / 62%);
-}
-
-html:has(.landing-page)::-webkit-scrollbar-thumb:hover {
-  background: rgb(205 211 217 / 78%);
-}
-
 :root {
   --color-surface-auth: rgb(13 14 15 / 90%);
   --color-surface-field: rgb(40 40 40 / 50%);

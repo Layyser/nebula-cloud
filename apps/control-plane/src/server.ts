@@ -1,6 +1,8 @@
 import {
   CONTROL_PLANE_API_VERSION,
   type CloudErrorResponse,
+  type ContactRequest,
+  type ContactResponse,
   type ControlPlaneStatus,
   type EnsurePersonalWorkspaceRequest,
   type EnsureWorkspaceRunningResponse,
@@ -26,6 +28,7 @@ import {
 } from '@nebula-cloud/contracts'
 import {
   OrganizationAccessDeniedError,
+  ContactRateLimitError,
   OrganizationMemberMutationError,
   UsageAccessDeniedError,
   WorkspaceMembershipNotFoundError,
@@ -33,6 +36,7 @@ import {
 
 const service = 'nebula-cloud-control-plane' as const
 const personalUsagePath = '/api/usage/me'
+const contactPath = '/api/contact'
 const organizationUsagePath = /^\/api\/organizations\/([^/]+)\/usage$/
 const organizationMembersPath = /^\/api\/organizations\/([^/]+)\/members$/
 const organizationMemberPath = /^\/api\/organizations\/([^/]+)\/members\/([^/]+)$/
@@ -147,6 +151,14 @@ export interface ControlPlaneHandlerOptions {
     workerHostId: string
     update: UpdateWorkerHostRequest
   }) => WorkerHostSummary | null
+  trustedContactOrigins?: string[]
+  submitContact?: (input: ContactRequest & {
+    sourceAddress: string | null
+  }) => Promise<ContactResponse>
+}
+
+export interface ControlPlaneRequestContext {
+  clientAddress?: string | null
 }
 
 function json(value: unknown, status = 200): Response {
@@ -235,6 +247,84 @@ function isUpdateWorkerHostRequest(value: unknown): value is UpdateWorkerHostReq
   ].includes(String(value.action))
 }
 
+const contactTopics = new Set(['sales', 'support', 'security', 'partnerships', 'other'])
+const contactRequestMaximumBytes = 16 * 1024
+
+async function readBoundedJSON(request: Request, maximumBytes: number): Promise<unknown> {
+  const declaredLength = Number(request.headers.get('content-length'))
+  if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
+    throw new Error('request_too_large')
+  }
+  if (!request.body) throw new Error('invalid_json')
+  const reader = request.body.getReader()
+  const chunks: Uint8Array[] = []
+  let length = 0
+  while (true) {
+    const chunk = await reader.read()
+    if (chunk.done) break
+    length += chunk.value.byteLength
+    if (length > maximumBytes) {
+      await reader.cancel()
+      throw new Error('request_too_large')
+    }
+    chunks.push(chunk.value)
+  }
+  const bytes = new Uint8Array(length)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  try {
+    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
+  } catch {
+    throw new Error('invalid_json')
+  }
+}
+
+function contactRequest(value: unknown): ContactRequest | null {
+  if (!isRecord(value)) return null
+  if (!hasOnlyKeys(value, [
+    'submissionId', 'name', 'email', 'organization', 'topic', 'message',
+    'privacyVersion', 'website',
+  ])) return null
+  if (
+    typeof value.submissionId !== 'string'
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.submissionId)
+    || typeof value.name !== 'string'
+    || value.name.trim().length < 1
+    || value.name.trim().length > 120
+    || typeof value.email !== 'string'
+    || value.email.trim().length < 3
+    || value.email.trim().length > 254
+    || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.email.trim())
+    || (value.organization !== undefined && (
+      typeof value.organization !== 'string' || value.organization.trim().length > 160
+    ))
+    || typeof value.topic !== 'string'
+    || !contactTopics.has(value.topic)
+    || typeof value.message !== 'string'
+    || value.message.trim().length < 10
+    || value.message.trim().length > 4000
+    || typeof value.privacyVersion !== 'string'
+    || value.privacyVersion.trim().length < 1
+    || value.privacyVersion.trim().length > 64
+    || (value.website !== undefined && (
+      typeof value.website !== 'string' || value.website.length > 256
+    ))
+  ) return null
+  return {
+    submissionId: value.submissionId,
+    name: value.name.trim(),
+    email: value.email.trim().toLowerCase(),
+    ...(value.organization?.trim() ? { organization: value.organization.trim() } : {}),
+    topic: value.topic as ContactRequest['topic'],
+    message: value.message.trim(),
+    privacyVersion: value.privacyVersion.trim(),
+    ...(value.website ? { website: value.website } : {}),
+  }
+}
+
 export function createControlPlaneHandler({
   version = 'dev',
   isReady = () => true,
@@ -260,9 +350,71 @@ export function createControlPlaneHandler({
   listWorkerHosts,
   registerWorkerHost,
   updateWorkerHost,
-}: ControlPlaneHandlerOptions = {}): (request: Request) => Promise<Response> {
-  return async request => {
+  trustedContactOrigins = [],
+  submitContact,
+}: ControlPlaneHandlerOptions = {}): (
+  request: Request,
+  context?: ControlPlaneRequestContext,
+) => Promise<Response> {
+  const allowedContactOrigins = new Set(trustedContactOrigins)
+  return async (request, context = {}) => {
     const url = new URL(request.url)
+
+    if (request.method === 'POST' && url.pathname === contactPath) {
+      const origin = request.headers.get('origin')
+      if (!origin || !allowedContactOrigins.has(origin)) {
+        return json({
+          error: 'contact request origin is not allowed',
+          code: 'contact_origin_denied',
+        } satisfies CloudErrorResponse, 403)
+      }
+      if (!submitContact) {
+        return json({
+          error: 'contact requests are temporarily unavailable',
+          code: 'contact_unavailable',
+          retryable: true,
+        } satisfies CloudErrorResponse, 503)
+      }
+      let parsed: unknown
+      try {
+        parsed = await readBoundedJSON(request, contactRequestMaximumBytes)
+      } catch (error) {
+        const tooLarge = error instanceof Error && error.message === 'request_too_large'
+        return json({
+          error: tooLarge ? 'contact request is too large' : 'request body must be valid JSON',
+          code: tooLarge ? 'request_too_large' : 'invalid_request',
+        } satisfies CloudErrorResponse, tooLarge ? 413 : 400)
+      }
+      const input = contactRequest(parsed)
+      if (!input) {
+        return json({
+          error: 'contact request is invalid',
+          code: 'invalid_request',
+        } satisfies CloudErrorResponse, 400)
+      }
+      if (input.website) {
+        return json({ requestId: input.submissionId, status: 'received' } satisfies ContactResponse, 202)
+      }
+      try {
+        return json(await submitContact({
+          ...input,
+          sourceAddress: context.clientAddress ?? null,
+        }), 202)
+      } catch (error) {
+        if (error instanceof ContactRateLimitError) {
+          return json({
+            error: 'contact request limit reached; please try again later',
+            code: error.code,
+            retryable: true,
+          } satisfies CloudErrorResponse, 429)
+        }
+        return json({
+          error: 'contact request could not be delivered',
+          code: 'contact_delivery_failed',
+          retryable: true,
+        } satisfies CloudErrorResponse, 503)
+      }
+    }
 
     const workerMemberMatch = url.pathname.match(workerAdministrationMemberPath)
     if (url.pathname === workerAdministrationPath || workerMemberMatch) {

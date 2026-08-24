@@ -82,6 +82,24 @@ export interface CloudErrorResponse {
   retryable?: boolean
 }
 
+export type ContactTopic = 'sales' | 'support' | 'security' | 'partnerships' | 'other'
+
+export interface ContactRequest {
+  submissionId: string
+  name: string
+  email: string
+  organization?: string
+  topic: ContactTopic
+  message: string
+  privacyVersion: string
+  website?: string
+}
+
+export interface ContactResponse {
+  requestId: string
+  status: 'received'
+}
+
 export type PersonalWorkspaceState =
   | 'pending'
   | 'provisioning'

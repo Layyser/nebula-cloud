@@ -158,6 +158,90 @@ test('forwards auth routes only to the configured Better Auth handler', async ()
   expect(forwardedPath).toBe('/api/auth/get-session')
 })
 
+test('accepts bounded same-origin contact requests with client context', async () => {
+  const submissions: unknown[] = []
+  const handler = createControlPlaneHandler({
+    trustedContactOrigins: ['https://nubols.com'],
+    submitContact: async input => {
+      submissions.push(input)
+      return { requestId: input.submissionId, status: 'received' }
+    },
+  })
+  const response = await handler(new Request('https://app.nubols.com/api/contact', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      origin: 'https://nubols.com',
+    },
+    body: JSON.stringify({
+      submissionId: '8f27d166-e949-4ec0-90f8-973ff8c69c80',
+      name: 'Ada Lovelace',
+      email: 'ADA@example.test',
+      organization: 'Analytical Engines',
+      topic: 'sales',
+      message: 'We need isolated build environments.',
+      privacyVersion: '2026-08-24',
+      website: '',
+    }),
+  }), { clientAddress: '203.0.113.7' })
+
+  expect(response.status).toBe(202)
+  expect(await response.json()).toEqual({
+    requestId: '8f27d166-e949-4ec0-90f8-973ff8c69c80',
+    status: 'received',
+  })
+  expect(submissions).toEqual([{
+    submissionId: '8f27d166-e949-4ec0-90f8-973ff8c69c80',
+    name: 'Ada Lovelace',
+    email: 'ada@example.test',
+    organization: 'Analytical Engines',
+    topic: 'sales',
+    message: 'We need isolated build environments.',
+    privacyVersion: '2026-08-24',
+    sourceAddress: '203.0.113.7',
+  }])
+})
+
+test('contact requests reject cross-origin, oversized, and honeypot traffic safely', async () => {
+  let calls = 0
+  const handler = createControlPlaneHandler({
+    trustedContactOrigins: ['https://nubols.com'],
+    submitContact: async input => {
+      calls += 1
+      return { requestId: input.submissionId, status: 'received' }
+    },
+  })
+  const body = {
+    submissionId: '8f27d166-e949-4ec0-90f8-973ff8c69c80',
+    name: 'Ada Lovelace',
+    email: 'ada@example.test',
+    topic: 'sales',
+    message: 'We need isolated build environments.',
+    privacyVersion: '2026-08-24',
+  }
+  const denied = await handler(new Request('https://app.nubols.com/api/contact', {
+    method: 'POST',
+    headers: { origin: 'https://attacker.example', 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  }))
+  expect(denied.status).toBe(403)
+
+  const oversized = await handler(new Request('https://app.nubols.com/api/contact', {
+    method: 'POST',
+    headers: { origin: 'https://nubols.com', 'content-type': 'application/json' },
+    body: JSON.stringify({ ...body, message: 'x'.repeat(17 * 1024) }),
+  }))
+  expect(oversized.status).toBe(413)
+
+  const honeypot = await handler(new Request('https://app.nubols.com/api/contact', {
+    method: 'POST',
+    headers: { origin: 'https://nubols.com', 'content-type': 'application/json' },
+    body: JSON.stringify({ ...body, website: 'https://spam.example' }),
+  }))
+  expect(honeypot.status).toBe(202)
+  expect(calls).toBe(0)
+})
+
 test('serves personal usage only for the active organization', async () => {
   const handler = createControlPlaneHandler({
     resolveSession: async () => ({

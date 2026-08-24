@@ -10,6 +10,7 @@ import {
   ContentContainer,
   IconButton,
   PageHeader,
+  ScrollArea,
   Surface,
   Tabs,
   TabsList,
@@ -312,7 +313,8 @@ function ModelShares({ models, totals, metric }: {
   const total = metric === 'cost' ? totals.estimatedCostMicrousd : totals.totalTokens
   return (
     <div className="relative mt-8 min-h-0 flex-1 overflow-hidden">
-      <div className="h-full space-y-6 overflow-y-auto pb-9 pr-5 [mask-image:linear-gradient(to_bottom,#000_0%,#000_calc(100%-2.25rem),transparent_100%)]">
+      <ScrollArea className="h-full">
+        <div className="space-y-6 pb-9 pr-5 [mask-image:linear-gradient(to_bottom,#000_0%,#000_calc(100%-2.25rem),transparent_100%)]">
         {models.length === 0 ? (
           <p className="text-xs text-[var(--color-text-subtle)]">Model distribution will appear after the first turn.</p>
         ) : models.map(model => {
@@ -342,7 +344,8 @@ function ModelShares({ models, totals, metric }: {
             </div>
           )
         })}
-      </div>
+        </div>
+      </ScrollArea>
     </div>
   )
 }
@@ -899,7 +902,7 @@ async function responseMessage(response: Response, fallback: string): Promise<st
 }
 
 function formatNumber(value: number): string {
-  return new Intl.NumberFormat().format(finiteMetric(value))
+  return new Intl.NumberFormat('en-US').format(finiteMetric(value))
 }
 
 function formatCompactNumber(value: number): string {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LayoutDashboard, Terminal } from 'lucide-react'
 import {
   RuntimeWorkspace,
@@ -27,9 +27,20 @@ const terminalOutput = [
   'operator@nebula:~/workspace$ _',
 ]
 
-function WorkspacePreview({ view }: { view: 'dashboard' | 'terminal' }) {
+function WorkspacePreview({
+  view,
+  onBackgroundChange,
+}: {
+  view: 'dashboard' | 'terminal'
+  onBackgroundChange: (visible: boolean) => void
+}) {
   const rootRef = useRef<HTMLDivElement>(null)
+  const [dashboardOverShader, setDashboardOverShader] = useState(true)
   const transport = useMemo(() => createCloudPreviewTransport(), [])
+  const handleDashboardBackgroundChange = useCallback((overShader: boolean) => {
+    setDashboardOverShader(overShader)
+    onBackgroundChange(overShader)
+  }, [onBackgroundChange])
   const navigation = useMemo<RuntimeNavigationItem[]>(() => [
     {
       id: 'terminal',
@@ -49,20 +60,21 @@ function WorkspacePreview({ view }: { view: 'dashboard' | 'terminal' }) {
       id: 'dashboard',
       label: 'Dashboard',
       icon: <LayoutDashboard size={15} />,
-      background: 'shader',
+      background: dashboardOverShader ? 'shader' : 'plain',
       onSelect: () => {},
       content: () => (
-        <div className="min-w-0 flex-1 overflow-y-auto bg-transparent">
+        <div className="min-w-0 flex-1 overflow-y-auto [scrollbar-gutter:stable] bg-transparent">
           <OrganizationDashboard
             userName={cloudPreviewUser.name}
             userKey={cloudPreviewUser.email}
             organizationId={cloudPreviewOrganization.id}
             organizationName={cloudPreviewOrganization.name}
+            onBackgroundChange={handleDashboardBackgroundChange}
           />
         </div>
       ),
     },
-  ], [])
+  ], [dashboardOverShader, handleDashboardBackgroundChange])
 
   useEffect(() => {
     let attempts = 0
@@ -136,6 +148,12 @@ function SettingsPreview() {
 }
 
 export function CloudPreview({ mode }: { mode: CloudPreviewMode }) {
+  const [backgroundVisible, setBackgroundVisible] = useState(true)
+
+  useEffect(() => {
+    setBackgroundVisible(true)
+  }, [mode])
+
   useEffect(() => {
     const handleThemeMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return
@@ -166,9 +184,9 @@ export function CloudPreview({ mode }: { mode: CloudPreviewMode }) {
   } else if (mode === 'settings') {
     content = <SettingsPreview />
   } else {
-    content = <WorkspacePreview view={mode} />
+    content = <WorkspacePreview view={mode} onBackgroundChange={setBackgroundVisible} />
   }
 
   if (mode === 'runtime') return content
-  return <PageBackground scrollReactive={false}>{content}</PageBackground>
+  return <PageBackground scrollReactive={false} visible={backgroundVisible}>{content}</PageBackground>
 }

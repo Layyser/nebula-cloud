@@ -10,6 +10,7 @@ export type TransactionalEmailKind =
   | 'email-verification'
   | 'password-reset'
   | 'organization-invitation'
+  | 'contact-notification'
 
 export interface TransactionalEmailMessage {
   kind: TransactionalEmailKind
@@ -17,6 +18,7 @@ export interface TransactionalEmailMessage {
   subject: string
   text: string
   html: string
+  replyTo?: string
 }
 
 export interface TransactionalEmailReceipt {
@@ -29,6 +31,17 @@ export interface TransactionalEmailSender {
 
 export interface FilesystemEmailSenderOptions {
   directory: string
+}
+
+export interface ResendEmailSenderOptions {
+  apiKey: string
+  from: string
+  endpoint?: string
+  timeoutMs?: number
+  fetch?: (
+    input: string | URL | Request,
+    init?: RequestInit,
+  ) => Promise<Response>
 }
 
 /**
@@ -59,6 +72,67 @@ export function createFilesystemEmailSender({
         { encoding: 'utf8', mode: 0o600 },
       )
       return { providerMessageId: `filesystem:${id}` }
+    },
+  }
+}
+
+export function createResendEmailSender({
+  apiKey,
+  from,
+  endpoint = 'https://api.resend.com/emails',
+  timeoutMs = 10000,
+  fetch: fetchImplementation = globalThis.fetch,
+}: ResendEmailSenderOptions): TransactionalEmailSender {
+  const token = apiKey.trim()
+  const sender = from.trim()
+  if (!token) throw new Error('Resend API key is required')
+  if (!sender) throw new Error('Transactional email from address is required')
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 60000) {
+    throw new Error('Transactional email timeout must be between 1000 and 60000 milliseconds')
+  }
+  const target = new URL(endpoint)
+  if (target.protocol !== 'https:' && target.hostname !== 'localhost') {
+    throw new Error('Transactional email endpoint must use HTTPS')
+  }
+
+  return {
+    async send(message) {
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), timeoutMs)
+      try {
+        const response = await fetchImplementation(target, {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${token}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            from: sender,
+            to: [message.to],
+            subject: message.subject,
+            text: message.text,
+            html: message.html,
+            ...(message.replyTo ? { reply_to: message.replyTo } : {}),
+            tags: [{ name: 'kind', value: message.kind }],
+          }),
+          signal: controller.signal,
+        })
+        if (!response.ok) {
+          throw new Error(`Transactional email provider rejected the message (${response.status})`)
+        }
+        const result = await response.json() as { id?: unknown }
+        if (typeof result.id !== 'string' || !result.id.trim()) {
+          throw new Error('Transactional email provider returned no message ID')
+        }
+        return { providerMessageId: result.id }
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw new Error('Transactional email provider timed out')
+        }
+        throw error
+      } finally {
+        clearTimeout(timeout)
+      }
     },
   }
 }
@@ -274,6 +348,53 @@ export function organizationInvitationEmail(input: {
       action: 'Accept invitation',
       url: input.url,
     }),
+  }
+}
+
+export function contactNotificationEmail(input: {
+  to: string
+  name: string
+  email: string
+  organization?: string | null
+  topic: string
+  message: string
+  requestId: string
+}): TransactionalEmailMessage {
+  const organization = input.organization?.trim() || 'Not provided'
+  const text = [
+    `New Nubols ${input.topic} contact request`,
+    '',
+    `Request: ${input.requestId}`,
+    `Name: ${input.name}`,
+    `Email: ${input.email}`,
+    `Organization: ${organization}`,
+    `Topic: ${input.topic}`,
+    '',
+    input.message,
+  ].join('\n')
+  const htmlMessage = escapeHTML(input.message).replaceAll('\n', '<br>')
+  return {
+    kind: 'contact-notification',
+    to: input.to,
+    replyTo: input.email,
+    subject: `[Nubols contact] ${input.topic}: ${input.organization?.trim() || input.name}`,
+    text,
+    html: `<!doctype html>
+<html lang="en">
+  <body style="margin:0;background:#111;color:#f5f5f5;font-family:Arial,sans-serif">
+    <main style="max-width:640px;margin:0 auto;padding:40px 24px">
+      <p style="font-size:14px;letter-spacing:.08em;color:#aaa">NUBOLS CONTACT</p>
+      <h1 style="font-size:24px;line-height:1.2">${escapeHTML(input.topic)}</h1>
+      <dl style="font-size:14px;line-height:1.7;color:#ccc">
+        <dt style="color:#888">Request</dt><dd>${escapeHTML(input.requestId)}</dd>
+        <dt style="color:#888">Name</dt><dd>${escapeHTML(input.name)}</dd>
+        <dt style="color:#888">Email</dt><dd>${escapeHTML(input.email)}</dd>
+        <dt style="color:#888">Organization</dt><dd>${escapeHTML(organization)}</dd>
+      </dl>
+      <p style="margin-top:28px;font-size:15px;line-height:1.7;color:#ddd">${htmlMessage}</p>
+    </main>
+  </body>
+</html>`,
   }
 }
 

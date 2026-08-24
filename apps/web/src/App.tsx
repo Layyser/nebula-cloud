@@ -99,6 +99,7 @@ function usePathname() {
 
 export default function App() {
   const { pathname, navigate } = usePathname()
+  const [cloudBackgroundVisible, setCloudBackgroundVisible] = useState(true)
   const cloudRoute = pathname === '/login'
     || pathname === '/reset-password'
     || pathname.startsWith('/app')
@@ -113,10 +114,21 @@ export default function App() {
     if (pathname === '/pricing') navigate('/plans')
   }, [navigate, pathname])
 
+  useEffect(() => {
+    if (!cloudRoute) setCloudBackgroundVisible(true)
+  }, [cloudRoute])
+
   return (
-    <PageBackground scrollReactive={!cloudRoute && !plainPublicRoute} visible={!plainPublicRoute}>
+    <PageBackground
+      scrollReactive={!cloudRoute && !plainPublicRoute}
+      visible={!plainPublicRoute && (!cloudRoute || cloudBackgroundVisible)}
+    >
       {cloudRoute ? (
-        <CloudSessionRoute pathname={pathname} navigate={navigate} />
+        <CloudSessionRoute
+          pathname={pathname}
+          navigate={navigate}
+          onBackgroundVisibilityChange={setCloudBackgroundVisible}
+        />
       ) : plansRoute ? (
         <PlansPage onLaunch={() => navigate('/login')} />
       ) : docsRoute ? (
@@ -146,15 +158,21 @@ export function PageBackground({ children, scrollReactive, visible = true }: { c
 function CloudSessionRoute({
   pathname,
   navigate,
+  onBackgroundVisibilityChange,
 }: {
   pathname: string
   navigate: (path: string) => void
+  onBackgroundVisibilityChange: (visible: boolean) => void
 }) {
   const sessionQuery = authClient.useSession()
   const hadSession = useRef(false)
   const [sessionExpired, setSessionExpired] = useState(
     () => consumeSessionExpired(),
   )
+
+  useEffect(() => {
+    if (!sessionQuery.data) onBackgroundVisibilityChange(true)
+  }, [onBackgroundVisibilityChange, sessionQuery.data])
 
   useEffect(() => {
     const handleSessionExpired = () => {
@@ -220,6 +238,7 @@ function CloudSessionRoute({
           navigate={navigate}
           user={session.user}
           activeOrganization={activeOrganization}
+          onBackgroundVisibilityChange={onBackgroundVisibilityChange}
         />
       )}
     </OrganizationGate>
@@ -230,10 +249,12 @@ function AuthenticatedCloudApp({
   navigate,
   user,
   activeOrganization,
+  onBackgroundVisibilityChange,
 }: {
   navigate: (path: string) => void
   user: { name: string; email: string }
   activeOrganization: CloudOrganization
+  onBackgroundVisibilityChange: (visible: boolean) => void
 }) {
   const [signingOut, setSigningOut] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -245,6 +266,10 @@ function AuthenticatedCloudApp({
   const [workspaceError, setWorkspaceError] = useState<WorkspaceStartupError | null>(null)
   const [workspaceAttempt, setWorkspaceAttempt] = useState(0)
   const [dashboardOverShader, setDashboardOverShader] = useState(true)
+  const handleDashboardBackgroundChange = useCallback((overShader: boolean) => {
+    setDashboardOverShader(overShader)
+    onBackgroundVisibilityChange(overShader)
+  }, [onBackgroundVisibilityChange])
 
   useEffect(() => {
     let cancelled = false
@@ -315,13 +340,13 @@ function AuthenticatedCloudApp({
       background: dashboardOverShader ? 'shader' : 'plain',
       onSelect: () => {},
       content: () => (
-        <div className="min-w-0 flex-1 overflow-y-auto bg-transparent">
+        <div className="min-w-0 flex-1 overflow-y-auto [scrollbar-gutter:stable] bg-transparent">
           <OrganizationDashboard
             userName={user.name}
             userKey={user.email}
             organizationId={activeOrganization.id}
             organizationName={activeOrganization.name}
-            onBackgroundChange={setDashboardOverShader}
+            onBackgroundChange={handleDashboardBackgroundChange}
           />
         </div>
       ),

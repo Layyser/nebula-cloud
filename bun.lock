@@ -27,7 +27,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@nebula-cloud/contracts": "workspace:*",
-        "@nebula/runtime-ui": "file:../../vendor/nebula-runtime-ui-0.1.30.tgz",
+        "@nebula/runtime-ui": "file:../../vendor/nebula-runtime-ui-0.1.38.tgz",
         "@radix-ui/react-navigation-menu": "^1.2.22",
         "@radix-ui/react-tooltip": "^1.2.13",
         "@tailwindcss/vite": "^4.2.4",
@@ -136,7 +136,7 @@
 
     "@nebula-cloud/web": ["@nebula-cloud/web@workspace:apps/web"],
 
-    "@nebula/runtime-ui": ["@nebula/runtime-ui@../../vendor/nebula-runtime-ui-0.1.30.tgz", { "dependencies": { "@radix-ui/react-alert-dialog": "^1.1.15", "@radix-ui/react-dialog": "^1.1.15", "@radix-ui/react-popover": "^1.1.15", "@radix-ui/react-scroll-area": "^1.2.10", "@radix-ui/react-separator": "^1.1.8", "@radix-ui/react-slot": "^1.2.4", "@radix-ui/react-switch": "^1.2.6", "@radix-ui/react-tabs": "^1.1.21", "@radix-ui/react-tooltip": "^1.2.8", "@tailwindcss/vite": "^4.2.4", "@tauri-apps/api": "^2.8.0", "@types/react-syntax-highlighter": "^15.5.13", "autoprefixer": "^10.5.0", "class-variance-authority": "^0.7.1", "clsx": "^2.1.1", "framer-motion": "^12.38.0", "lucide-react": "^1.11.0", "react": "^19.2.5", "react-dom": "^19.2.5", "react-markdown": "^10.1.0", "react-syntax-highlighter": "^16.1.1", "remark-gfm": "^4.0.1", "tailwind-merge": "^3.5.0", "tailwindcss": "^4.2.4" } }, "sha512-wztE7u3xt2gupXWhPyIYh1jQvwsRNK9NJ5p/OuCnU1YZhYnsNBY6AYMwWoYFUQ3dd3VnDIms+Tju10mc3/rKmA=="],
+    "@nebula/runtime-ui": ["@nebula/runtime-ui@../../vendor/nebula-runtime-ui-0.1.38.tgz", { "dependencies": { "@radix-ui/react-alert-dialog": "^1.1.15", "@radix-ui/react-dialog": "^1.1.15", "@radix-ui/react-popover": "^1.1.15", "@radix-ui/react-scroll-area": "^1.2.10", "@radix-ui/react-separator": "^1.1.8", "@radix-ui/react-slot": "^1.2.4", "@radix-ui/react-switch": "^1.2.6", "@radix-ui/react-tabs": "^1.1.21", "@radix-ui/react-tooltip": "^1.2.8", "@tailwindcss/vite": "^4.2.4", "@tauri-apps/api": "^2.8.0", "@types/react-syntax-highlighter": "^15.5.13", "autoprefixer": "^10.5.0", "class-variance-authority": "^0.7.1", "clsx": "^2.1.1", "framer-motion": "^12.38.0", "lucide-react": "^1.11.0", "react": "^19.2.5", "react-dom": "^19.2.5", "react-markdown": "^10.1.0", "react-syntax-highlighter": "^16.1.1", "remark-gfm": "^4.0.1", "tailwind-merge": "^3.5.0", "tailwindcss": "^4.2.4" } }, "sha512-yOSxiQ0dHFcruODhmP/G8vkrsuYt22KPJ467BrUc/8u1/JCgdu+rjyuWTQOIa0onvORxDgzqfsG9yAu/K0ZygQ=="],
 
     "@noble/ciphers": ["@noble/ciphers@2.2.0", "", {}, "sha512-Z6pjIZ/8IJcCGzb2S/0Px5J81yij85xASuk1teLNeg75bfT07MV3a/O2Mtn1I2se43k3lkVEcFaR10N4cgQcZA=="],
 

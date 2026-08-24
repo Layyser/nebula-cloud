@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os'
 import {
   createCloudAuth,
   createFilesystemEmailSender,
+  createResendEmailSender,
+  contactNotificationEmail,
   emailVerificationEmail,
   migrateCloudAuthSchema,
   type TransactionalEmailMessage,
@@ -184,6 +186,49 @@ test('filesystem transport writes private local outbox messages', async () => {
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
+})
+
+test('Resend transport uses fixed sender credentials and returns the provider ID', async () => {
+  let request: Request | undefined
+  const sender = createResendEmailSender({
+    apiKey: 're_test_secret',
+    from: 'Nubols <account@send.nubols.com>',
+    fetch: async (input, init) => {
+      request = new Request(input, init)
+      return Response.json({ id: 'email-provider-1' })
+    },
+  })
+  const receipt = await sender.send(contactNotificationEmail({
+    to: 'sales@nubols.com',
+    name: 'Ada',
+    email: 'ada@example.test',
+    organization: 'Analytical Engines',
+    topic: 'sales',
+    message: 'We need isolated build environments.',
+    requestId: 'contact-1',
+  }))
+
+  expect(receipt.providerMessageId).toBe('email-provider-1')
+  expect(request?.headers.get('authorization')).toBe('Bearer re_test_secret')
+  expect(await request?.json()).toMatchObject({
+    from: 'Nubols <account@send.nubols.com>',
+    to: ['sales@nubols.com'],
+    reply_to: 'ada@example.test',
+    tags: [{ name: 'kind', value: 'contact-notification' }],
+  })
+})
+
+test('Resend transport rejects provider failures without leaking the response body', async () => {
+  const sender = createResendEmailSender({
+    apiKey: 're_test_secret',
+    from: 'Nubols <account@send.nubols.com>',
+    fetch: async () => new Response('secret provider diagnostic', { status: 422 }),
+  })
+  await expect(sender.send(emailVerificationEmail({
+    email: 'local@example.test',
+    name: 'Local',
+    url: 'https://app.nubols.com/verify?token=secret',
+  }))).rejects.toThrow('provider rejected the message (422)')
 })
 
 test('supports an email session and organization lifecycle', async () => {

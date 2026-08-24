@@ -109,7 +109,7 @@ export function CloudShell({
         </div>
       </aside>
 
-      <main className="cloud-grid min-w-0 flex-1 overflow-y-auto bg-[#090a0a]">
+      <main className="cloud-grid min-w-0 flex-1 overflow-y-auto [scrollbar-gutter:stable] bg-[#090a0a]">
         {children}
       </main>
     </div>

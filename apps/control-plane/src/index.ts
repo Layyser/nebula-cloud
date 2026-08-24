@@ -5,6 +5,7 @@ import {
 import { initializePersistence } from './persistence'
 import {
   assignWorkspaceWorker,
+  createContactRequest,
   ensurePersonalWorkspace,
   ensureWorkspaceRunning,
   getOrganizationAdminSummary,
@@ -22,10 +23,15 @@ import {
   resolveWorkspaceAccess,
   rotateOrganizationJoinCode,
   setOrganizationMemberDisabled,
+  setContactNotificationResult,
   upsertWorkerHost,
   updateOrganizationName,
 } from '@nebula-cloud/database'
-import { createFilesystemEmailSender } from '@nebula-cloud/auth'
+import {
+  contactNotificationEmail,
+  createFilesystemEmailSender,
+  createResendEmailSender,
+} from '@nebula-cloud/auth'
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { ProvisioningProcessor } from './provisioningProcessor'
 import {
@@ -58,6 +64,10 @@ const emailTransport = process.env.NEBULA_EMAIL_TRANSPORT?.trim().toLowerCase()
   || 'disabled'
 const emailOutboxDirectory = process.env.NEBULA_EMAIL_OUTBOX_DIR?.trim()
   || './data/email-outbox'
+const emailFrom = process.env.NEBULA_EMAIL_FROM?.trim() || ''
+const resendApiKey = process.env.RESEND_API_KEY?.trim() || ''
+const contactToEmail = process.env.NEBULA_CONTACT_TO_EMAIL?.trim()
+  || 'sales@nubols.com'
 const requireEmailVerification = parseBooleanEnvironment(
   'NEBULA_REQUIRE_EMAIL_VERIFICATION',
   process.env.NEBULA_REQUIRE_EMAIL_VERIFICATION,
@@ -65,6 +75,9 @@ const requireEmailVerification = parseBooleanEnvironment(
 )
 const organizationCodeSecret = process.env.NEBULA_ORGANIZATION_CODE_SECRET?.trim()
   || authSecret
+const contactSourceHashSecret = process.env.NEBULA_CONTACT_SOURCE_HASH_SECRET?.trim()
+  || organizationCodeSecret
+const runtimeEnvironment = process.env.NODE_ENV?.trim().toLowerCase() || 'development'
 const trustedOrigins = (process.env.NEBULA_CLOUD_TRUSTED_ORIGINS
   || 'http://localhost:5173,http://127.0.0.1:5173')
   .split(',')
@@ -141,8 +154,22 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 if (authSecret.length < 32) {
   throw new Error('BETTER_AUTH_SECRET must contain at least 32 characters')
 }
-if (emailTransport !== 'disabled' && emailTransport !== 'filesystem') {
-  throw new Error('NEBULA_EMAIL_TRANSPORT must be disabled or filesystem')
+if (!['disabled', 'filesystem', 'resend'].includes(emailTransport)) {
+  throw new Error('NEBULA_EMAIL_TRANSPORT must be disabled, filesystem, or resend')
+}
+if (emailTransport === 'resend' && (!resendApiKey || !emailFrom)) {
+  throw new Error('Resend email transport requires RESEND_API_KEY and NEBULA_EMAIL_FROM')
+}
+if (runtimeEnvironment === 'production') {
+  if (emailTransport !== 'resend') {
+    throw new Error('Production requires a non-filesystem transactional email transport')
+  }
+  if (!requireEmailVerification) {
+    throw new Error('Production requires email verification')
+  }
+  if (!process.env.NEBULA_CONTACT_SOURCE_HASH_SECRET?.trim()) {
+    throw new Error('Production requires NEBULA_CONTACT_SOURCE_HASH_SECRET')
+  }
 }
 if (platformAdminToken && platformAdminToken.length < 32) {
   throw new Error('NEBULA_PLATFORM_ADMIN_TOKEN must contain at least 32 characters')
@@ -150,7 +177,9 @@ if (platformAdminToken && platformAdminToken.length < 32) {
 
 const emailSender = emailTransport === 'filesystem'
   ? createFilesystemEmailSender({ directory: emailOutboxDirectory })
-  : undefined
+  : emailTransport === 'resend'
+    ? createResendEmailSender({ apiKey: resendApiKey, from: emailFrom })
+    : undefined
 
 const { database, auth } = await initializePersistence({
   databasePath,
@@ -504,6 +533,49 @@ const controlPlaneHandler = createControlPlaneHandler({
       targetId: input.organizationId,
     })
   },
+  trustedContactOrigins: trustedOrigins,
+  submitContact: emailSender
+    ? async input => {
+        const sourceHash = createHmac('sha256', contactSourceHashSecret)
+          .update(input.sourceAddress || 'unavailable')
+          .digest('hex')
+        const stored = createContactRequest(database, {
+          id: input.submissionId,
+          name: input.name,
+          email: input.email,
+          organization: input.organization,
+          topic: input.topic,
+          message: input.message,
+          sourceHash,
+          privacyVersion: input.privacyVersion,
+        })
+        if (stored.request.notificationStatus !== 'sent') {
+          try {
+            const receipt = await emailSender.send(contactNotificationEmail({
+              to: contactToEmail,
+              name: stored.request.name,
+              email: stored.request.email,
+              organization: stored.request.organization,
+              topic: stored.request.topic,
+              message: stored.request.message,
+              requestId: stored.request.id,
+            }))
+            setContactNotificationResult(database, {
+              requestId: stored.request.id,
+              status: 'sent',
+              providerMessageId: receipt.providerMessageId,
+            })
+          } catch (error) {
+            setContactNotificationResult(database, {
+              requestId: stored.request.id,
+              status: 'failed',
+            })
+            throw error
+          }
+        }
+        return { requestId: stored.request.id, status: 'received' }
+      }
+    : undefined,
 })
 
 const server = Bun.serve({
@@ -515,7 +587,11 @@ const server = Bun.serve({
     const consoleRoute = url.pathname.match(
       /^\/api\/workspaces\/([^/]+)\/console(?:\/([^/]+))?$/,
     )
-    if (!consoleRoute) return await controlPlaneHandler(request)
+    if (!consoleRoute) {
+      return await controlPlaneHandler(request, {
+        clientAddress: bunServer.requestIP(request)?.address ?? null,
+      })
+    }
     const prepared = await prepareConsoleUpgrade({
       request,
       encodedWorkspaceId: consoleRoute[1],

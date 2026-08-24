@@ -2,6 +2,8 @@ import { expect, test } from 'bun:test'
 import {
   assignWorkspaceWorker,
   claimProvisioningJob,
+  ContactRateLimitError,
+  createContactRequest,
   ensurePersonalWorkspace,
   ensureWorkspaceRunning,
   finishProvisioningJob,
@@ -19,6 +21,7 @@ import {
   rotateOrganizationJoinCode,
   resolveWorkspaceAccess,
   setWorkerHostScheduling,
+  setContactNotificationResult,
   upsertWorkerHost,
   UsageAccessDeniedError,
   WorkspaceMembershipNotFoundError,
@@ -49,7 +52,63 @@ test('applies the minimal application schema idempotently', () => {
     expect(tables).toContain('workspace')
     expect(database.query<{ count: number }, []>(
       'SELECT COUNT(*) AS count FROM nebula_migration',
-    ).get()?.count).toBe(12)
+    ).get()?.count).toBe(13)
+  } finally {
+    database.close()
+  }
+})
+
+test('persists idempotent contact requests and enforces durable source and email limits', () => {
+  const database = openCloudDatabase({ path: ':memory:' })
+  try {
+    database.exec(`
+      CREATE TABLE user (id TEXT PRIMARY KEY);
+      CREATE TABLE organization (id TEXT PRIMARY KEY);
+      CREATE TABLE member (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL REFERENCES user(id),
+        organizationId TEXT NOT NULL REFERENCES organization(id),
+        role TEXT NOT NULL DEFAULT 'member'
+      );
+    `)
+    migrateCloudSchema(database)
+    const base = {
+      name: 'Ada Lovelace',
+      email: 'ADA@example.test',
+      organization: 'Analytical Engines',
+      topic: 'sales' as const,
+      message: 'We need isolated build environments for our team.',
+      sourceHash: 'source-hash-that-is-long-enough',
+      privacyVersion: '2026-08-24',
+      now: () => 100,
+      maximumPerSource: 2,
+      maximumPerEmail: 2,
+    }
+    const first = createContactRequest(database, { ...base, id: 'request-1' })
+    expect(first.created).toBe(true)
+    expect(first.request).toMatchObject({
+      id: 'request-1',
+      email: 'ada@example.test',
+      notificationStatus: 'pending',
+    })
+    expect(createContactRequest(database, { ...base, id: 'request-1' }).created).toBe(false)
+
+    const sent = setContactNotificationResult(database, {
+      requestId: 'request-1',
+      status: 'sent',
+      providerMessageId: 'provider-1',
+      now: () => 110,
+    })
+    expect(sent).toMatchObject({
+      notificationStatus: 'sent',
+      providerMessageId: 'provider-1',
+    })
+
+    createContactRequest(database, { ...base, id: 'request-2' })
+    expect(() => createContactRequest(database, {
+      ...base,
+      id: 'request-3',
+    })).toThrow(ContactRateLimitError)
   } finally {
     database.close()
   }
