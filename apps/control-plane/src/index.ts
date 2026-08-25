@@ -14,21 +14,26 @@ import {
   getOrganizationOperators,
   getOrganizationUsageSummary,
   getPersonalUsageSummary,
+  getPublishedServiceBySlug,
+  getWorkspaceOwnerIdentity,
   isOrganizationMemberEnabled,
   joinOrganizationById,
   listContactRequests,
   listOrganizationAuditEvents,
+  listPublishedServices,
   OrganizationMemberMutationError,
   recordAuditEvent,
   recordUsageEvent,
   resolveOrganizationJoinCode,
   resolveWorkspaceAccess,
+  revokePublishedService,
   rotateOrganizationJoinCode,
   setOrganizationMemberDisabled,
   setContactNotificationResult,
   upsertWorkerHost,
   updateContactRequestStatus,
   updateOrganizationName,
+  upsertPublishedService,
 } from '@nebula-cloud/database'
 import {
   contactNotificationEmail,
@@ -54,6 +59,8 @@ import { prepareConsoleUpgrade } from './consoleUpgrade'
 import { WorkerAdministration } from './workerAdministration'
 import { loadWorkerCredentials } from './workerCredentials'
 import { WorkerHealthMonitor } from './workerHealthMonitor'
+import { PublishedServiceGateway } from './publishedServiceGateway'
+import { workspacePublicationAuthenticated } from './workspacePublicationAuth'
 
 const hostname = process.env.NEBULA_CLOUD_BIND?.trim() || '127.0.0.1'
 const port = Number.parseInt(process.env.NEBULA_CLOUD_PORT || '7790', 10)
@@ -305,6 +312,28 @@ const runtimeGateway = new RuntimeGateway({
   recordUsageEvent: input => recordUsageEvent(database, input),
 })
 
+const publishedServiceGateway = new PublishedServiceGateway({
+  worker: workerDirectory,
+  resolveService: slug => getPublishedServiceBySlug(database, slug),
+})
+
+function publishedServiceURL(slug: string): string {
+  return `${publicAppURL.replace(/\/$/, '')}/p/${encodeURIComponent(slug)}`
+}
+
+function publishedServiceSummary(service: ReturnType<typeof upsertPublishedService>) {
+  return {
+    id: service.id,
+    name: service.name,
+    protocol: service.protocol,
+    targetPort: service.targetPort,
+    state: 'active' as const,
+    publicUrl: publishedServiceURL(service.slug),
+    createdAt: service.createdAt,
+    updatedAt: service.updatedAt,
+  }
+}
+
 const consoleGateway = new ConsoleGateway({
   resolveWorkerConnection: workspaceId => workerDirectory.connectionForWorkspace(workspaceId),
   resolveWorkspace: input => resolveWorkspaceAccess(database, input),
@@ -493,6 +522,61 @@ const controlPlaneHandler = createControlPlaneHandler({
   proxyRuntime: runtimeGateway
     ? input => runtimeGateway.proxy(input)
     : undefined,
+  authenticateWorkspacePublication: async ({ request, workspaceId }) => {
+    return await workspacePublicationAuthenticated({
+      request,
+      workspaceId,
+      worker: workerDirectory,
+      workspaceEnabled: id => getWorkspaceOwnerIdentity(database, id) !== null,
+    })
+  },
+  listWorkspacePublications: ({ workspaceId }) => ({
+    publications: listPublishedServices(database, workspaceId).map(publishedServiceSummary),
+  }),
+  upsertWorkspacePublication: ({ workspaceId, name, port }) => {
+    const owner = getWorkspaceOwnerIdentity(database, workspaceId)
+    if (!owner) throw new Error('Workspace owner was not found')
+    const publication = upsertPublishedService(database, {
+      id: randomUUID(),
+      workspaceId,
+      name,
+      slug: randomBytes(18).toString('hex'),
+      targetPort: port,
+    })
+    recordAuditEvent(database, {
+      userId: owner.userId,
+      organizationId: owner.organizationId,
+      action: 'workspace.service_published',
+      targetType: 'published_service',
+      targetId: publication.id,
+      metadata: {
+        name: publication.name,
+        protocol: publication.protocol,
+        targetPort: publication.targetPort,
+      },
+    })
+    return { publication: publishedServiceSummary(publication) }
+  },
+  revokeWorkspacePublication: ({ workspaceId, name }) => {
+    const owner = getWorkspaceOwnerIdentity(database, workspaceId)
+    if (!owner) return false
+    const publication = revokePublishedService(database, { workspaceId, name })
+    if (!publication) return false
+    recordAuditEvent(database, {
+      userId: owner.userId,
+      organizationId: owner.organizationId,
+      action: 'workspace.service_revoked',
+      targetType: 'published_service',
+      targetId: publication.id,
+      metadata: {
+        name: publication.name,
+        protocol: publication.protocol,
+        targetPort: publication.targetPort,
+      },
+    })
+    return true
+  },
+  proxyPublishedService: input => publishedServiceGateway.proxy(input),
   getPersonalUsage: input => getPersonalUsageSummary(database, input),
   getOrganizationUsage: input => getOrganizationUsageSummary(database, input),
   getOrganizationMembers: input => getOrganizationMembers(database, input),

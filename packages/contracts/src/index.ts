@@ -184,6 +184,29 @@ export interface OperatorRuntimeResponse {
   }
 }
 
+export interface PublishedServiceSummary {
+  id: string
+  name: string
+  protocol: 'http'
+  targetPort: number
+  state: 'active'
+  publicUrl: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface PublishedServicesResponse {
+  publications: PublishedServiceSummary[]
+}
+
+export interface PublishedServiceResponse {
+  publication: PublishedServiceSummary
+}
+
+export interface UpsertPublishedServiceRequest {
+  port: number
+}
+
 export interface UsageTotals {
   modelTurns: number
   inputTokens: number

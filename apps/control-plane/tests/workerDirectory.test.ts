@@ -91,6 +91,7 @@ test('routes provisioning through the worker selected by the durable directory',
         workspaceId: input.workspaceId,
         observedState: 'ready',
       }),
+      proxyWorkspaceService: async () => new Response('proxied'),
     }
     const resolver: WorkerClientResolver = {
       connection: (host: WorkerHost) => ({

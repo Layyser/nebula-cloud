@@ -179,6 +179,7 @@ function resolverFor(
       getRuntimeAccess: unsupported,
       getWorkspace: unsupported,
       restartWorkspace: unsupported,
+      proxyWorkspaceService: unsupported,
     } as RoutedWorkerClient),
   }
 }

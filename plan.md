@@ -286,15 +286,19 @@ and Compose compatibility are explicitly not promised for this beta.
 
 #### 4. Controlled HTTP and TCP publication
 
-- [ ] Implement durable workspace-owned `published_service` desired state and
+- [x] Implement durable workspace-owned `published_service` desired state and
       audit events before changing DNS or exposing any Worker port.
-- [ ] Add a narrow CLI flow such as `nubols expose 3000`,
+- [x] Add a narrow CLI flow such as `nubols expose 3000`,
       `nubols expose api 3000`, and `nubols unexpose api`. It publishes only a
       process already listening inside the caller's workspace; it does not start
       a container or accept host routing details.
-- [ ] Add a workspace-scoped broker that accepts only protocol, service target,
-      target port, visibility/auth policy, and bounded TTL; it cannot accept a
-      Worker, host IP, host port, DNS zone, or another workspace ID.
+- [x] Add the first workspace-scoped HTTP broker. It accepts only a bounded
+      service name and target port; it cannot accept a Worker, host IP, host
+      port, DNS zone, or another workspace ID. Cloud issues and revokes an
+      unpredictable same-origin `/p/<slug>` URL, and the Worker derives the
+      current private container address for each request.
+- [ ] Extend publication desired state with explicit visibility/auth policy and
+      bounded TTL before broad public availability.
 - [ ] Route HTTP/HTTPS through wildcard TLS on `*.apps.nubols.com`; issue one
       unpredictable hostname per publication and revoke it independently of the
       workspace lifecycle.
@@ -692,15 +696,16 @@ worker_health_sample         # short retention
       disk consumption cannot exceed those limits.
 - [ ] Keep Docker-in-Docker, alternate OCI runtimes, microVM launchers, and
       Worker-managed customer service containers disabled for this phase.
-- [ ] Add a workspace-scoped service-publication broker. The runtime can request
+- [x] Add a workspace-scoped HTTP service-publication broker. The runtime can request
       publication only for a port already listening inside its own workspace;
       it never receives Worker, DNS-provider, or ingress credentials.
-- [ ] Add a narrow runtime CLI such as `nubols expose api 3000` and
+- [x] Add a narrow runtime CLI such as `nubols expose api 3000` and
       `nubols unexpose api`. The control plane derives workspace ownership from
       authentication and the Worker chooses all host-side routing details.
-- [ ] Add durable `published_service` state with workspace ownership, protocol,
-      internal target, public hostname/allocated TCP port, visibility, auth
-      policy, status, expiry, timestamps, and audit actor.
+- [x] Add durable first-slice `published_service` state with workspace ownership,
+      HTTP target port, opaque public slug, status, timestamps, and audit actor.
+- [ ] Extend `published_service` with allocated TCP endpoints, visibility, auth
+      policy, and expiry when those routing modes are implemented.
 - [ ] Route HTTP/HTTPS through managed wildcard DNS and TLS. Route raw TCP (for
       example Minecraft) through an allocated gateway port; optionally publish
       protocol-specific SRV records where clients support them. DNS alone does

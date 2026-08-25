@@ -11,6 +11,7 @@ import {
   type WorkerStatus,
   type WorkerProvisioningResult,
   type WorkerRuntimeAccess,
+  type WorkerServiceProxyRequest,
   type WorkerWorkspaceInfo,
 } from './workerClient'
 
@@ -60,6 +61,7 @@ export interface RoutedWorkerClient {
     operationId: string
     signal?: AbortSignal
   }): Promise<WorkerProvisioningResult>
+  proxyWorkspaceService(input: WorkerServiceProxyRequest): Promise<Response>
 }
 
 export interface WorkerClientResolver {
@@ -176,6 +178,14 @@ export class WorkerDirectory {
       workspaceId: resolved.workerWorkspaceId,
       operationId: input.operationId,
       signal: input.signal,
+    })
+  }
+
+  async proxyWorkspaceService(input: WorkerServiceProxyRequest): Promise<Response> {
+    const resolved = this.#assigned(input.workspaceId)
+    return await this.#clientFactory.client(resolved.workerHost).proxyWorkspaceService({
+      ...input,
+      workspaceId: resolved.workerWorkspaceId,
     })
   }
 

@@ -18,6 +18,8 @@ import {
   type JoinOrganizationRequest,
   type JoinOrganizationResponse,
   type PersonalWorkspaceResponse,
+  type PublishedServiceResponse,
+  type PublishedServicesResponse,
   type PersonalUsageResponse,
   type OrganizationUsageResponse,
   type RestartWorkspaceResponse,
@@ -52,6 +54,9 @@ const organizationAuditPath = /^\/api\/organizations\/([^/]+)\/audit$/
 const organizationJoinCodePath = /^\/api\/organizations\/([^/]+)\/admin\/join-code$/
 const organizationPath = /^\/api\/organizations\/([^/]+)$/
 const operatorRuntimePath = /^\/api\/workspaces\/([^/]+)\/operator$/
+const workspacePublicationsPath = /^\/api\/workspaces\/([^/]+)\/publications$/
+const workspacePublicationPath = /^\/api\/workspaces\/([^/]+)\/publications\/([^/]+)$/
+const publishedServicePath = /^\/p\/([^/]+)(\/.*)?$/
 const workerAdministrationPath = '/internal/v1/workers'
 const workerAdministrationMemberPath = /^\/internal\/v1\/workers\/([^/]+)$/
 
@@ -94,6 +99,27 @@ export interface ControlPlaneHandlerOptions {
     runtimePath: string
     userId: string
     organizationId: string
+  }) => Promise<Response>
+  authenticateWorkspacePublication?: (input: {
+    request: Request
+    workspaceId: string
+  }) => Promise<boolean>
+  listWorkspacePublications?: (input: {
+    workspaceId: string
+  }) => PublishedServicesResponse
+  upsertWorkspacePublication?: (input: {
+    workspaceId: string
+    name: string
+    port: number
+  }) => PublishedServiceResponse
+  revokeWorkspacePublication?: (input: {
+    workspaceId: string
+    name: string
+  }) => boolean
+  proxyPublishedService?: (input: {
+    request: Request
+    slug: string
+    servicePath: string
   }) => Promise<Response>
   getPersonalUsage?: (input: {
     userId: string
@@ -275,6 +301,18 @@ const contactStatuses = new Set<ContactRequestStatus>([
 const contactRequestMaximumBytes = 16 * 1024
 const contactAdministrationMaximumBytes = 1024
 const contactExportMaximumRows = 5000
+const publicationRequestMaximumBytes = 1024
+
+function isPublishedServiceName(value: string): boolean {
+  return /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/.test(value)
+}
+
+function isPublishedServicePort(value: unknown): value is number {
+  return Number.isSafeInteger(value)
+    && Number(value) >= 1024
+    && Number(value) <= 65535
+    && Number(value) !== 7777
+}
 
 function contactStatus(value: string | null): ContactRequestStatus | undefined | null {
   if (value === null || value === '') return undefined
@@ -424,6 +462,11 @@ export function createControlPlaneHandler({
   restartWorkspace,
   getOperatorRuntime,
   proxyRuntime,
+  authenticateWorkspacePublication,
+  listWorkspacePublications,
+  upsertWorkspacePublication,
+  revokeWorkspacePublication,
+  proxyPublishedService,
   getPersonalUsage,
   getOrganizationUsage,
   getOrganizationMembers,
@@ -451,6 +494,94 @@ export function createControlPlaneHandler({
   const allowedContactOrigins = new Set(trustedContactOrigins)
   return async (request, context = {}) => {
     const url = new URL(request.url)
+
+    const publishedMatch = url.pathname.match(publishedServicePath)
+    if (publishedMatch) {
+      if (request.method === 'CONNECT' || request.method === 'TRACE') {
+        return json({ error: 'method not allowed', code: 'method_not_allowed' } satisfies CloudErrorResponse, 405)
+      }
+      if (request.headers.has('upgrade')) {
+        return json({ error: 'protocol upgrades are not supported', code: 'upgrade_not_supported' } satisfies CloudErrorResponse, 426)
+      }
+      if (!proxyPublishedService) {
+        return json({ error: 'published service not found', code: 'not_found' } satisfies CloudErrorResponse, 404)
+      }
+      try {
+        return await proxyPublishedService({
+          request,
+          slug: publishedMatch[1],
+          servicePath: `${publishedMatch[2] || '/'}${url.search}`,
+        })
+      } catch {
+        return json({ error: 'published service is unavailable', code: 'published_service_unavailable', retryable: true } satisfies CloudErrorResponse, 503)
+      }
+    }
+
+    const publicationCollectionMatch = url.pathname.match(workspacePublicationsPath)
+    const publicationMemberMatch = url.pathname.match(workspacePublicationPath)
+    if (publicationCollectionMatch || publicationMemberMatch) {
+      if (!authenticateWorkspacePublication) {
+        return json({ error: 'workspace publication is unavailable', code: 'workspace_publication_unavailable', retryable: true } satisfies CloudErrorResponse, 503)
+      }
+      let workspaceId: string
+      let name: string | null = null
+      try {
+        workspaceId = decodeURIComponent(
+          publicationCollectionMatch?.[1] ?? publicationMemberMatch![1],
+        )
+        name = publicationMemberMatch
+          ? decodeURIComponent(publicationMemberMatch[2]).toLowerCase()
+          : null
+      } catch {
+        return json({ error: 'publication route is invalid', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+      }
+      if (!workspaceId.trim() || (name !== null && !isPublishedServiceName(name))) {
+        return json({ error: 'publication route is invalid', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+      }
+      if (!await authenticateWorkspacePublication({ request, workspaceId })) {
+        return json({ error: 'workspace authentication required', code: 'workspace_authentication_required' } satisfies CloudErrorResponse, 401)
+      }
+      if (request.method === 'GET' && publicationCollectionMatch) {
+        return listWorkspacePublications
+          ? json(listWorkspacePublications({ workspaceId }))
+          : json({ error: 'workspace publication is unavailable', code: 'workspace_publication_unavailable', retryable: true } satisfies CloudErrorResponse, 503)
+      }
+      if (request.method === 'PUT' && name !== null) {
+        if (!upsertWorkspacePublication) {
+          return json({ error: 'workspace publication is unavailable', code: 'workspace_publication_unavailable', retryable: true } satisfies CloudErrorResponse, 503)
+        }
+        let body: unknown
+        try {
+          body = await readBoundedJSON(request, publicationRequestMaximumBytes)
+        } catch {
+          return json({ error: 'request body must be valid JSON', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+        }
+        if (!isRecord(body) || !hasOnlyKeys(body, ['port']) || !isPublishedServicePort(body.port)) {
+          return json({ error: 'port must be an integer from 1024 to 65535 and cannot be 7777', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+        }
+        try {
+          return json(upsertWorkspacePublication({ workspaceId, name, port: body.port }))
+        } catch (error) {
+          if (
+            error instanceof Error
+            && 'code' in error
+            && error.code === 'published_service_limit_reached'
+          ) {
+            return json({ error: 'published service limit reached', code: 'published_service_limit_reached' } satisfies CloudErrorResponse, 409)
+          }
+          return json({ error: 'workspace publication failed', code: 'workspace_publication_failed', retryable: true } satisfies CloudErrorResponse, 503)
+        }
+      }
+      if (request.method === 'DELETE' && name !== null) {
+        if (!revokeWorkspacePublication) {
+          return json({ error: 'workspace publication is unavailable', code: 'workspace_publication_unavailable', retryable: true } satisfies CloudErrorResponse, 503)
+        }
+        return revokeWorkspacePublication({ workspaceId, name })
+          ? new Response(null, { status: 204 })
+          : json({ error: 'published service not found', code: 'not_found' } satisfies CloudErrorResponse, 404)
+      }
+      return json({ error: 'route not found', code: 'not_found' } satisfies CloudErrorResponse, 404)
+    }
 
     if (request.method === 'POST' && url.pathname === contactPath) {
       const origin = request.headers.get('origin')

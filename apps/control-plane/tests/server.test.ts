@@ -158,6 +158,133 @@ test('forwards auth routes only to the configured Better Auth handler', async ()
   expect(forwardedPath).toBe('/api/auth/get-session')
 })
 
+test('authenticates workspace publication commands before listing, exposing, or revoking', async () => {
+  const calls: unknown[] = []
+  const publication = {
+    id: 'publication-1',
+    name: 'api',
+    protocol: 'http' as const,
+    targetPort: 3000,
+    state: 'active' as const,
+    publicUrl: 'https://app.nubols.com/p/opaque-slug',
+    createdAt: 10,
+    updatedAt: 10,
+  }
+  const handler = createControlPlaneHandler({
+    authenticateWorkspacePublication: async ({ request, workspaceId }) => (
+      workspaceId === 'workspace-1'
+      && request.headers.get('authorization') === 'Bearer runtime-token'
+    ),
+    listWorkspacePublications: input => {
+      calls.push(['list', input])
+      return { publications: [publication] }
+    },
+    upsertWorkspacePublication: input => {
+      calls.push(['upsert', input])
+      return { publication }
+    },
+    revokeWorkspacePublication: input => {
+      calls.push(['revoke', input])
+      return true
+    },
+  })
+  const denied = await handler(new Request(
+    'http://control-plane.test/api/workspaces/workspace-1/publications',
+  ))
+  expect(denied.status).toBe(401)
+  expect(calls).toEqual([])
+
+  const headers = { authorization: 'Bearer runtime-token' }
+  const listed = await handler(new Request(
+    'http://control-plane.test/api/workspaces/workspace-1/publications',
+    { headers },
+  ))
+  expect(listed.status).toBe(200)
+  expect(await listed.json()).toEqual({ publications: [publication] })
+
+  const exposed = await handler(new Request(
+    'http://control-plane.test/api/workspaces/workspace-1/publications/api',
+    {
+      method: 'PUT',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ port: 3000 }),
+    },
+  ))
+  expect(exposed.status).toBe(200)
+  expect(await exposed.json()).toEqual({ publication })
+
+  const revoked = await handler(new Request(
+    'http://control-plane.test/api/workspaces/workspace-1/publications/api',
+    { method: 'DELETE', headers },
+  ))
+  expect(revoked.status).toBe(204)
+  expect(calls).toEqual([
+    ['list', { workspaceId: 'workspace-1' }],
+    ['upsert', { workspaceId: 'workspace-1', name: 'api', port: 3000 }],
+    ['revoke', { workspaceId: 'workspace-1', name: 'api' }],
+  ])
+})
+
+test('rejects publication inputs that could target runtime or inject routing state', async () => {
+  let calls = 0
+  const handler = createControlPlaneHandler({
+    authenticateWorkspacePublication: async () => true,
+    upsertWorkspacePublication: () => {
+      calls += 1
+      throw new Error('must not be reached')
+    },
+  })
+  for (const body of [
+    { port: 7777 },
+    { port: 80 },
+    { port: 3000, host: 'other-workspace' },
+    { port: '3000' },
+  ]) {
+    const response = await handler(new Request(
+      'http://control-plane.test/api/workspaces/workspace-1/publications/api',
+      {
+        method: 'PUT',
+        headers: {
+          authorization: 'Bearer runtime-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      },
+    ))
+    expect(response.status).toBe(400)
+  }
+  expect(calls).toBe(0)
+})
+
+test('routes opaque public service URLs without exposing workspace or port selectors', async () => {
+  const calls: unknown[] = []
+  const handler = createControlPlaneHandler({
+    proxyPublishedService: async input => {
+      calls.push({
+        slug: input.slug,
+        servicePath: input.servicePath,
+        method: input.request.method,
+      })
+      return new Response('proxied', { status: 201 })
+    },
+  })
+  const response = await handler(new Request(
+    'https://app.nubols.com/p/opaque-slug/v1/items?limit=2',
+    { method: 'POST', body: 'payload' },
+  ))
+  expect(response.status).toBe(201)
+  expect(await response.text()).toBe('proxied')
+  expect(calls).toEqual([{
+    slug: 'opaque-slug',
+    servicePath: '/v1/items?limit=2',
+    method: 'POST',
+  }])
+  const missing = await createControlPlaneHandler()(new Request(
+    'https://app.nubols.com/p/unknown',
+  ))
+  expect(missing.status).toBe(404)
+})
+
 test('accepts bounded same-origin contact requests with client context', async () => {
   const submissions: unknown[] = []
   const handler = createControlPlaneHandler({

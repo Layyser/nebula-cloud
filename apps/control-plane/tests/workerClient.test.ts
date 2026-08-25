@@ -193,3 +193,47 @@ test('restarts a workspace with a durable operation key', async () => {
   expect(requests[0]?.headers.get('idempotency-key')).toBe('restart-1')
   expect(await requests[0]?.json()).toEqual({ timeout_seconds: 30 })
 })
+
+test('proxies a workspace service with worker auth while preserving app auth separately', async () => {
+  let forwarded: Request | null = null
+  const client = new NebulaWorkerClient({
+    baseURL: 'http://worker.test',
+    token: 'service-token-0123456789abcdef0123456789',
+    workspaceImage: 'nebula-workspace:test',
+    now: () => Date.UTC(2026, 7, 25, 12),
+    nonce: () => '0123456789abcdef',
+    fetch: async (input, init) => {
+      forwarded = new Request(input, init)
+      return new Response('application response', {
+        status: 202,
+        headers: { 'set-cookie': 'session=application' },
+      })
+    },
+  })
+  const response = await client.proxyWorkspaceService({
+    workspaceId: 'workspace-1',
+    targetPort: 3000,
+    servicePath: '/v1/items?limit=2',
+    request: new Request('https://app.nubols.com/p/slug/v1/items?limit=2', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer application-token',
+        cookie: 'session=browser',
+        'x-nubols-service-authorization': 'spoofed',
+      },
+      body: 'payload',
+    }),
+  })
+  expect(response.status).toBe(202)
+  expect(await response.text()).toBe('application response')
+  expect(forwarded).not.toBeNull()
+  expect(forwarded!.url).toBe(
+    'http://worker.test/internal/v1/workspaces/workspace-1/services/3000/v1/items?limit=2',
+  )
+  expect(forwarded!.headers.get('authorization')).toStartWith('Nebula-HMAC v1.')
+  expect(forwarded!.headers.get('x-nubols-service-authorization'))
+    .toBe('Bearer application-token')
+  expect(forwarded!.headers.get('cookie')).toBe('session=browser')
+  expect(forwarded!.headers.get('x-forwarded-host')).toBe('app.nubols.com')
+  expect(await forwarded!.text()).toBe('payload')
+})

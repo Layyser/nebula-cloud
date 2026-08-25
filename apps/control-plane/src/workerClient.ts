@@ -86,6 +86,14 @@ export interface WorkerWorkspaceInfo {
   resources: WorkerWorkspaceResponse['resources']
 }
 
+export interface WorkerServiceProxyRequest {
+  workspaceId: string
+  targetPort: number
+  servicePath: string
+  request: Request
+  signal?: AbortSignal
+}
+
 export interface WorkerCapacity {
   totalMemoryBytes: number
   reservedMemoryBytes: number
@@ -371,6 +379,77 @@ export class NebulaWorkerClient {
     return {
       workspaceId: payload.workspace.id,
       observedState: payload.workspace.observed_state,
+    }
+  }
+
+  async proxyWorkspaceService({
+    workspaceId,
+    targetPort,
+    servicePath,
+    request,
+    signal,
+  }: WorkerServiceProxyRequest): Promise<Response> {
+    const suffix = servicePath.startsWith('/') ? servicePath : `/${servicePath}`
+    const serviceURL = new URL(suffix, 'http://workspace-service.invalid')
+    const path = `/internal/v1/workspaces/${encodeURIComponent(workspaceId)}`
+      + `/services/${targetPort}${serviceURL.pathname}`
+    const authorization = workerAuthorizationHeader({
+      secret: this.#token,
+      method: request.method,
+      path,
+      now: this.#now,
+      nonce: this.#nonce,
+    })
+    const headers = new Headers()
+    request.headers.forEach((value, key) => {
+      const normalized = key.toLowerCase()
+      if (
+        normalized === 'authorization'
+        || normalized === 'connection'
+        || normalized === 'forwarded'
+        || normalized === 'host'
+        || normalized === 'keep-alive'
+        || normalized === 'proxy-authenticate'
+        || normalized === 'proxy-authorization'
+        || normalized === 'te'
+        || normalized === 'trailer'
+        || normalized === 'transfer-encoding'
+        || normalized === 'upgrade'
+        || normalized.startsWith('x-forwarded-')
+        || normalized.startsWith('x-nubols-')
+      ) return
+      headers.append(key, value)
+    })
+    const clientAuthorization = request.headers.get('authorization')
+    if (clientAuthorization) {
+      headers.set('x-nubols-service-authorization', clientAuthorization)
+    }
+    headers.set('authorization', authorization)
+    headers.set('x-nebula-actor-id', 'nebula-cloud-control-plane')
+    const originalURL = new URL(request.url)
+    headers.set('x-forwarded-host', originalURL.host)
+    headers.set('x-forwarded-proto', originalURL.protocol.slice(0, -1))
+
+    try {
+      return await this.#fetch(
+        `${this.#baseURL}${path}${serviceURL.search}`,
+        {
+          method: request.method,
+          signal,
+          headers,
+          body: request.method === 'GET' || request.method === 'HEAD'
+            ? undefined
+            : request.body,
+        },
+      )
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') throw error
+      throw new WorkerClientError({
+        message: 'Worker service gateway is unreachable',
+        code: 'worker_unreachable',
+        retryable: true,
+        status: 503,
+      })
     }
   }
 

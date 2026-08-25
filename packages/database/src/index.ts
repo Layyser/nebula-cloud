@@ -364,6 +364,37 @@ const migrations = [
         ON contact_request(status, created_at DESC);
     `,
   },
+  {
+    id: '0014_published_service',
+    sql: `
+      CREATE TABLE published_service (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL
+          REFERENCES workspace(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        slug TEXT NOT NULL UNIQUE,
+        protocol TEXT NOT NULL DEFAULT 'http'
+          CHECK (protocol = 'http'),
+        target_port INTEGER NOT NULL
+          CHECK (target_port BETWEEN 1024 AND 65535 AND target_port != 7777),
+        state TEXT NOT NULL DEFAULT 'active'
+          CHECK (state IN ('active', 'revoked')),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        revoked_at INTEGER,
+        UNIQUE (workspace_id, name),
+        CHECK (
+          (state = 'active' AND revoked_at IS NULL)
+          OR (state = 'revoked' AND revoked_at IS NOT NULL)
+        )
+      );
+
+      CREATE INDEX published_service_workspace_state_idx
+        ON published_service(workspace_id, state, created_at);
+      CREATE INDEX published_service_slug_state_idx
+        ON published_service(slug, state);
+    `,
+  },
 ] as const
 
 export type WorkspaceState = 'pending' | 'provisioning' | 'ready' | 'stopped' | 'failed'
@@ -693,6 +724,36 @@ export interface ContactRequest {
   updatedAt: number
 }
 
+export type PublishedServiceState = 'active' | 'revoked'
+
+export interface PublishedService {
+  id: string
+  workspaceId: string
+  name: string
+  slug: string
+  protocol: 'http'
+  targetPort: number
+  state: PublishedServiceState
+  createdAt: number
+  updatedAt: number
+  revokedAt: number | null
+}
+
+export interface WorkspaceOwnerIdentity {
+  workspaceId: string
+  userId: string
+  organizationId: string
+}
+
+export class PublishedServiceLimitError extends Error {
+  readonly code = 'published_service_limit_reached'
+
+  constructor() {
+    super('Published service limit reached')
+    this.name = 'PublishedServiceLimitError'
+  }
+}
+
 export interface CreateContactRequestInput {
   id: string
   name: string
@@ -836,6 +897,19 @@ interface ContactRequestRow {
   updated_at: number
 }
 
+interface PublishedServiceRow {
+  id: string
+  workspace_id: string
+  name: string
+  slug: string
+  protocol: 'http'
+  target_port: number
+  state: PublishedServiceState
+  created_at: number
+  updated_at: number
+  revoked_at: number | null
+}
+
 function toPersonalWorkspace(row: WorkspaceRow): PersonalWorkspace {
   return {
     id: row.id,
@@ -915,6 +989,21 @@ function toContactRequest(row: ContactRequestRow): ContactRequest {
   }
 }
 
+function toPublishedService(row: PublishedServiceRow): PublishedService {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    name: row.name,
+    slug: row.slug,
+    protocol: row.protocol,
+    targetPort: row.target_port,
+    state: row.state,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    revokedAt: row.revoked_at,
+  }
+}
+
 export interface OpenCloudDatabaseOptions {
   path: string
 }
@@ -958,6 +1047,180 @@ export function migrateCloudSchema(database: Database): void {
       insert.run(migration.id, Date.now())
     })()
   }
+}
+
+function publishedServiceName(value: string): string {
+  const normalized = value.trim().toLowerCase()
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/.test(normalized)) {
+    throw new Error('Published service name is invalid')
+  }
+  return normalized
+}
+
+function publishedServiceText(value: string, field: string, maximum = 128): string {
+  const normalized = value.trim()
+  if (!normalized || normalized.length > maximum) {
+    throw new Error(`${field} is invalid`)
+  }
+  return normalized
+}
+
+function publishedServicePort(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 1024 || value > 65535 || value === 7777) {
+    throw new Error('Published service port is invalid')
+  }
+  return value
+}
+
+export function getWorkspaceOwnerIdentity(
+  database: Database,
+  workspaceId: string,
+): WorkspaceOwnerIdentity | null {
+  const row = database.query<{
+    workspace_id: string
+    user_id: string
+    organization_id: string
+  }, [string]>(`
+    SELECT
+      workspace.id AS workspace_id,
+      member.userId AS user_id,
+      workspace.organization_id
+    FROM workspace
+    INNER JOIN member ON member.id = workspace.member_id
+    LEFT JOIN organization_member_state AS member_state
+      ON member_state.member_id = member.id
+    WHERE workspace.id = ?
+      AND member.organizationId = workspace.organization_id
+      AND COALESCE(member_state.disabled, 0) = 0
+    LIMIT 1
+  `).get(workspaceId.trim())
+  return row
+    ? {
+        workspaceId: row.workspace_id,
+        userId: row.user_id,
+        organizationId: row.organization_id,
+      }
+    : null
+}
+
+export function getPublishedServiceBySlug(
+  database: Database,
+  slug: string,
+): PublishedService | null {
+  const row = database.query<PublishedServiceRow, [string]>(`
+    SELECT published_service.*
+    FROM published_service
+    INNER JOIN workspace ON workspace.id = published_service.workspace_id
+    INNER JOIN member ON member.id = workspace.member_id
+    LEFT JOIN organization_member_state AS member_state
+      ON member_state.member_id = member.id
+    WHERE published_service.slug = ?
+      AND published_service.state = 'active'
+      AND workspace.state = 'ready'
+      AND member.organizationId = workspace.organization_id
+      AND COALESCE(member_state.disabled, 0) = 0
+    LIMIT 1
+  `).get(slug.trim())
+  return row ? toPublishedService(row) : null
+}
+
+export function listPublishedServices(
+  database: Database,
+  workspaceId: string,
+): PublishedService[] {
+  return database.query<PublishedServiceRow, [string]>(`
+    SELECT * FROM published_service
+    WHERE workspace_id = ? AND state = 'active'
+    ORDER BY created_at, name
+  `).all(workspaceId.trim()).map(toPublishedService)
+}
+
+export function upsertPublishedService(
+  database: Database,
+  input: {
+    id: string
+    workspaceId: string
+    name: string
+    slug: string
+    targetPort: number
+    maximumActive?: number
+    now?: () => number
+  },
+): PublishedService {
+  const id = publishedServiceText(input.id, 'Published service id')
+  const workspaceId = publishedServiceText(input.workspaceId, 'Workspace id')
+  const name = publishedServiceName(input.name)
+  const slug = publishedServiceText(input.slug, 'Published service slug')
+  const targetPort = publishedServicePort(input.targetPort)
+  const maximumActive = input.maximumActive ?? 5
+  if (!Number.isSafeInteger(maximumActive) || maximumActive < 1 || maximumActive > 100) {
+    throw new Error('Published service limit is invalid')
+  }
+
+  return database.transaction(() => {
+    const workspace = getWorkspaceById(database, workspaceId)
+    if (!workspace) throw new Error('Workspace was not found')
+    const existing = database.query<PublishedServiceRow, [string, string]>(`
+      SELECT * FROM published_service
+      WHERE workspace_id = ? AND name = ?
+      LIMIT 1
+    `).get(workspaceId, name)
+    if (!existing || existing.state !== 'active') {
+      const active = database.query<{ count: number }, [string]>(`
+        SELECT COUNT(*) AS count FROM published_service
+        WHERE workspace_id = ? AND state = 'active'
+      `).get(workspaceId)?.count ?? 0
+      if (active >= maximumActive) throw new PublishedServiceLimitError()
+    }
+
+    const timestamp = (input.now ?? Date.now)()
+    database.prepare(`
+      INSERT INTO published_service (
+        id, workspace_id, name, slug, protocol, target_port, state,
+        created_at, updated_at, revoked_at
+      ) VALUES (?, ?, ?, ?, 'http', ?, 'active', ?, ?, NULL)
+      ON CONFLICT(workspace_id, name) DO UPDATE SET
+        target_port = excluded.target_port,
+        state = 'active',
+        updated_at = excluded.updated_at,
+        revoked_at = NULL
+    `).run(id, workspaceId, name, slug, targetPort, timestamp, timestamp)
+    const service = database.query<PublishedServiceRow, [string, string]>(`
+      SELECT * FROM published_service
+      WHERE workspace_id = ? AND name = ?
+      LIMIT 1
+    `).get(workspaceId, name)
+    if (!service) throw new Error('Published service could not be resolved')
+    return toPublishedService(service)
+  }).immediate()
+}
+
+export function revokePublishedService(
+  database: Database,
+  input: { workspaceId: string; name: string; now?: () => number },
+): PublishedService | null {
+  const workspaceId = publishedServiceText(input.workspaceId, 'Workspace id')
+  const name = publishedServiceName(input.name)
+  const existing = database.query<PublishedServiceRow, [string, string]>(`
+    SELECT * FROM published_service
+    WHERE workspace_id = ? AND name = ?
+    LIMIT 1
+  `).get(workspaceId, name)
+  if (!existing) return null
+  if (existing.state === 'active') {
+    const timestamp = (input.now ?? Date.now)()
+    database.prepare(`
+      UPDATE published_service
+      SET state = 'revoked', updated_at = ?, revoked_at = ?
+      WHERE workspace_id = ? AND name = ?
+    `).run(timestamp, timestamp, workspaceId, name)
+  }
+  const service = database.query<PublishedServiceRow, [string, string]>(`
+    SELECT * FROM published_service
+    WHERE workspace_id = ? AND name = ?
+    LIMIT 1
+  `).get(workspaceId, name)
+  return service ? toPublishedService(service) : null
 }
 
 function boundedContactText(

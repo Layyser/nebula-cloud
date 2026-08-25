@@ -8,24 +8,29 @@ import {
   ensurePersonalWorkspace,
   ensureWorkspaceRunning,
   finishProvisioningJob,
+  getPublishedServiceBySlug,
+  getWorkspaceOwnerIdentity,
   getOrganizationUsageSummary,
   getWorkerHost,
   getOrganizationMembers,
   getPersonalUsageSummary,
   listOrganizationAuditEvents,
   listContactRequests,
+  listPublishedServices,
   migrateCloudSchema,
   openCloudDatabase,
   ProvisioningJobLeaseLostError,
   recordAuditEvent,
   recordUsageEvent,
   recordWorkerHealth,
+  revokePublishedService,
   rotateOrganizationJoinCode,
   resolveWorkspaceAccess,
   setWorkerHostScheduling,
   setContactNotificationResult,
   updateContactRequestStatus,
   upsertWorkerHost,
+  upsertPublishedService,
   UsageAccessDeniedError,
   WorkspaceMembershipNotFoundError,
   WorkerPlacementUnavailableError,
@@ -53,9 +58,102 @@ test('applies the minimal application schema idempotently', () => {
 
     expect(tables).toContain('nebula_migration')
     expect(tables).toContain('workspace')
+    expect(tables).toContain('published_service')
     expect(database.query<{ count: number }, []>(
       'SELECT COUNT(*) AS count FROM nebula_migration',
-    ).get()?.count).toBe(13)
+    ).get()?.count).toBe(14)
+  } finally {
+    database.close()
+  }
+})
+
+test('publishes only bounded workspace ports with stable opaque slugs and revocation', () => {
+  const database = openCloudDatabase({ path: ':memory:' })
+  try {
+    database.exec(`
+      CREATE TABLE user (id TEXT PRIMARY KEY);
+      CREATE TABLE organization (id TEXT PRIMARY KEY);
+      CREATE TABLE member (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL REFERENCES user(id),
+        organizationId TEXT NOT NULL REFERENCES organization(id),
+        role TEXT NOT NULL DEFAULT 'member'
+      );
+      INSERT INTO user (id) VALUES ('owner');
+      INSERT INTO organization (id) VALUES ('org-1');
+      INSERT INTO member (id, userId, organizationId, role)
+        VALUES ('membership-1', 'owner', 'org-1', 'owner');
+    `)
+    migrateCloudSchema(database)
+    const workspace = ensurePersonalWorkspace(database, {
+      userId: 'owner',
+      organizationId: 'org-1',
+      createId: () => 'workspace-1',
+      now: () => 10,
+    })
+    expect(getWorkspaceOwnerIdentity(database, workspace.id)).toEqual({
+      workspaceId: 'workspace-1',
+      userId: 'owner',
+      organizationId: 'org-1',
+    })
+    database.prepare("UPDATE workspace SET state = 'ready' WHERE id = ?")
+      .run(workspace.id)
+
+    const first = upsertPublishedService(database, {
+      id: 'publication-1',
+      workspaceId: workspace.id,
+      name: 'web',
+      slug: 'opaque-slug-one',
+      targetPort: 3000,
+      maximumActive: 2,
+      now: () => 20,
+    })
+    expect(first).toMatchObject({
+      name: 'web', slug: 'opaque-slug-one', targetPort: 3000, state: 'active',
+    })
+    const updated = upsertPublishedService(database, {
+      id: 'ignored-new-id',
+      workspaceId: workspace.id,
+      name: 'web',
+      slug: 'ignored-new-slug',
+      targetPort: 8080,
+      maximumActive: 2,
+      now: () => 30,
+    })
+    expect(updated).toMatchObject({
+      id: 'publication-1', slug: 'opaque-slug-one', targetPort: 8080,
+    })
+    upsertPublishedService(database, {
+      id: 'publication-2', workspaceId: workspace.id, name: 'api',
+      slug: 'opaque-slug-two', targetPort: 4000, maximumActive: 2,
+    })
+    expect(() => upsertPublishedService(database, {
+      id: 'publication-3', workspaceId: workspace.id, name: 'docs',
+      slug: 'opaque-slug-three', targetPort: 5000, maximumActive: 2,
+    })).toThrow('Published service limit reached')
+    expect(() => upsertPublishedService(database, {
+      id: 'publication-runtime', workspaceId: workspace.id, name: 'runtime',
+      slug: 'opaque-runtime-slug', targetPort: 7777,
+    })).toThrow('port is invalid')
+
+    expect(listPublishedServices(database, workspace.id).map(service => service.name))
+      .toEqual(['web', 'api'])
+    expect(getPublishedServiceBySlug(database, 'opaque-slug-one')?.targetPort).toBe(8080)
+    expect(revokePublishedService(database, {
+      workspaceId: workspace.id,
+      name: 'web',
+      now: () => 40,
+    })).toMatchObject({ state: 'revoked', revokedAt: 40 })
+    expect(getPublishedServiceBySlug(database, 'opaque-slug-one')).toBeNull()
+    expect(listPublishedServices(database, workspace.id).map(service => service.name))
+      .toEqual(['api'])
+    database.exec(`
+      INSERT INTO organization_member_state (
+        member_id, disabled, disabled_by, disabled_at, updated_at
+      ) VALUES ('membership-1', 1, 'owner', 50, 50)
+    `)
+    expect(getWorkspaceOwnerIdentity(database, workspace.id)).toBeNull()
+    expect(getPublishedServiceBySlug(database, 'opaque-slug-two')).toBeNull()
   } finally {
     database.close()
   }

@@ -207,6 +207,8 @@ POST /api/workspaces/personal/ensure-running
                                   Durably request a ready workspace
 ALL /api/workspaces/:id/runtime/* Authenticated Runtime API gateway
 GET /api/workspaces/:id/console   Authenticated Console WebSocket gateway
+GET|PUT|DELETE /api/workspaces/:id/publications/* Workspace-token publication control
+ALL /p/:opaque-slug/*             Public HTTP workspace-service gateway
 ```
 
 Its default development database is
