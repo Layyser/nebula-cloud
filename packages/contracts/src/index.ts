@@ -187,8 +187,9 @@ export interface OperatorRuntimeResponse {
 export interface PublishedServiceSummary {
   id: string
   name: string
-  protocol: 'http'
+  protocol: 'http' | 'tcp'
   targetPort: number
+  ingressPort: number | null
   state: 'active'
   visibility: 'public' | 'private'
   authPolicy: 'none' | 'token'
@@ -209,6 +210,7 @@ export interface PublishedServiceResponse {
 
 export interface UpsertPublishedServiceRequest {
   port: number
+  protocol?: 'http' | 'tcp'
   visibility: 'public' | 'private'
   ttlSeconds?: number | null
 }

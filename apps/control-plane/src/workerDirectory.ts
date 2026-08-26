@@ -36,6 +36,10 @@ export interface WorkerConnection {
   token: string
 }
 
+export interface WorkerTCPConnection extends WorkerConnection {
+  workspaceId: string
+}
+
 export interface WorkerClientFactoryOptions {
   credentials: WorkerCredentialProvider
   workspaceImage: string
@@ -191,6 +195,14 @@ export class WorkerDirectory {
 
   connectionForWorkspace(workspaceId: string): WorkerConnection {
     return this.#clientFactory.connection(this.#assigned(workspaceId).workerHost)
+  }
+
+  tcpConnectionForWorkspace(workspaceId: string): WorkerTCPConnection {
+    const assigned = this.#assigned(workspaceId)
+    return {
+      ...this.#clientFactory.connection(assigned.workerHost),
+      workspaceId: assigned.workerWorkspaceId,
+    }
   }
 
   #assigned(workspaceId: string): {

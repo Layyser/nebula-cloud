@@ -61,7 +61,7 @@ test('applies the minimal application schema idempotently', () => {
     expect(tables).toContain('published_service')
     expect(database.query<{ count: number }, []>(
       'SELECT COUNT(*) AS count FROM nebula_migration',
-    ).get()?.count).toBe(16)
+    ).get()?.count).toBe(17)
   } finally {
     database.close()
   }
@@ -137,6 +137,8 @@ test('migrates legacy publications to permanent public access without changing s
       visibility: 'public',
       authPolicy: 'none',
       accessTokenHash: null,
+      protocol: 'http',
+      ingressPort: null,
     })
     expect(migrated!.expiresAt).toBeNull()
     expect(getPublishedServiceBySlug(database, 'stable-opaque-slug', Number.MAX_SAFE_INTEGER))
@@ -239,18 +241,23 @@ test('publishes only workspace-scoped ports with stable opaque slugs and revocat
     })
     database.prepare("UPDATE workspace SET state = 'ready' WHERE id = ?")
       .run(peerWorkspace.id)
-    for (const [id, name, slug, port] of [
-      ['peer-publication-1', 'web', 'peer-opaque-slug-one', 3000],
-      ['peer-publication-2', 'api', 'peer-opaque-slug-two', 4000],
-    ] as const) {
-      upsertPublishedService(database, {
-        id, workspaceId: peerWorkspace.id, name, slug, targetPort: port,
-        visibility: 'public', authPolicy: 'none', expiresAt: null,
-        maximumActive: 2, now: () => 50,
-      })
-    }
+    const peerTCP = upsertPublishedService(database, {
+      id: 'peer-publication-1', workspaceId: peerWorkspace.id, name: 'minecraft',
+      slug: 'peer-opaque-slug-one', targetPort: 25565, protocol: 'tcp',
+      visibility: 'public', authPolicy: 'none', expiresAt: null,
+      tcpIngressPortMinimum: 20000, tcpIngressPortMaximum: 20002,
+      maximumActive: 2, now: () => 50,
+    })
+    expect(peerTCP).toMatchObject({ protocol: 'tcp', targetPort: 25565, ingressPort: 20000 })
+    const peerHTTP = upsertPublishedService(database, {
+      id: 'peer-publication-2', workspaceId: peerWorkspace.id, name: 'web',
+      slug: 'peer-opaque-slug-two', targetPort: 4000, protocol: 'http',
+      visibility: 'public', authPolicy: 'none', expiresAt: null,
+      maximumActive: 2, now: () => 50,
+    })
+    expect(peerHTTP.ingressPort).toBeNull()
     expect(listPublishedServices(database, peerWorkspace.id, 60).map(service => service.name))
-      .toEqual(['api', 'web'])
+      .toEqual(['minecraft', 'web'])
     expect(() => upsertPublishedService(database, {
       id: 'peer-publication-3', workspaceId: peerWorkspace.id, name: 'docs',
       slug: 'peer-opaque-slug-three', targetPort: 5000,

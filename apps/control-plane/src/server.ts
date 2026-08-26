@@ -114,13 +114,14 @@ export interface ControlPlaneHandlerOptions {
     workspaceId: string
     name: string
     port: number
+    protocol: 'http' | 'tcp'
     visibility: 'public' | 'private'
     ttlSeconds: number | null
-  }) => PublishedServiceResponse
+  }) => PublishedServiceResponse | Promise<PublishedServiceResponse>
   revokeWorkspacePublication?: (input: {
     workspaceId: string
     name: string
-  }) => boolean
+  }) => boolean | Promise<boolean>
   proxyPublishedService?: (input: {
     request: Request
     slug: string
@@ -574,13 +575,16 @@ export function createControlPlaneHandler({
         } catch {
           return json({ error: 'request body must be valid JSON', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
         }
-        if (!isRecord(body) || !hasOnlyKeys(body, ['port', 'visibility', 'ttlSeconds']) || !isPublishedServicePort(body.port)) {
+        if (!isRecord(body) || !hasOnlyKeys(body, ['port', 'protocol', 'visibility', 'ttlSeconds']) || !isPublishedServicePort(body.port)) {
           return json({ error: 'publication request is invalid', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
         }
         const visibility = body.visibility ?? 'public'
+        const protocol = body.protocol ?? 'http'
         const ttlSeconds = body.ttlSeconds ?? null
         if (
-          (visibility !== 'public' && visibility !== 'private')
+          (protocol !== 'http' && protocol !== 'tcp')
+          || (protocol === 'tcp' && visibility !== 'public')
+          || (visibility !== 'public' && visibility !== 'private')
           || (
             ttlSeconds !== null
             && (
@@ -591,15 +595,16 @@ export function createControlPlaneHandler({
           )
         ) {
           return json({
-            error: `visibility must be public or private and ttlSeconds must be null or ${publishedServiceMinimumTTLSeconds}-${publishedServiceMaximumTTLSeconds}`,
+            error: `protocol must be http or tcp; TCP publications are public passthrough only; visibility must be public or private and ttlSeconds must be null or ${publishedServiceMinimumTTLSeconds}-${publishedServiceMaximumTTLSeconds}`,
             code: 'invalid_request',
           } satisfies CloudErrorResponse, 400)
         }
         try {
-          return json(upsertWorkspacePublication({
+          return json(await upsertWorkspacePublication({
             workspaceId,
             name,
             port: body.port,
+            protocol,
             visibility,
             ttlSeconds: ttlSeconds === null ? null : Number(ttlSeconds),
           }))
@@ -607,9 +612,15 @@ export function createControlPlaneHandler({
           if (
             error instanceof Error
             && 'code' in error
-            && error.code === 'published_service_limit_reached'
+            && (error.code === 'published_service_limit_reached'
+              || error.code === 'published_service_ingress_capacity_reached')
           ) {
-            return json({ error: 'published service limit reached', code: 'published_service_limit_reached' } satisfies CloudErrorResponse, 409)
+            return json({
+              error: error.code === 'published_service_ingress_capacity_reached'
+                ? 'TCP ingress capacity reached'
+                : 'published service limit reached',
+              code: error.code,
+            } satisfies CloudErrorResponse, 409)
           }
           return json({ error: 'workspace publication failed', code: 'workspace_publication_failed', retryable: true } satisfies CloudErrorResponse, 503)
         }
@@ -618,7 +629,7 @@ export function createControlPlaneHandler({
         if (!revokeWorkspacePublication) {
           return json({ error: 'workspace publication is unavailable', code: 'workspace_publication_unavailable', retryable: true } satisfies CloudErrorResponse, 503)
         }
-        return revokeWorkspacePublication({ workspaceId, name })
+        return await revokeWorkspacePublication({ workspaceId, name })
           ? new Response(null, { status: 204 })
           : json({ error: 'published service not found', code: 'not_found' } satisfies CloudErrorResponse, 404)
       }

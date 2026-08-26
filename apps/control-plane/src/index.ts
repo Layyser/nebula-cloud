@@ -15,12 +15,15 @@ import {
   getOrganizationUsageSummary,
   getPersonalUsageSummary,
   getPublishedServiceBySlug,
+  getPublishedServiceByIngressPort,
+  getPublishedServiceByName,
   getWorkspaceOwnerIdentity,
   isOrganizationMemberEnabled,
   joinOrganizationById,
   listContactRequests,
   listOrganizationAuditEvents,
   listPublishedServices,
+  listTCPPublishedServices,
   OrganizationMemberMutationError,
   recordAuditEvent,
   recordUsageEvent,
@@ -63,6 +66,7 @@ import { PublishedServiceGateway } from './publishedServiceGateway'
 import { workspacePublicationAuthenticated } from './workspacePublicationAuth'
 import { parsePublishedServiceOrigin } from './publishedServiceRouting'
 import { hashPublishedServiceToken } from './publishedServiceAccess'
+import { TCPIngress } from './tcpIngress'
 
 const hostname = process.env.NEBULA_CLOUD_BIND?.trim() || '127.0.0.1'
 const port = Number.parseInt(process.env.NEBULA_CLOUD_PORT || '7790', 10)
@@ -143,6 +147,20 @@ const workerHeartbeatStaleMs = positiveIntegerEnvironment(
   'NEBULA_WORKER_HEARTBEAT_STALE_MS',
   30000,
 )
+const tcpIngressEnabled = parseBooleanEnvironment(
+  'NEBULA_TCP_INGRESS_ENABLED',
+  process.env.NEBULA_TCP_INGRESS_ENABLED,
+  false,
+)
+const tcpIngressBind = process.env.NEBULA_TCP_INGRESS_BIND?.trim() || '127.0.0.1'
+const tcpIngressHost = process.env.NEBULA_TCP_INGRESS_HOST?.trim() || 'tcp.nubols.com'
+const tcpIngressPortMinimum = positiveIntegerEnvironment('NEBULA_TCP_INGRESS_PORT_MIN', 20000)
+const tcpIngressPortMaximum = positiveIntegerEnvironment('NEBULA_TCP_INGRESS_PORT_MAX', 20999)
+if (tcpIngressPortMinimum > tcpIngressPortMaximum
+  || (tcpIngressPortMinimum <= 7777 && tcpIngressPortMaximum >= 7777)
+  || tcpIngressPortMaximum > 65535) {
+  throw new Error('NEBULA_TCP_INGRESS_PORT_MIN/MAX are invalid')
+}
 const contactRetentionDays = positiveIntegerEnvironment(
   'NEBULA_CONTACT_RETENTION_DAYS',
   730,
@@ -328,18 +346,44 @@ function publishedServiceURL(slug: string): string {
 }
 
 function publishedServiceSummary(service: ReturnType<typeof upsertPublishedService>) {
+  const publicUrl = service.protocol === 'tcp'
+    ? `tcp://${tcpIngressHost}:${service.ingressPort}`
+    : publishedServiceURL(service.slug)
   return {
     id: service.id,
     name: service.name,
     protocol: service.protocol,
     targetPort: service.targetPort,
+    ingressPort: service.ingressPort,
     state: 'active' as const,
     visibility: service.visibility,
     authPolicy: service.authPolicy,
-    publicUrl: publishedServiceURL(service.slug),
+    publicUrl,
     expiresAt: service.expiresAt,
     createdAt: service.createdAt,
     updatedAt: service.updatedAt,
+  }
+}
+
+const tcpIngress = tcpIngressEnabled
+  ? new TCPIngress({
+      bindHost: tcpIngressBind,
+      resolveRoute: ingressPort => {
+        const service = getPublishedServiceByIngressPort(database, ingressPort)
+        return service
+          ? { ingressPort, workspaceId: service.workspaceId, targetPort: service.targetPort }
+          : null
+      },
+      resolveWorker: workspaceId => {
+        const connection = workerDirectory.tcpConnectionForWorkspace(workspaceId)
+        return connection
+      },
+    })
+  : null
+if (tcpIngress) {
+  for (const service of listTCPPublishedServices(database)) {
+    if (service.ingressPort === null) throw new Error('TCP publication has no ingress port')
+    await tcpIngress.activate(service.ingressPort)
   }
 }
 
@@ -543,18 +587,23 @@ const controlPlaneHandler = createControlPlaneHandler({
   listWorkspacePublications: ({ workspaceId }) => ({
     publications: listPublishedServices(database, workspaceId).map(publishedServiceSummary),
   }),
-  upsertWorkspacePublication: ({ workspaceId, name, port, visibility, ttlSeconds }) => {
+  upsertWorkspacePublication: async ({ workspaceId, name, protocol, port, visibility, ttlSeconds }) => {
+    if (protocol === 'tcp' && !tcpIngress) {
+      throw new Error('TCP ingress is not enabled')
+    }
     const owner = getWorkspaceOwnerIdentity(database, workspaceId)
     if (!owner) throw new Error('Workspace owner was not found')
     const accessToken = visibility === 'private'
       ? randomBytes(32).toString('base64url')
       : undefined
     const timestamp = Date.now()
+    const previous = getPublishedServiceByName(database, workspaceId, name)
     const publication = upsertPublishedService(database, {
       id: randomUUID(),
       workspaceId,
       name,
       slug: randomBytes(18).toString('hex'),
+      protocol,
       targetPort: port,
       visibility,
       authPolicy: visibility === 'private' ? 'token' : 'none',
@@ -563,7 +612,28 @@ const controlPlaneHandler = createControlPlaneHandler({
         : null,
       expiresAt: ttlSeconds === null ? null : timestamp + ttlSeconds * 1000,
       now: () => timestamp,
+      tcpIngressPortMinimum: tcpIngressPortMinimum,
+      tcpIngressPortMaximum: tcpIngressPortMaximum,
     })
+    if (
+      previous?.protocol === 'tcp'
+      && previous.ingressPort !== null
+      && (publication.protocol !== 'tcp' || publication.ingressPort !== previous.ingressPort)
+    ) {
+      await tcpIngress?.deactivate(previous.ingressPort)
+    }
+    if (publication.protocol === 'tcp') {
+      if (publication.ingressPort === null || !tcpIngress) {
+        revokePublishedService(database, { workspaceId, name, now: () => timestamp })
+        throw new Error('TCP publication ingress could not be allocated')
+      }
+      try {
+        await tcpIngress.activate(publication.ingressPort)
+      } catch (error) {
+        revokePublishedService(database, { workspaceId, name, now: () => timestamp })
+        throw error
+      }
+    }
     recordAuditEvent(database, {
       userId: owner.userId,
       organizationId: owner.organizationId,
@@ -584,11 +654,14 @@ const controlPlaneHandler = createControlPlaneHandler({
       ...(accessToken ? { accessToken } : {}),
     }
   },
-  revokeWorkspacePublication: ({ workspaceId, name }) => {
+  revokeWorkspacePublication: async ({ workspaceId, name }) => {
     const owner = getWorkspaceOwnerIdentity(database, workspaceId)
     if (!owner) return false
     const publication = revokePublishedService(database, { workspaceId, name })
     if (!publication) return false
+    if (publication.protocol === 'tcp' && publication.ingressPort !== null) {
+      await tcpIngress?.deactivate(publication.ingressPort)
+    }
     recordAuditEvent(database, {
       userId: owner.userId,
       organizationId: owner.organizationId,
@@ -809,6 +882,7 @@ function stop() {
   provisioningProcessor.stop()
   workerHealthMonitor.stop()
   server.stop(true)
+  void tcpIngress?.close()
   database.close()
 }
 

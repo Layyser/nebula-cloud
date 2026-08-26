@@ -518,6 +518,79 @@ const migrations = [
         ON published_service(slug, state, expires_at);
     `,
   },
+  {
+    id: '0017_tcp_published_service_ingress',
+    sql: `
+      CREATE TABLE published_service_next (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL
+          REFERENCES workspace(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        slug TEXT NOT NULL UNIQUE,
+        protocol TEXT NOT NULL
+          CHECK (protocol IN ('http', 'tcp')),
+        target_port INTEGER NOT NULL
+          CHECK (target_port BETWEEN 1024 AND 65535 AND target_port != 7777),
+        ingress_port INTEGER UNIQUE,
+        state TEXT NOT NULL DEFAULT 'active'
+          CHECK (state IN ('active', 'revoked')),
+        visibility TEXT NOT NULL
+          CHECK (visibility IN ('public', 'private')),
+        auth_policy TEXT NOT NULL
+          CHECK (auth_policy IN ('none', 'token')),
+        access_token_hash TEXT,
+        expires_at INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        revoked_at INTEGER,
+        UNIQUE (workspace_id, name),
+        CHECK (
+          (protocol = 'http' AND ingress_port IS NULL)
+          OR (
+            protocol = 'tcp'
+            AND ingress_port BETWEEN 1024 AND 65535
+            AND ingress_port != 7777
+          )
+        ),
+        CHECK (expires_at IS NULL OR expires_at > created_at),
+        CHECK (
+          (visibility = 'public' AND auth_policy = 'none' AND access_token_hash IS NULL)
+          OR (
+            protocol = 'http'
+            AND visibility = 'private'
+            AND auth_policy = 'token'
+            AND length(access_token_hash) = 64
+            AND access_token_hash NOT GLOB '*[^0-9a-f]*'
+          )
+        ),
+        CHECK (
+          (state = 'active' AND revoked_at IS NULL)
+          OR (state = 'revoked' AND revoked_at IS NOT NULL)
+        )
+      );
+
+      INSERT INTO published_service_next (
+        id, workspace_id, name, slug, protocol, target_port, ingress_port,
+        state, visibility, auth_policy, access_token_hash, expires_at,
+        created_at, updated_at, revoked_at
+      )
+      SELECT
+        id, workspace_id, name, slug, protocol, target_port, NULL,
+        state, visibility, auth_policy, access_token_hash, expires_at,
+        created_at, updated_at, revoked_at
+      FROM published_service;
+
+      DROP TABLE published_service;
+      ALTER TABLE published_service_next RENAME TO published_service;
+
+      CREATE INDEX published_service_workspace_state_idx
+        ON published_service(workspace_id, state, expires_at, created_at);
+      CREATE INDEX published_service_slug_state_idx
+        ON published_service(slug, state, expires_at);
+      CREATE INDEX published_service_ingress_state_idx
+        ON published_service(ingress_port, state, expires_at);
+    `,
+  },
 ] as const
 
 export type WorkspaceState = 'pending' | 'provisioning' | 'ready' | 'stopped' | 'failed'
@@ -848,6 +921,7 @@ export interface ContactRequest {
 }
 
 export type PublishedServiceState = 'active' | 'revoked'
+export type PublishedServiceProtocol = 'http' | 'tcp'
 export type PublishedServiceVisibility = 'public' | 'private'
 export type PublishedServiceAuthPolicy = 'none' | 'token'
 
@@ -859,8 +933,9 @@ export interface PublishedService {
   workspaceId: string
   name: string
   slug: string
-  protocol: 'http'
+  protocol: PublishedServiceProtocol
   targetPort: number
+  ingressPort: number | null
   state: PublishedServiceState
   visibility: PublishedServiceVisibility
   authPolicy: PublishedServiceAuthPolicy
@@ -883,6 +958,15 @@ export class PublishedServiceLimitError extends Error {
   constructor() {
     super('Published service limit reached')
     this.name = 'PublishedServiceLimitError'
+  }
+}
+
+export class PublishedServiceIngressCapacityError extends Error {
+  readonly code = 'published_service_ingress_capacity_reached'
+
+  constructor() {
+    super('Published service TCP ingress capacity reached')
+    this.name = 'PublishedServiceIngressCapacityError'
   }
 }
 
@@ -1034,8 +1118,9 @@ interface PublishedServiceRow {
   workspace_id: string
   name: string
   slug: string
-  protocol: 'http'
+  protocol: PublishedServiceProtocol
   target_port: number
+  ingress_port: number | null
   state: PublishedServiceState
   visibility: PublishedServiceVisibility
   auth_policy: PublishedServiceAuthPolicy
@@ -1133,6 +1218,7 @@ function toPublishedService(row: PublishedServiceRow): PublishedService {
     slug: row.slug,
     protocol: row.protocol,
     targetPort: row.target_port,
+    ingressPort: row.ingress_port,
     state: row.state,
     visibility: row.visibility,
     authPolicy: row.auth_policy,
@@ -1266,6 +1352,59 @@ export function getPublishedServiceBySlug(
   return row ? toPublishedService(row) : null
 }
 
+export function getPublishedServiceByIngressPort(
+  database: Database,
+  ingressPort: number,
+  now: number = Date.now(),
+): PublishedService | null {
+  if (!Number.isSafeInteger(ingressPort) || ingressPort < 1024 || ingressPort > 65535) {
+    return null
+  }
+  const row = database.query<PublishedServiceRow, [number, number]>(`
+    SELECT published_service.*
+    FROM published_service
+    INNER JOIN workspace ON workspace.id = published_service.workspace_id
+    INNER JOIN member ON member.id = workspace.member_id
+    LEFT JOIN organization_member_state AS member_state
+      ON member_state.member_id = member.id
+    WHERE published_service.protocol = 'tcp'
+      AND published_service.ingress_port = ?
+      AND published_service.state = 'active'
+      AND (published_service.expires_at IS NULL OR published_service.expires_at > ?)
+      AND workspace.state = 'ready'
+      AND member.organizationId = workspace.organization_id
+      AND COALESCE(member_state.disabled, 0) = 0
+    LIMIT 1
+  `).get(ingressPort, now)
+  return row ? toPublishedService(row) : null
+}
+
+export function listTCPPublishedServices(
+  database: Database,
+  now: number = Date.now(),
+): PublishedService[] {
+  return database.query<PublishedServiceRow, [number]>(`
+    SELECT * FROM published_service
+    WHERE protocol = 'tcp'
+      AND state = 'active'
+      AND (expires_at IS NULL OR expires_at > ?)
+    ORDER BY ingress_port
+  `).all(now).map(toPublishedService)
+}
+
+export function getPublishedServiceByName(
+  database: Database,
+  workspaceId: string,
+  name: string,
+): PublishedService | null {
+  const row = database.query<PublishedServiceRow, [string, string]>(`
+    SELECT * FROM published_service
+    WHERE workspace_id = ? AND name = ?
+    LIMIT 1
+  `).get(workspaceId.trim(), publishedServiceName(name))
+  return row ? toPublishedService(row) : null
+}
+
 export function listPublishedServices(
   database: Database,
   workspaceId: string,
@@ -1287,11 +1426,14 @@ export function upsertPublishedService(
     workspaceId: string
     name: string
     slug: string
+    protocol?: PublishedServiceProtocol
     targetPort: number
     visibility: PublishedServiceVisibility
     authPolicy: PublishedServiceAuthPolicy
     accessTokenHash?: string | null
     expiresAt: number | null
+    tcpIngressPortMinimum?: number
+    tcpIngressPortMaximum?: number
     maximumActive?: number
     now?: () => number
   },
@@ -1300,6 +1442,7 @@ export function upsertPublishedService(
   const workspaceId = publishedServiceText(input.workspaceId, 'Workspace id')
   const name = publishedServiceName(input.name)
   const slug = publishedServiceText(input.slug, 'Published service slug')
+  const protocol = input.protocol ?? 'http'
   const targetPort = publishedServicePort(input.targetPort)
   const visibility = input.visibility
   const authPolicy = input.authPolicy
@@ -1307,6 +1450,9 @@ export function upsertPublishedService(
   const maximumActive = input.maximumActive ?? 5
   if (!Number.isSafeInteger(maximumActive) || maximumActive < 1 || maximumActive > 100) {
     throw new Error('Published service limit is invalid')
+  }
+  if (protocol !== 'http' && protocol !== 'tcp') {
+    throw new Error('Published service protocol is invalid')
   }
 
   return database.transaction(() => {
@@ -1342,6 +1488,9 @@ export function upsertPublishedService(
     if (visibility !== 'public' && visibility !== 'private') {
       throw new Error('Published service visibility is invalid')
     }
+    if (protocol === 'tcp' && (visibility !== 'public' || authPolicy !== 'none')) {
+      throw new Error('TCP publications must use public passthrough access')
+    }
     if (
       !existing
       || existing.state !== 'active'
@@ -1356,14 +1505,52 @@ export function upsertPublishedService(
       if (active >= maximumActive) throw new PublishedServiceLimitError()
     }
 
+    let ingressPort: number | null = null
+    if (protocol === 'tcp') {
+      const minimum = input.tcpIngressPortMinimum
+      const maximum = input.tcpIngressPortMaximum
+      if (
+        !Number.isSafeInteger(minimum)
+        || !Number.isSafeInteger(maximum)
+        || Number(minimum) < 1024
+        || Number(maximum) > 65535
+        || Number(minimum) > Number(maximum)
+        || (Number(minimum) <= 7777 && Number(maximum) >= 7777)
+      ) {
+        throw new Error('Published service TCP ingress range is invalid')
+      }
+      if (
+        existing?.protocol === 'tcp'
+        && existing.ingress_port !== null
+        && existing.ingress_port >= Number(minimum)
+        && existing.ingress_port <= Number(maximum)
+      ) {
+        ingressPort = existing.ingress_port
+      } else {
+        const used = new Set(database.query<{ ingress_port: number }, []>(`
+          SELECT ingress_port FROM published_service
+          WHERE ingress_port IS NOT NULL
+        `).all().map(row => row.ingress_port))
+        for (let candidate = Number(minimum); candidate <= Number(maximum); candidate += 1) {
+          if (!used.has(candidate)) {
+            ingressPort = candidate
+            break
+          }
+        }
+        if (ingressPort === null) throw new PublishedServiceIngressCapacityError()
+      }
+    }
+
     database.prepare(`
       INSERT INTO published_service (
-        id, workspace_id, name, slug, protocol, target_port, state,
+        id, workspace_id, name, slug, protocol, target_port, ingress_port, state,
         visibility, auth_policy, access_token_hash, expires_at,
         created_at, updated_at, revoked_at
-      ) VALUES (?, ?, ?, ?, 'http', ?, 'active', ?, ?, ?, ?, ?, ?, NULL)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, NULL)
       ON CONFLICT(workspace_id, name) DO UPDATE SET
+        protocol = excluded.protocol,
         target_port = excluded.target_port,
+        ingress_port = excluded.ingress_port,
         state = 'active',
         visibility = excluded.visibility,
         auth_policy = excluded.auth_policy,
@@ -1372,7 +1559,7 @@ export function upsertPublishedService(
         updated_at = excluded.updated_at,
         revoked_at = NULL
     `).run(
-      id, workspaceId, name, slug, targetPort,
+      id, workspaceId, name, slug, protocol, targetPort, ingressPort,
       visibility, authPolicy, accessTokenHash, input.expiresAt,
       timestamp, timestamp,
     )

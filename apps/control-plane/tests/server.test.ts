@@ -165,6 +165,7 @@ test('authenticates workspace publication commands before listing, exposing, or 
     name: 'api',
     protocol: 'http' as const,
     targetPort: 3000,
+    ingressPort: null,
     state: 'active' as const,
     visibility: 'public' as const,
     authPolicy: 'none' as const,
@@ -237,6 +238,7 @@ test('authenticates workspace publication commands before listing, exposing, or 
       workspaceId: 'workspace-1',
       name: 'api',
       port: 3000,
+      protocol: 'http',
       visibility: 'public',
       ttlSeconds: null,
     }],
@@ -244,6 +246,7 @@ test('authenticates workspace publication commands before listing, exposing, or 
       workspaceId: 'workspace-1',
       name: 'api',
       port: 3000,
+      protocol: 'http',
       visibility: 'private',
       ttlSeconds: 3600,
     }],
@@ -268,6 +271,7 @@ test('rejects publication inputs that could target runtime or inject routing sta
     { port: 3000, visibility: 'shared' },
     { port: 3000, visibility: 'private', ttlSeconds: 299 },
     { port: 3000, visibility: 'public', ttlSeconds: 604801 },
+    { port: 25565, protocol: 'tcp', visibility: 'private' },
   ]) {
     const response = await handler(new Request(
       'http://control-plane.test/api/workspaces/workspace-1/publications/api',

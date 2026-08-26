@@ -13,6 +13,7 @@ test('resolves an opaque slug to one workspace port and preserves application co
           slug,
           protocol: 'http',
           targetPort: 3000,
+          ingressPort: null,
           state: 'active',
           visibility: 'public',
           authPolicy: 'none',
@@ -69,6 +70,7 @@ test('requires the dedicated token header before contacting a private publicatio
       slug: 'private-slug',
       protocol: 'http',
       targetPort: 3000,
+      ingressPort: null,
       state: 'active',
       visibility: 'private',
       authPolicy: 'token',
@@ -133,4 +135,40 @@ test('does not contact a worker for an unknown or revoked publication slug', asy
   })
   expect(response.status).toBe(404)
   expect(calls).toBe(0)
+})
+
+test('does not send TCP publications through the HTTP gateway', async () => {
+  let workerCalls = 0
+  const gateway = new PublishedServiceGateway({
+    worker: {
+      proxyWorkspaceService: async () => {
+        workerCalls += 1
+        return new Response('must not proxy')
+      },
+    },
+    resolveService: () => ({
+      id: 'tcp-publication',
+      workspaceId: 'workspace-1',
+      name: 'minecraft',
+      slug: 'tcp-slug',
+      protocol: 'tcp',
+      targetPort: 25565,
+      ingressPort: 20000,
+      state: 'active',
+      visibility: 'public',
+      authPolicy: 'none',
+      accessTokenHash: null,
+      expiresAt: null,
+      createdAt: 1,
+      updatedAt: 1,
+      revokedAt: null,
+    }),
+  })
+  const response = await gateway.proxy({
+    request: new Request('https://app.nubols.com/p/tcp-slug'),
+    slug: 'tcp-slug',
+    servicePath: '',
+  })
+  expect(response.status).toBe(404)
+  expect(workerCalls).toBe(0)
 })

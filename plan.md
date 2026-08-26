@@ -311,9 +311,11 @@ and Compose compatibility are explicitly not promised for this beta.
       public URL, exact one-label routing, path fallback, and revocation lookup
       are complete; wildcard DNS, certificate, and reverse-proxy deployment
       remain open.
-- [ ] Route raw TCP through an ingress-owned allocated port on
-      `*.tcp.nubols.com`. Add optional SRV records for protocols such as
-      Minecraft; never imply that generic DNS carries a TCP port.
+- [ ] Productionize raw TCP through an ingress-owned allocated port on
+      `*.tcp.nubols.com`. The first Cloud-to-Worker bridge is implemented;
+      add managed DNS, TLS/network exposure, and optional SRV records for
+      protocols such as Minecraft. Never imply that generic DNS carries a
+      TCP port.
 - [ ] Keep databases private by default. Public database routes require TLS,
       generated credentials, bounded expiry, connection limits, and preferably
       source-IP allowlists.
@@ -714,10 +716,17 @@ worker_health_sample         # short retention
 - [x] Add durable first-slice `published_service` state with workspace ownership,
       HTTP target port, opaque public slug, status, timestamps, and audit actor.
 - [x] Extend HTTP `published_service` state with visibility, token auth policy,
-      and optional bounded expiry. Allocated TCP endpoint state remains pending with the
-      raw-TCP routing mode.
-- [ ] Route HTTP/HTTPS through managed wildcard DNS and TLS. Route raw TCP (for
-      example Minecraft) through an allocated gateway port; optionally publish
+      optional bounded expiry, and protocol-neutral raw-TCP endpoint allocation.
+      TCP is public passthrough only; its allocated external port is never
+      accepted from the workspace.
+- [x] Implement the first raw-TCP ingress bridge. The control plane owns the
+      allocated listener and authenticates the Cloud-to-Worker CONNECT handshake;
+      the Worker derives the current private container address and forwards raw
+      bytes to the exact target port. Route, global connection, per-route
+      connection, idle-time, workspace-stop, and wrong-workspace/port checks are
+      covered locally.
+- [ ] Route HTTP/HTTPS through managed wildcard DNS and TLS. Add production DNS
+      and ingress deployment for the HTTP hostnames; optionally publish
       protocol-specific SRV records where clients support them. DNS alone does
       not encode a generic TCP port.
 - [x] Keep every listener private until the workspace runs the explicit,
@@ -733,6 +742,10 @@ worker_health_sample         # short retention
 - [ ] Add per-organization service/port/bandwidth limits, abuse detection, and
       emergency revocation. Block SMTP, metadata/private control networks,
       reflection/amplification patterns, scanning, and prohibited workloads.
+- [ ] Post-beta: add a publication firewall policy layer with organization VPN
+      requirements, source-IP/CIDR allowlists, and emergency deny rules. Keep
+      it outside the beta TCP passthrough contract; do not treat a shared secret
+      or an undisclosed port as authentication.
 - [x] Integration-test two workspaces on one worker: each can run and publish a
       small HTTP process, each hits only its own quota, and neither can connect
       to or inspect the other's processes, filesystem, volumes, or private
@@ -1106,10 +1119,11 @@ Continue locally without purchasing infrastructure in this order:
    DinD, microVMs, or Worker-managed customer service containers now.
 7. [x] Implement publication desired state and workspace ownership checks only
    after the current workspace isolation boundary passes. Expose an already
-   listening workspace port through a narrow `nubols expose` command; deliver
-   HTTP/TLS before allocated raw TCP. The same-origin HTTP broker, CLI, durable
+   listening workspace port through narrow HTTP and raw-TCP `nubols expose`
+   commands. The same-origin HTTP broker, allocated TCP bridge, CLI, durable
    ownership state, and real-Docker two-workspace isolation probe are complete;
-   wildcard TLS and allocated raw TCP remain later slices in G1A/G5.
+   wildcard TLS, SRV records, and public-internet proof remain later slices in
+   G1A/G5.
 8. Treat bounded Docker Compose translation as future discovery work only. If
    beta evidence justifies it, translate a safe subset into Worker-owned desired
    state without exposing Docker sockets, privileged mode, host namespaces,

@@ -11,6 +11,7 @@ nubols expose 3000
 nubols expose api 3000
 nubols expose --ttl 1h api 3000
 nubols expose --private --ttl 1h api 3000
+nubols expose --tcp minecraft 25565
 nubols ps
 nubols stop api
 nubols --help
@@ -35,6 +36,20 @@ Private mode is intended for API clients that can set a request header. The
 token is rotated on every private update, never appears in listings or audit
 metadata, and is stored only as a SHA-256 hash. The dedicated header is consumed
 by Cloud and stripped before the application request reaches the workspace.
+
+Raw TCP publication is protocol-neutral and does not inject authentication or
+rewrite the byte stream. PostgreSQL, Minecraft, and other applications must
+authenticate using their own protocol. Nubols allocates the external TCP port
+and routes it through an authenticated Cloud-to-Worker bridge to the exact
+workspace port. TCP ingress is disabled unless explicitly enabled in the
+control-plane deployment; the first slice applies route, per-route connection,
+global connection, and idle-time limits.
+
+The TCP command returns an allocated endpoint such as
+`tcp://tcp.nubols.com:20000`; external clients connect to that host and port,
+while Nubols forwards to the recorded internal port. DNS does not carry a TCP
+port, so protocols that support SRV records may later receive a friendlier
+hostname-only connection form.
 
 The publication name (`app`, `api`, and so on) is only a route label. The final
 argument is the actual HTTP port inside the current workspace; the application
@@ -101,19 +116,22 @@ original Host header. Do not route the wildcard to Worker hosts. Vite proxies
 container cannot use the host's `localhost`, so use a trusted HTTPS development
 origin if testing the workspace command end to end.
 
-Changing the publication instructions changes runtime contract version 6.
+Changing the publication instructions changes runtime contract version 7.
 Replace existing workspace compute so it receives the current CLI, environment,
 and system context; persistent `/home/nebula` data is preserved.
 
 ## Deliberate first-slice limits
 
-- HTTP only; WebSocket upgrades, CONNECT, and TRACE are rejected.
+- HTTP publication requests reject WebSocket upgrades, CONNECT, and TRACE;
+  raw TCP uses a separate allocated listener and is protocol passthrough.
 - Five active publications per workspace.
 - 32 MiB maximum request body.
 - The application-layer wildcard hostname contract exists, but DNS, certificate
   issuance, and production ingress deployment are not completed here.
-- No raw TCP/Minecraft/database publication yet. Private HTTP publication uses
-  a generated header token; browser-oriented organization/session policy is not
+- Raw TCP publication is available only when explicitly enabled in the
+  control-plane deployment. It is public protocol passthrough with no Nubols
+  token; PostgreSQL, Minecraft, or another service must provide its own
+  authentication. Browser-oriented organization/session policy is not
   implemented.
 - No global bandwidth/rate controls yet; those remain required before broad
   public availability.

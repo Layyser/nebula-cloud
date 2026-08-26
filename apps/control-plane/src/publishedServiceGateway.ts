@@ -73,6 +73,12 @@ export class PublishedServiceGateway {
         headers: { 'cache-control': 'no-store' },
       })
     }
+    if (publication.protocol !== 'http') {
+      return Response.json({ error: 'TCP publication requires a TCP connection', code: 'protocol_mismatch' }, {
+        status: 404,
+        headers: { 'cache-control': 'no-store' },
+      })
+    }
     if (
       publication.visibility === 'private'
       && (
