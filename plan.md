@@ -274,9 +274,11 @@ daemon, the host Docker socket, or privileges in the Worker host.
       Worker-managed customer service containers in this phase.
 - [ ] Preserve the non-bypassable host envelope around the existing workspace:
       memory, CPU, PIDs, disk and I/O, open files, logs, and network egress.
-- [ ] Add two-workspace adversarial tests proving workspace A cannot enumerate,
+- [x] Add two-workspace adversarial tests proving workspace A cannot enumerate,
       inspect, signal, ptrace, read `/proc` details for, mount, or network-reach
-      workspace B's processes, filesystem, volumes, runtime, or secrets.
+      workspace B's processes, filesystem, volumes, runtime, or secrets. The
+      Worker's real-Docker lifecycle fixture now runs these attacks between two
+      live workspace containers and verifies the target remains healthy.
 - [ ] Test fork bombs, memory pressure, disk/image/build-cache exhaustion,
       restart persistence, runtime crash recovery, and workspace deletion.
 
@@ -1087,10 +1089,12 @@ Continue locally without purchasing infrastructure in this order:
    Firecracker works but costs roughly five times the current warm-idle memory;
    retain the current Worker-owned workspace containers and do not implement
    DinD, microVMs, or Worker-managed customer service containers now.
-7. Implement publication desired state and workspace ownership checks only
+7. [x] Implement publication desired state and workspace ownership checks only
    after the current workspace isolation boundary passes. Expose an already
    listening workspace port through a narrow `nubols expose` command; deliver
-   HTTP/TLS before allocated raw TCP.
+   HTTP/TLS before allocated raw TCP. The same-origin HTTP broker, CLI, durable
+   ownership state, and real-Docker two-workspace isolation probe are complete;
+   wildcard TLS and allocated raw TCP remain later slices in G1A/G5.
 8. Treat bounded Docker Compose translation as future discovery work only. If
    beta evidence justifies it, translate a safe subset into Worker-owned desired
    state without exposing Docker sockets, privileged mode, host namespaces,
