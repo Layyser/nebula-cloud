@@ -61,13 +61,13 @@ test('applies the minimal application schema idempotently', () => {
     expect(tables).toContain('published_service')
     expect(database.query<{ count: number }, []>(
       'SELECT COUNT(*) AS count FROM nebula_migration',
-    ).get()?.count).toBe(15)
+    ).get()?.count).toBe(16)
   } finally {
     database.close()
   }
 })
 
-test('migrates legacy publications to bounded public access without changing slugs', () => {
+test('migrates legacy publications to permanent public access without changing slugs', () => {
   const database = openCloudDatabase({ path: ':memory:' })
   try {
     database.exec(`
@@ -130,24 +130,23 @@ test('migrates legacy publications to bounded public access without changing slu
       '0014_published_service',
     ]) insertMigration.run(id)
 
-    const before = Date.now()
     migrateCloudSchema(database)
-    const after = Date.now()
-    const migrated = getPublishedServiceBySlug(database, 'stable-opaque-slug', before)
+    const migrated = getPublishedServiceBySlug(database, 'stable-opaque-slug')
     expect(migrated).toMatchObject({
       id: 'publication-1',
       visibility: 'public',
       authPolicy: 'none',
       accessTokenHash: null,
     })
-    expect(migrated!.expiresAt).toBeGreaterThanOrEqual(before + 86_399_000)
-    expect(migrated!.expiresAt).toBeLessThanOrEqual(after + 86_401_000)
+    expect(migrated!.expiresAt).toBeNull()
+    expect(getPublishedServiceBySlug(database, 'stable-opaque-slug', Number.MAX_SAFE_INTEGER))
+      .toMatchObject({ id: 'publication-1', expiresAt: null })
   } finally {
     database.close()
   }
 })
 
-test('publishes only bounded workspace ports with stable opaque slugs and revocation', () => {
+test('publishes only workspace-scoped ports with stable opaque slugs and revocation', () => {
   const database = openCloudDatabase({ path: ':memory:' })
   try {
     database.exec(`
@@ -256,8 +255,17 @@ test('publishes only bounded workspace ports with stable opaque slugs and revoca
     expect(getPublishedServiceBySlug(database, 'opaque-slug-one', 60)).toBeNull()
     expect(listPublishedServices(database, workspace.id, 60).map(service => service.name))
       .toEqual(['api'])
+    upsertPublishedService(database, {
+      id: 'publication-3', workspaceId: workspace.id, name: 'docs',
+      slug: 'opaque-slug-three', targetPort: 5000, maximumActive: 2,
+      visibility: 'public', authPolicy: 'none', expiresAt: null,
+      now: () => 70,
+    })
     expect(getPublishedServiceBySlug(database, 'opaque-slug-two', 600_040)).toBeNull()
-    expect(listPublishedServices(database, workspace.id, 600_040)).toEqual([])
+    expect(listPublishedServices(database, workspace.id, 600_040).map(service => service.name))
+      .toEqual(['docs'])
+    expect(getPublishedServiceBySlug(database, 'opaque-slug-three', Number.MAX_SAFE_INTEGER))
+      .toMatchObject({ name: 'docs', expiresAt: null })
     database.exec(`
       INSERT INTO organization_member_state (
         member_id, disabled, disabled_by, disabled_at, updated_at

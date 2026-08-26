@@ -169,7 +169,7 @@ test('authenticates workspace publication commands before listing, exposing, or 
     visibility: 'public' as const,
     authPolicy: 'none' as const,
     publicUrl: 'https://app.nubols.com/p/opaque-slug',
-    expiresAt: 86_400_010,
+    expiresAt: null,
     createdAt: 10,
     updatedAt: 10,
   }
@@ -238,7 +238,7 @@ test('authenticates workspace publication commands before listing, exposing, or 
       name: 'api',
       port: 3000,
       visibility: 'public',
-      ttlSeconds: 86400,
+      ttlSeconds: null,
     }],
     ['upsert', {
       workspaceId: 'workspace-1',

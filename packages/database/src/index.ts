@@ -457,6 +457,67 @@ const migrations = [
         ON published_service(slug, state, expires_at);
     `,
   },
+  {
+    id: '0016_optional_published_service_expiry',
+    sql: `
+      CREATE TABLE published_service_next (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL
+          REFERENCES workspace(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        slug TEXT NOT NULL UNIQUE,
+        protocol TEXT NOT NULL DEFAULT 'http'
+          CHECK (protocol = 'http'),
+        target_port INTEGER NOT NULL
+          CHECK (target_port BETWEEN 1024 AND 65535 AND target_port != 7777),
+        state TEXT NOT NULL DEFAULT 'active'
+          CHECK (state IN ('active', 'revoked')),
+        visibility TEXT NOT NULL
+          CHECK (visibility IN ('public', 'private')),
+        auth_policy TEXT NOT NULL
+          CHECK (auth_policy IN ('none', 'token')),
+        access_token_hash TEXT,
+        expires_at INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        revoked_at INTEGER,
+        UNIQUE (workspace_id, name),
+        CHECK (expires_at IS NULL OR expires_at > created_at),
+        CHECK (
+          (visibility = 'public' AND auth_policy = 'none' AND access_token_hash IS NULL)
+          OR (
+            visibility = 'private'
+            AND auth_policy = 'token'
+            AND length(access_token_hash) = 64
+            AND access_token_hash NOT GLOB '*[^0-9a-f]*'
+          )
+        ),
+        CHECK (
+          (state = 'active' AND revoked_at IS NULL)
+          OR (state = 'revoked' AND revoked_at IS NOT NULL)
+        )
+      );
+
+      INSERT INTO published_service_next (
+        id, workspace_id, name, slug, protocol, target_port, state,
+        visibility, auth_policy, access_token_hash, expires_at,
+        created_at, updated_at, revoked_at
+      )
+      SELECT
+        id, workspace_id, name, slug, protocol, target_port, state,
+        visibility, auth_policy, access_token_hash, NULL,
+        created_at, updated_at, revoked_at
+      FROM published_service;
+
+      DROP TABLE published_service;
+      ALTER TABLE published_service_next RENAME TO published_service;
+
+      CREATE INDEX published_service_workspace_state_idx
+        ON published_service(workspace_id, state, expires_at, created_at);
+      CREATE INDEX published_service_slug_state_idx
+        ON published_service(slug, state, expires_at);
+    `,
+  },
 ] as const
 
 export type WorkspaceState = 'pending' | 'provisioning' | 'ready' | 'stopped' | 'failed'
@@ -791,7 +852,6 @@ export type PublishedServiceVisibility = 'public' | 'private'
 export type PublishedServiceAuthPolicy = 'none' | 'token'
 
 export const publishedServiceMinimumTTLSeconds = 5 * 60
-export const publishedServiceDefaultTTLSeconds = 24 * 60 * 60
 export const publishedServiceMaximumTTLSeconds = 7 * 24 * 60 * 60
 
 export interface PublishedService {
@@ -805,7 +865,7 @@ export interface PublishedService {
   visibility: PublishedServiceVisibility
   authPolicy: PublishedServiceAuthPolicy
   accessTokenHash: string | null
-  expiresAt: number
+  expiresAt: number | null
   createdAt: number
   updatedAt: number
   revokedAt: number | null
@@ -980,7 +1040,7 @@ interface PublishedServiceRow {
   visibility: PublishedServiceVisibility
   auth_policy: PublishedServiceAuthPolicy
   access_token_hash: string | null
-  expires_at: number
+  expires_at: number | null
   created_at: number
   updated_at: number
   revoked_at: number | null
@@ -1197,7 +1257,7 @@ export function getPublishedServiceBySlug(
       ON member_state.member_id = member.id
     WHERE published_service.slug = ?
       AND published_service.state = 'active'
-      AND published_service.expires_at > ?
+      AND (published_service.expires_at IS NULL OR published_service.expires_at > ?)
       AND workspace.state = 'ready'
       AND member.organizationId = workspace.organization_id
       AND COALESCE(member_state.disabled, 0) = 0
@@ -1213,7 +1273,9 @@ export function listPublishedServices(
 ): PublishedService[] {
   return database.query<PublishedServiceRow, [string, number]>(`
     SELECT * FROM published_service
-    WHERE workspace_id = ? AND state = 'active' AND expires_at > ?
+    WHERE workspace_id = ?
+      AND state = 'active'
+      AND (expires_at IS NULL OR expires_at > ?)
     ORDER BY created_at, name
   `).all(workspaceId.trim(), now).map(toPublishedService)
 }
@@ -1229,7 +1291,7 @@ export function upsertPublishedService(
     visibility: PublishedServiceVisibility
     authPolicy: PublishedServiceAuthPolicy
     accessTokenHash?: string | null
-    expiresAt: number
+    expiresAt: number | null
     maximumActive?: number
     now?: () => number
   },
@@ -1256,15 +1318,17 @@ export function upsertPublishedService(
       LIMIT 1
     `).get(workspaceId, name)
     const timestamp = (input.now ?? Date.now)()
-    if (!Number.isSafeInteger(input.expiresAt)) {
-      throw new Error('Published service expiry is invalid')
-    }
-    const ttlMs = input.expiresAt - timestamp
-    if (
-      ttlMs < publishedServiceMinimumTTLSeconds * 1000
-      || ttlMs > publishedServiceMaximumTTLSeconds * 1000
-    ) {
-      throw new Error('Published service TTL is invalid')
+    if (input.expiresAt !== null) {
+      if (!Number.isSafeInteger(input.expiresAt)) {
+        throw new Error('Published service expiry is invalid')
+      }
+      const ttlMs = input.expiresAt - timestamp
+      if (
+        ttlMs < publishedServiceMinimumTTLSeconds * 1000
+        || ttlMs > publishedServiceMaximumTTLSeconds * 1000
+      ) {
+        throw new Error('Published service TTL is invalid')
+      }
     }
     if (
       (visibility === 'public' && (authPolicy !== 'none' || accessTokenHash !== null))
@@ -1278,10 +1342,16 @@ export function upsertPublishedService(
     if (visibility !== 'public' && visibility !== 'private') {
       throw new Error('Published service visibility is invalid')
     }
-    if (!existing || existing.state !== 'active' || existing.expires_at <= timestamp) {
+    if (
+      !existing
+      || existing.state !== 'active'
+      || (existing.expires_at !== null && existing.expires_at <= timestamp)
+    ) {
       const active = database.query<{ count: number }, [string, number]>(`
         SELECT COUNT(*) AS count FROM published_service
-        WHERE workspace_id = ? AND state = 'active' AND expires_at > ?
+        WHERE workspace_id = ?
+          AND state = 'active'
+          AND (expires_at IS NULL OR expires_at > ?)
       `).get(workspaceId, timestamp)?.count ?? 0
       if (active >= maximumActive) throw new PublishedServiceLimitError()
     }

@@ -561,7 +561,7 @@ const controlPlaneHandler = createControlPlaneHandler({
       accessTokenHash: accessToken
         ? hashPublishedServiceToken(accessToken)
         : null,
-      expiresAt: timestamp + ttlSeconds * 1000,
+      expiresAt: ttlSeconds === null ? null : timestamp + ttlSeconds * 1000,
       now: () => timestamp,
     })
     recordAuditEvent(database, {

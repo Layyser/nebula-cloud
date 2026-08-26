@@ -11,19 +11,20 @@ nubols expose 3000
 nubols expose api 3000
 nubols expose --ttl 1h api 3000
 nubols expose --private --ttl 1h api 3000
-nubols exposed
-nubols unexpose api
+nubols ps
+nubols stop api
+nubols --help
 ```
 
 The default service name is `app`. Names contain at most 32 lowercase letters,
 numbers, and internal hyphens. Ports must be unprivileged; the Nebula Runtime
 API port 7777 is always reserved.
 
-`nubols expose` is the explicit public action. Publications expire after 24
-hours unless `--ttl` selects a duration between 5 minutes and 7 days. An
-expired publication is removed from lookup and active listings immediately and
-no longer consumes the five-service quota; running the command again extends
-it. `nubols expose --private` instead creates a token-protected endpoint and
+`nubols expose` is the explicit public action. Publications are permanent by
+default; `--ttl` may select an expiry between 5 minutes and 7 days. An expired
+publication is removed from lookup and active listings immediately and no
+longer consumes the five-service quota; running the command again recreates it.
+`nubols expose --private` instead creates a token-protected endpoint and
 prints this credential once:
 
 ```text
@@ -35,13 +36,21 @@ token is rotated on every private update, never appears in listings or audit
 metadata, and is stored only as a SHA-256 hash. The dedicated header is consumed
 by Cloud and stripped before the application request reaches the workspace.
 
+The publication name (`app`, `api`, and so on) is only a route label. The final
+argument is the actual HTTP port inside the current workspace; the application
+must listen on `0.0.0.0:PORT`. The CLI does not accept an IP address, hostname,
+container selector, or process name. `nubols stop NAME` revokes only that route
+and does not terminate the listening process. Stopping a workspace makes its
+routes unavailable without deleting them; permanent routes resume when the
+workspace starts, while workspace deletion removes them.
+
 ## Trust and routing boundary
 
 The Worker injects the workspace ID, Cloud origin, rotating Runtime API token,
 and authoritative command instructions. The CLI sends only the service name
 and target port. Cloud verifies that token against the named workspace, stores
 durable `published_service` desired state, creates an opaque 144-bit slug, and
-records visibility, authentication policy, expiry, and publish/revoke audit
+records visibility, authentication policy, optional expiry, and publish/revoke audit
 events without credentials. It accepts no Worker ID, container
 address, host address, host port, or network selector from the workspace.
 
@@ -91,7 +100,7 @@ original Host header. Do not route the wildcard to Worker hosts. Vite proxies
 container cannot use the host's `localhost`, so use a trusted HTTPS development
 origin if testing the workspace command end to end.
 
-Changing the publication instructions changes runtime contract version 5.
+Changing the publication instructions changes runtime contract version 6.
 Replace existing workspace compute so it receives the current CLI, environment,
 and system context; persistent `/home/nebula` data is preserved.
 

@@ -291,7 +291,7 @@ and Compose compatibility are explicitly not promised for this beta.
 - [x] Implement durable workspace-owned `published_service` desired state and
       audit events before changing DNS or exposing any Worker port.
 - [x] Add a narrow CLI flow such as `nubols expose 3000`,
-      `nubols expose api 3000`, and `nubols unexpose api`. It publishes only a
+      `nubols expose api 3000`, and `nubols stop api`. It publishes only a
       process already listening inside the caller's workspace; it does not start
       a container or accept host routing details.
 - [x] Add the first workspace-scoped HTTP broker. It accepts only a bounded
@@ -300,10 +300,11 @@ and Compose compatibility are explicitly not promised for this beta.
       unpredictable same-origin `/p/<slug>` URL, and the Worker derives the
       current private container address for each request.
 - [x] Extend publication desired state with explicit visibility/auth policy and
-      bounded TTL before broad public availability. Public exposure is an
-      explicit CLI action; `--private` generates a one-time-displayed header
-      token stored only as a hash. Every route expires in 5 minutes to 7 days,
-      defaults to 24 hours, and fails lookup immediately after expiry.
+      optional bounded TTL before broad public availability. Public exposure is
+      an explicit CLI action; `--private` generates a one-time-displayed header
+      token stored only as a hash. Routes are permanent by default and can be
+      explicitly stopped; an optional 5-minute-to-7-day TTL fails lookup
+      immediately after expiry.
 - [ ] Route HTTP/HTTPS through wildcard TLS on `*.apps.nubols.com`; issue one
       unpredictable hostname per publication and revoke it independently of the
       workspace lifecycle. The application-layer hostname parser, generated
@@ -708,12 +709,12 @@ worker_health_sample         # short retention
       publication only for a port already listening inside its own workspace;
       it never receives Worker, DNS-provider, or ingress credentials.
 - [x] Add a narrow runtime CLI such as `nubols expose api 3000` and
-      `nubols unexpose api`. The control plane derives workspace ownership from
+      `nubols stop api`. The control plane derives workspace ownership from
       authentication and the Worker chooses all host-side routing details.
 - [x] Add durable first-slice `published_service` state with workspace ownership,
       HTTP target port, opaque public slug, status, timestamps, and audit actor.
 - [x] Extend HTTP `published_service` state with visibility, token auth policy,
-      and bounded expiry. Allocated TCP endpoint state remains pending with the
+      and optional bounded expiry. Allocated TCP endpoint state remains pending with the
       raw-TCP routing mode.
 - [ ] Route HTTP/HTTPS through managed wildcard DNS and TLS. Route raw TCP (for
       example Minecraft) through an allocated gateway port; optionally publish
@@ -721,10 +722,11 @@ worker_health_sample         # short retention
       not encode a generic TCP port.
 - [x] Keep every listener private until the workspace runs the explicit,
       auditable `nubols expose` action. The CLI clearly prints public/private
-      policy, exact endpoint, and expiry; private mode prints its token once.
+      policy, exact endpoint, and permanent/expiring lifetime; private mode
+      prints its token once.
 - [ ] Add organization quotas plus global rate, connection, and bandwidth
       limits around publication traffic. Service-count/port limits and
-      expiry/revocation are already enforced.
+      optional expiry/revocation are already enforced.
 - [ ] Require TLS and generated credentials for database-like protocols, plus
       optional source-IP allowlists. A password/token alone is not an adequate
       public-database boundary.

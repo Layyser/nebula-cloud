@@ -35,7 +35,6 @@ import {
   OrganizationAccessDeniedError,
   ContactRateLimitError,
   OrganizationMemberMutationError,
-  publishedServiceDefaultTTLSeconds,
   publishedServiceMaximumTTLSeconds,
   publishedServiceMinimumTTLSeconds,
   UsageAccessDeniedError,
@@ -116,7 +115,7 @@ export interface ControlPlaneHandlerOptions {
     name: string
     port: number
     visibility: 'public' | 'private'
-    ttlSeconds: number
+    ttlSeconds: number | null
   }) => PublishedServiceResponse
   revokeWorkspacePublication?: (input: {
     workspaceId: string
@@ -579,15 +578,20 @@ export function createControlPlaneHandler({
           return json({ error: 'publication request is invalid', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
         }
         const visibility = body.visibility ?? 'public'
-        const ttlSeconds = body.ttlSeconds ?? publishedServiceDefaultTTLSeconds
+        const ttlSeconds = body.ttlSeconds ?? null
         if (
           (visibility !== 'public' && visibility !== 'private')
-          || !Number.isSafeInteger(ttlSeconds)
-          || Number(ttlSeconds) < publishedServiceMinimumTTLSeconds
-          || Number(ttlSeconds) > publishedServiceMaximumTTLSeconds
+          || (
+            ttlSeconds !== null
+            && (
+              !Number.isSafeInteger(ttlSeconds)
+              || Number(ttlSeconds) < publishedServiceMinimumTTLSeconds
+              || Number(ttlSeconds) > publishedServiceMaximumTTLSeconds
+            )
+          )
         ) {
           return json({
-            error: `visibility must be public or private and ttlSeconds must be ${publishedServiceMinimumTTLSeconds}-${publishedServiceMaximumTTLSeconds}`,
+            error: `visibility must be public or private and ttlSeconds must be null or ${publishedServiceMinimumTTLSeconds}-${publishedServiceMaximumTTLSeconds}`,
             code: 'invalid_request',
           } satisfies CloudErrorResponse, 400)
         }
@@ -597,7 +601,7 @@ export function createControlPlaneHandler({
             name,
             port: body.port,
             visibility,
-            ttlSeconds: Number(ttlSeconds),
+            ttlSeconds: ttlSeconds === null ? null : Number(ttlSeconds),
           }))
         } catch (error) {
           if (

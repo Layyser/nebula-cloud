@@ -193,7 +193,7 @@ export interface PublishedServiceSummary {
   visibility: 'public' | 'private'
   authPolicy: 'none' | 'token'
   publicUrl: string
-  expiresAt: number
+  expiresAt: number | null
   createdAt: number
   updatedAt: number
 }
@@ -210,7 +210,7 @@ export interface PublishedServiceResponse {
 export interface UpsertPublishedServiceRequest {
   port: number
   visibility: 'public' | 'private'
-  ttlSeconds: number
+  ttlSeconds?: number | null
 }
 
 export interface UsageTotals {
