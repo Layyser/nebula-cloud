@@ -41,8 +41,9 @@ argument is the actual HTTP port inside the current workspace; the application
 must listen on `0.0.0.0:PORT`. The CLI does not accept an IP address, hostname,
 container selector, or process name. `nubols stop NAME` revokes only that route
 and does not terminate the listening process. Stopping a workspace makes its
-routes unavailable without deleting them; permanent routes resume when the
-workspace starts, while workspace deletion removes them.
+routes unavailable without deleting them; permanent routes work again after
+both the workspace and HTTP server are running, while workspace deletion
+removes them.
 
 ## Trust and routing boundary
 

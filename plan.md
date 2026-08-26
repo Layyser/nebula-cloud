@@ -733,10 +733,13 @@ worker_health_sample         # short retention
 - [ ] Add per-organization service/port/bandwidth limits, abuse detection, and
       emergency revocation. Block SMTP, metadata/private control networks,
       reflection/amplification patterns, scanning, and prohibited workloads.
-- [ ] Integration-test two workspaces on one worker: each can run and publish a
+- [x] Integration-test two workspaces on one worker: each can run and publish a
       small HTTP process, each hits only its own quota, and neither can connect
       to or inspect the other's processes, filesystem, volumes, or private
-      network.
+      network. The real-Docker fixture verifies Worker-derived routing,
+      wrong-workspace/port failure, stop/restart availability, and process,
+      mount, and network isolation; database coverage verifies quotas remain
+      workspace-scoped.
 - [ ] End-to-end test one HTTPS service and one raw TCP service from the public
       internet, including restart persistence, certificate issuance, routing to
       the correct worker, credential rotation, expiry, deletion, and worker drain.

@@ -158,10 +158,12 @@ test('publishes only workspace-scoped ports with stable opaque slugs and revocat
         organizationId TEXT NOT NULL REFERENCES organization(id),
         role TEXT NOT NULL DEFAULT 'member'
       );
-      INSERT INTO user (id) VALUES ('owner');
-      INSERT INTO organization (id) VALUES ('org-1');
+      INSERT INTO user (id) VALUES ('owner'), ('peer-owner');
+      INSERT INTO organization (id) VALUES ('org-1'), ('org-2');
       INSERT INTO member (id, userId, organizationId, role)
-        VALUES ('membership-1', 'owner', 'org-1', 'owner');
+        VALUES
+          ('membership-1', 'owner', 'org-1', 'owner'),
+          ('membership-2', 'peer-owner', 'org-2', 'owner');
     `)
     migrateCloudSchema(database)
     const workspace = ensurePersonalWorkspace(database, {
@@ -228,6 +230,33 @@ test('publishes only workspace-scoped ports with stable opaque slugs and revocat
       visibility: 'public', authPolicy: 'none', expiresAt: 600_050,
       now: () => 50,
     })).toThrow('port is invalid')
+
+    const peerWorkspace = ensurePersonalWorkspace(database, {
+      userId: 'peer-owner',
+      organizationId: 'org-2',
+      createId: () => 'workspace-2',
+      now: () => 50,
+    })
+    database.prepare("UPDATE workspace SET state = 'ready' WHERE id = ?")
+      .run(peerWorkspace.id)
+    for (const [id, name, slug, port] of [
+      ['peer-publication-1', 'web', 'peer-opaque-slug-one', 3000],
+      ['peer-publication-2', 'api', 'peer-opaque-slug-two', 4000],
+    ] as const) {
+      upsertPublishedService(database, {
+        id, workspaceId: peerWorkspace.id, name, slug, targetPort: port,
+        visibility: 'public', authPolicy: 'none', expiresAt: null,
+        maximumActive: 2, now: () => 50,
+      })
+    }
+    expect(listPublishedServices(database, peerWorkspace.id, 60).map(service => service.name))
+      .toEqual(['api', 'web'])
+    expect(() => upsertPublishedService(database, {
+      id: 'peer-publication-3', workspaceId: peerWorkspace.id, name: 'docs',
+      slug: 'peer-opaque-slug-three', targetPort: 5000,
+      visibility: 'public', authPolicy: 'none', expiresAt: null,
+      maximumActive: 2, now: () => 50,
+    })).toThrow('Published service limit reached')
 
     expect(listPublishedServices(database, workspace.id, 60).map(service => service.name))
       .toEqual(['web', 'api'])
