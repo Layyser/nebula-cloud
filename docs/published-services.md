@@ -26,7 +26,8 @@ durable `published_service` desired state, creates an opaque 144-bit slug, and
 records publish/revoke audit events. It accepts no Worker ID, container
 address, host address, host port, or network selector from the workspace.
 
-Public requests currently use the same-origin path:
+Without dedicated publication ingress, public requests use the same-origin
+compatibility path:
 
 ```text
 https://app.nubols.com/p/<opaque-slug>
@@ -42,6 +43,19 @@ credential travels separately and is removed before the application receives
 the request. Internal and hop-by-hop response headers are removed while
 application status, body, redirects, and cookies are preserved.
 
+When `NEBULA_PUBLISHED_SERVICE_ORIGIN=https://apps.nubols.com` is configured,
+new and existing publication summaries instead return:
+
+```text
+https://<opaque-slug>.apps.nubols.com
+```
+
+The control plane accepts exactly one DNS label below the configured suffix.
+The bare suffix and nested labels return 404 and cannot fall through to normal
+Cloud API or authentication routes. The opaque slug still resolves through the
+same durable ownership and revocation checks; no workspace or Worker selector
+is encoded in DNS.
+
 ## Deployment
 
 Set the Worker to the externally reachable HTTPS Cloud origin:
@@ -51,9 +65,12 @@ NEBULA_WORKER_WORKSPACE_CONTROL_URL=https://app.nubols.com
 ```
 
 The public reverse proxy must send both `/api/*` and `/p/*` to the control
-plane. Vite proxies `/p/*` in local web development, but a container cannot use
-the host's `localhost`; use a trusted HTTPS development origin if testing the
-workspace command end to end.
+plane. For dedicated hostnames, wildcard DNS and a wildcard certificate must
+send `*.apps.nubols.com` to the same publication handler while preserving the
+original Host header. Do not route the wildcard to Worker hosts. Vite proxies
+`/p/*` in local web development, but it does not emulate wildcard DNS/TLS; a
+container cannot use the host's `localhost`, so use a trusted HTTPS development
+origin if testing the workspace command end to end.
 
 Changing the Worker control URL changes runtime contract version 4. Replace
 existing workspace compute so it receives the CLI environment and current
@@ -64,8 +81,9 @@ workspace image; persistent `/home/nebula` data is preserved.
 - HTTP only; WebSocket upgrades, CONNECT, and TRACE are rejected.
 - Five active publications per workspace.
 - 32 MiB maximum request body.
-- No wildcard hostname, raw TCP/Minecraft/database publication, TTL, or
-  per-service authentication policy yet.
+- The application-layer wildcard hostname contract exists, but DNS, certificate
+  issuance, and production ingress deployment are not completed here.
+- No raw TCP/Minecraft/database publication, TTL, or per-service authentication
+  policy yet.
 - No global bandwidth/rate controls yet; those remain required before broad
   public availability.
-

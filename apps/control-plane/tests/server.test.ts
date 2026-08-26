@@ -285,6 +285,40 @@ test('routes opaque public service URLs without exposing workspace or port selec
   expect(missing.status).toBe(404)
 })
 
+test('routes one wildcard publication hostname and preserves its complete app path', async () => {
+  const calls: unknown[] = []
+  const handler = createControlPlaneHandler({
+    publishedServiceHostnameSuffix: 'apps.nubols.com',
+    proxyPublishedService: async input => {
+      calls.push({
+        slug: input.slug,
+        servicePath: input.servicePath,
+        host: new URL(input.request.url).host,
+      })
+      return new Response('hostname-proxied')
+    },
+  })
+  const response = await handler(new Request(
+    'https://opaque-slug.apps.nubols.com/v1/items?limit=2',
+  ))
+  expect(response.status).toBe(200)
+  expect(await response.text()).toBe('hostname-proxied')
+  expect(calls).toEqual([{
+    slug: 'opaque-slug',
+    servicePath: '/v1/items?limit=2',
+    host: 'opaque-slug.apps.nubols.com',
+  }])
+
+  for (const hostname of [
+    'apps.nubols.com',
+    'nested.slug.apps.nubols.com',
+  ]) {
+    const denied = await handler(new Request(`https://${hostname}/api/workspaces`))
+    expect(denied.status).toBe(404)
+  }
+  expect(calls).toHaveLength(1)
+})
+
 test('accepts bounded same-origin contact requests with client context', async () => {
   const submissions: unknown[] = []
   const handler = createControlPlaneHandler({

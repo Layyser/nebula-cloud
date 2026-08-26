@@ -38,6 +38,7 @@ import {
   UsageAccessDeniedError,
   WorkspaceMembershipNotFoundError,
 } from '@nebula-cloud/database'
+import { matchPublishedServiceHostname } from './publishedServiceRouting'
 
 const service = 'nebula-cloud-control-plane' as const
 const personalUsagePath = '/api/usage/me'
@@ -121,6 +122,7 @@ export interface ControlPlaneHandlerOptions {
     slug: string
     servicePath: string
   }) => Promise<Response>
+  publishedServiceHostnameSuffix?: string
   getPersonalUsage?: (input: {
     userId: string
     organizationId: string
@@ -487,6 +489,7 @@ export function createControlPlaneHandler({
   updateContactRequestStatus,
   trustedContactOrigins = [],
   submitContact,
+  publishedServiceHostnameSuffix,
 }: ControlPlaneHandlerOptions = {}): (
   request: Request,
   context?: ControlPlaneRequestContext,
@@ -495,8 +498,15 @@ export function createControlPlaneHandler({
   return async (request, context = {}) => {
     const url = new URL(request.url)
 
+    const publishedHost = matchPublishedServiceHostname(
+      url.hostname,
+      publishedServiceHostnameSuffix,
+    )
+    if (publishedHost.kind === 'invalid') {
+      return json({ error: 'published service not found', code: 'not_found' } satisfies CloudErrorResponse, 404)
+    }
     const publishedMatch = url.pathname.match(publishedServicePath)
-    if (publishedMatch) {
+    if (publishedHost.kind === 'service' || publishedMatch) {
       if (request.method === 'CONNECT' || request.method === 'TRACE') {
         return json({ error: 'method not allowed', code: 'method_not_allowed' } satisfies CloudErrorResponse, 405)
       }
@@ -509,8 +519,12 @@ export function createControlPlaneHandler({
       try {
         return await proxyPublishedService({
           request,
-          slug: publishedMatch[1],
-          servicePath: `${publishedMatch[2] || '/'}${url.search}`,
+          slug: publishedHost.kind === 'service'
+            ? publishedHost.slug
+            : publishedMatch![1],
+          servicePath: publishedHost.kind === 'service'
+            ? `${url.pathname}${url.search}`
+            : `${publishedMatch![2] || '/'}${url.search}`,
         })
       } catch {
         return json({ error: 'published service is unavailable', code: 'published_service_unavailable', retryable: true } satisfies CloudErrorResponse, 503)

@@ -61,6 +61,7 @@ import { loadWorkerCredentials } from './workerCredentials'
 import { WorkerHealthMonitor } from './workerHealthMonitor'
 import { PublishedServiceGateway } from './publishedServiceGateway'
 import { workspacePublicationAuthenticated } from './workspacePublicationAuth'
+import { parsePublishedServiceOrigin } from './publishedServiceRouting'
 
 const hostname = process.env.NEBULA_CLOUD_BIND?.trim() || '127.0.0.1'
 const port = Number.parseInt(process.env.NEBULA_CLOUD_PORT || '7790', 10)
@@ -70,6 +71,9 @@ const authBaseURL = process.env.BETTER_AUTH_URL?.trim() || `http://${hostname}:$
 const authSecret = process.env.BETTER_AUTH_SECRET?.trim() || ''
 const publicAppURL = process.env.NEBULA_PUBLIC_APP_URL?.trim()
   || 'http://localhost:5173'
+const publishedServiceOrigin = parsePublishedServiceOrigin(
+  process.env.NEBULA_PUBLISHED_SERVICE_ORIGIN,
+)
 const emailTransport = process.env.NEBULA_EMAIL_TRANSPORT?.trim().toLowerCase()
   || 'disabled'
 const emailOutboxDirectory = process.env.NEBULA_EMAIL_OUTBOX_DIR?.trim()
@@ -318,6 +322,7 @@ const publishedServiceGateway = new PublishedServiceGateway({
 })
 
 function publishedServiceURL(slug: string): string {
+  if (publishedServiceOrigin) return publishedServiceOrigin.urlForSlug(slug)
   return `${publicAppURL.replace(/\/$/, '')}/p/${encodeURIComponent(slug)}`
 }
 
@@ -354,6 +359,7 @@ function parseBooleanEnvironment(
 
 const controlPlaneHandler = createControlPlaneHandler({
   version,
+  publishedServiceHostnameSuffix: publishedServiceOrigin?.hostnameSuffix,
   authorizeWorkerAdministration: platformAdminToken
     ? authorizePlatformAdministration
     : undefined,

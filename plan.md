@@ -303,7 +303,10 @@ and Compose compatibility are explicitly not promised for this beta.
       bounded TTL before broad public availability.
 - [ ] Route HTTP/HTTPS through wildcard TLS on `*.apps.nubols.com`; issue one
       unpredictable hostname per publication and revoke it independently of the
-      workspace lifecycle.
+      workspace lifecycle. The application-layer hostname parser, generated
+      public URL, exact one-label routing, path fallback, and revocation lookup
+      are complete; wildcard DNS, certificate, and reverse-proxy deployment
+      remain open.
 - [ ] Route raw TCP through an ingress-owned allocated port on
       `*.tcp.nubols.com`. Add optional SRV records for protocols such as
       Minecraft; never imply that generic DNS carries a TCP port.
