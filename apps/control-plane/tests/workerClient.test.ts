@@ -220,6 +220,7 @@ test('proxies a workspace service with worker auth while preserving app auth sep
         authorization: 'Bearer application-token',
         cookie: 'session=browser',
         'x-nubols-service-authorization': 'spoofed',
+        'x-nubols-publication-token': 'private-publication-token',
       },
       body: 'payload',
     }),
@@ -234,6 +235,7 @@ test('proxies a workspace service with worker auth while preserving app auth sep
   expect(forwarded!.headers.get('x-nubols-service-authorization'))
     .toBe('Bearer application-token')
   expect(forwarded!.headers.get('cookie')).toBe('session=browser')
+  expect(forwarded!.headers.has('x-nubols-publication-token')).toBe(false)
   expect(forwarded!.headers.get('x-forwarded-host')).toBe('app.nubols.com')
   expect(await forwarded!.text()).toBe('payload')
 })

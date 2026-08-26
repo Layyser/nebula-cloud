@@ -35,6 +35,9 @@ import {
   OrganizationAccessDeniedError,
   ContactRateLimitError,
   OrganizationMemberMutationError,
+  publishedServiceDefaultTTLSeconds,
+  publishedServiceMaximumTTLSeconds,
+  publishedServiceMinimumTTLSeconds,
   UsageAccessDeniedError,
   WorkspaceMembershipNotFoundError,
 } from '@nebula-cloud/database'
@@ -112,6 +115,8 @@ export interface ControlPlaneHandlerOptions {
     workspaceId: string
     name: string
     port: number
+    visibility: 'public' | 'private'
+    ttlSeconds: number
   }) => PublishedServiceResponse
   revokeWorkspacePublication?: (input: {
     workspaceId: string
@@ -570,11 +575,30 @@ export function createControlPlaneHandler({
         } catch {
           return json({ error: 'request body must be valid JSON', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
         }
-        if (!isRecord(body) || !hasOnlyKeys(body, ['port']) || !isPublishedServicePort(body.port)) {
-          return json({ error: 'port must be an integer from 1024 to 65535 and cannot be 7777', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+        if (!isRecord(body) || !hasOnlyKeys(body, ['port', 'visibility', 'ttlSeconds']) || !isPublishedServicePort(body.port)) {
+          return json({ error: 'publication request is invalid', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+        }
+        const visibility = body.visibility ?? 'public'
+        const ttlSeconds = body.ttlSeconds ?? publishedServiceDefaultTTLSeconds
+        if (
+          (visibility !== 'public' && visibility !== 'private')
+          || !Number.isSafeInteger(ttlSeconds)
+          || Number(ttlSeconds) < publishedServiceMinimumTTLSeconds
+          || Number(ttlSeconds) > publishedServiceMaximumTTLSeconds
+        ) {
+          return json({
+            error: `visibility must be public or private and ttlSeconds must be ${publishedServiceMinimumTTLSeconds}-${publishedServiceMaximumTTLSeconds}`,
+            code: 'invalid_request',
+          } satisfies CloudErrorResponse, 400)
         }
         try {
-          return json(upsertWorkspacePublication({ workspaceId, name, port: body.port }))
+          return json(upsertWorkspacePublication({
+            workspaceId,
+            name,
+            port: body.port,
+            visibility,
+            ttlSeconds: Number(ttlSeconds),
+          }))
         } catch (error) {
           if (
             error instanceof Error

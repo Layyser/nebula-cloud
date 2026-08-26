@@ -1,5 +1,6 @@
 import type { PublishedService } from '@nebula-cloud/database'
 import { WorkerClientError } from './workerClient'
+import { publishedServiceTokenAuthenticated } from './publishedServiceAccess'
 
 export interface PublishedServiceWorker {
   proxyWorkspaceService(input: {
@@ -41,6 +42,16 @@ function unavailable(): Response {
   })
 }
 
+function authenticationRequired(): Response {
+  return Response.json({
+    error: 'published service authentication required',
+    code: 'published_service_authentication_required',
+  }, {
+    status: 401,
+    headers: { 'cache-control': 'no-store' },
+  })
+}
+
 export class PublishedServiceGateway {
   readonly #worker: PublishedServiceWorker
   readonly #resolveService: (slug: string) => PublishedService | null
@@ -61,6 +72,16 @@ export class PublishedServiceGateway {
         status: 404,
         headers: { 'cache-control': 'no-store' },
       })
+    }
+    if (
+      publication.visibility === 'private'
+      && (
+        publication.authPolicy !== 'token'
+        || !publication.accessTokenHash
+        || !publishedServiceTokenAuthenticated(input.request, publication.accessTokenHash)
+      )
+    ) {
+      return authenticationRequired()
     }
     try {
       const upstream = await this.#worker.proxyWorkspaceService({

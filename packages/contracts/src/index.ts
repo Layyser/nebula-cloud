@@ -190,7 +190,10 @@ export interface PublishedServiceSummary {
   protocol: 'http'
   targetPort: number
   state: 'active'
+  visibility: 'public' | 'private'
+  authPolicy: 'none' | 'token'
   publicUrl: string
+  expiresAt: number
   createdAt: number
   updatedAt: number
 }
@@ -201,10 +204,13 @@ export interface PublishedServicesResponse {
 
 export interface PublishedServiceResponse {
   publication: PublishedServiceSummary
+  accessToken?: string
 }
 
 export interface UpsertPublishedServiceRequest {
   port: number
+  visibility: 'public' | 'private'
+  ttlSeconds: number
 }
 
 export interface UsageTotals {

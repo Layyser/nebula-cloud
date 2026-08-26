@@ -299,8 +299,11 @@ and Compose compatibility are explicitly not promised for this beta.
       port, DNS zone, or another workspace ID. Cloud issues and revokes an
       unpredictable same-origin `/p/<slug>` URL, and the Worker derives the
       current private container address for each request.
-- [ ] Extend publication desired state with explicit visibility/auth policy and
-      bounded TTL before broad public availability.
+- [x] Extend publication desired state with explicit visibility/auth policy and
+      bounded TTL before broad public availability. Public exposure is an
+      explicit CLI action; `--private` generates a one-time-displayed header
+      token stored only as a hash. Every route expires in 5 minutes to 7 days,
+      defaults to 24 hours, and fails lookup immediately after expiry.
 - [ ] Route HTTP/HTTPS through wildcard TLS on `*.apps.nubols.com`; issue one
       unpredictable hostname per publication and revoke it independently of the
       workspace lifecycle. The application-layer hostname parser, generated
@@ -709,15 +712,19 @@ worker_health_sample         # short retention
       authentication and the Worker chooses all host-side routing details.
 - [x] Add durable first-slice `published_service` state with workspace ownership,
       HTTP target port, opaque public slug, status, timestamps, and audit actor.
-- [ ] Extend `published_service` with allocated TCP endpoints, visibility, auth
-      policy, and expiry when those routing modes are implemented.
+- [x] Extend HTTP `published_service` state with visibility, token auth policy,
+      and bounded expiry. Allocated TCP endpoint state remains pending with the
+      raw-TCP routing mode.
 - [ ] Route HTTP/HTTPS through managed wildcard DNS and TLS. Route raw TCP (for
       example Minecraft) through an allocated gateway port; optionally publish
       protocol-specific SRV records where clients support them. DNS alone does
       not encode a generic TCP port.
-- [ ] Default every service to private. Making it public requires an explicit,
-      auditable action with quotas, rate/connection limits, expiry/revocation,
-      and clear UI output containing the exact endpoint.
+- [x] Keep every listener private until the workspace runs the explicit,
+      auditable `nubols expose` action. The CLI clearly prints public/private
+      policy, exact endpoint, and expiry; private mode prints its token once.
+- [ ] Add organization quotas plus global rate, connection, and bandwidth
+      limits around publication traffic. Service-count/port limits and
+      expiry/revocation are already enforced.
 - [ ] Require TLS and generated credentials for database-like protocols, plus
       optional source-IP allowlists. A password/token alone is not an adequate
       public-database boundary.

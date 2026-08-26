@@ -61,7 +61,87 @@ test('applies the minimal application schema idempotently', () => {
     expect(tables).toContain('published_service')
     expect(database.query<{ count: number }, []>(
       'SELECT COUNT(*) AS count FROM nebula_migration',
-    ).get()?.count).toBe(14)
+    ).get()?.count).toBe(15)
+  } finally {
+    database.close()
+  }
+})
+
+test('migrates legacy publications to bounded public access without changing slugs', () => {
+  const database = openCloudDatabase({ path: ':memory:' })
+  try {
+    database.exec(`
+      CREATE TABLE nebula_migration (
+        id TEXT PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+      );
+      CREATE TABLE member (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL,
+        organizationId TEXT NOT NULL
+      );
+      CREATE TABLE workspace (
+        id TEXT PRIMARY KEY,
+        member_id TEXT NOT NULL,
+        organization_id TEXT NOT NULL,
+        state TEXT NOT NULL
+      );
+      CREATE TABLE organization_member_state (
+        member_id TEXT PRIMARY KEY,
+        disabled INTEGER NOT NULL
+      );
+      CREATE TABLE published_service (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        slug TEXT NOT NULL UNIQUE,
+        protocol TEXT NOT NULL,
+        target_port INTEGER NOT NULL,
+        state TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        revoked_at INTEGER,
+        UNIQUE (workspace_id, name)
+      );
+      INSERT INTO member VALUES ('membership-1', 'owner', 'org-1');
+      INSERT INTO workspace VALUES ('workspace-1', 'membership-1', 'org-1', 'ready');
+      INSERT INTO published_service VALUES (
+        'publication-1', 'workspace-1', 'api', 'stable-opaque-slug',
+        'http', 3000, 'active', 10, 20, NULL
+      );
+    `)
+    const insertMigration = database.prepare(
+      'INSERT INTO nebula_migration (id, applied_at) VALUES (?, 1)',
+    )
+    for (const id of [
+      '0001_workspace',
+      '0002_workspace_membership_organization_guard',
+      '0003_validate_existing_workspace_ownership',
+      '0004_provisioning_job',
+      '0005_usage_event',
+      '0006_usage_event_cost',
+      '0007_usage_event_details',
+      '0008_usage_session_display_name',
+      '0009_organization_control_plane',
+      '0010_audit_event',
+      '0011_worker_host_registry',
+      '0012_worker_health_reported_capacity',
+      '0013_contact_request',
+      '0014_published_service',
+    ]) insertMigration.run(id)
+
+    const before = Date.now()
+    migrateCloudSchema(database)
+    const after = Date.now()
+    const migrated = getPublishedServiceBySlug(database, 'stable-opaque-slug', before)
+    expect(migrated).toMatchObject({
+      id: 'publication-1',
+      visibility: 'public',
+      authPolicy: 'none',
+      accessTokenHash: null,
+    })
+    expect(migrated!.expiresAt).toBeGreaterThanOrEqual(before + 86_399_000)
+    expect(migrated!.expiresAt).toBeLessThanOrEqual(after + 86_401_000)
   } finally {
     database.close()
   }
@@ -105,6 +185,9 @@ test('publishes only bounded workspace ports with stable opaque slugs and revoca
       name: 'web',
       slug: 'opaque-slug-one',
       targetPort: 3000,
+      visibility: 'public',
+      authPolicy: 'none',
+      expiresAt: 600_020,
       maximumActive: 2,
       now: () => 20,
     })
@@ -117,43 +200,71 @@ test('publishes only bounded workspace ports with stable opaque slugs and revoca
       name: 'web',
       slug: 'ignored-new-slug',
       targetPort: 8080,
+      visibility: 'private',
+      authPolicy: 'token',
+      accessTokenHash: 'a'.repeat(64),
+      expiresAt: 600_030,
       maximumActive: 2,
       now: () => 30,
     })
     expect(updated).toMatchObject({
       id: 'publication-1', slug: 'opaque-slug-one', targetPort: 8080,
+      visibility: 'private', authPolicy: 'token', expiresAt: 600_030,
     })
     upsertPublishedService(database, {
       id: 'publication-2', workspaceId: workspace.id, name: 'api',
       slug: 'opaque-slug-two', targetPort: 4000, maximumActive: 2,
+      visibility: 'public', authPolicy: 'none', expiresAt: 600_040,
+      now: () => 40,
     })
     expect(() => upsertPublishedService(database, {
       id: 'publication-3', workspaceId: workspace.id, name: 'docs',
       slug: 'opaque-slug-three', targetPort: 5000, maximumActive: 2,
+      visibility: 'public', authPolicy: 'none', expiresAt: 600_050,
+      now: () => 50,
     })).toThrow('Published service limit reached')
     expect(() => upsertPublishedService(database, {
       id: 'publication-runtime', workspaceId: workspace.id, name: 'runtime',
       slug: 'opaque-runtime-slug', targetPort: 7777,
+      visibility: 'public', authPolicy: 'none', expiresAt: 600_050,
+      now: () => 50,
     })).toThrow('port is invalid')
 
-    expect(listPublishedServices(database, workspace.id).map(service => service.name))
+    expect(listPublishedServices(database, workspace.id, 60).map(service => service.name))
       .toEqual(['web', 'api'])
-    expect(getPublishedServiceBySlug(database, 'opaque-slug-one')?.targetPort).toBe(8080)
+    expect(getPublishedServiceBySlug(database, 'opaque-slug-one', 60)).toMatchObject({
+      targetPort: 8080,
+      accessTokenHash: 'a'.repeat(64),
+    })
+    expect(() => upsertPublishedService(database, {
+      id: 'invalid-private', workspaceId: workspace.id, name: 'private',
+      slug: 'invalid-private', targetPort: 5001,
+      visibility: 'private', authPolicy: 'token', expiresAt: 600_060,
+      now: () => 60,
+    })).toThrow('access policy is invalid')
+    expect(() => upsertPublishedService(database, {
+      id: 'invalid-ttl', workspaceId: workspace.id, name: 'short',
+      slug: 'invalid-ttl', targetPort: 5002,
+      visibility: 'public', authPolicy: 'none', expiresAt: 61_000,
+      now: () => 60,
+    })).toThrow('TTL is invalid')
     expect(revokePublishedService(database, {
       workspaceId: workspace.id,
       name: 'web',
       now: () => 40,
     })).toMatchObject({ state: 'revoked', revokedAt: 40 })
-    expect(getPublishedServiceBySlug(database, 'opaque-slug-one')).toBeNull()
-    expect(listPublishedServices(database, workspace.id).map(service => service.name))
+    expect(getPublishedServiceBySlug(database, 'opaque-slug-one', 60)).toBeNull()
+    expect(listPublishedServices(database, workspace.id, 60).map(service => service.name))
       .toEqual(['api'])
+    expect(getPublishedServiceBySlug(database, 'opaque-slug-two', 600_040)).toBeNull()
+    expect(listPublishedServices(database, workspace.id, 600_040)).toEqual([])
     database.exec(`
       INSERT INTO organization_member_state (
         member_id, disabled, disabled_by, disabled_at, updated_at
       ) VALUES ('membership-1', 1, 'owner', 50, 50)
     `)
     expect(getWorkspaceOwnerIdentity(database, workspace.id)).toBeNull()
-    expect(getPublishedServiceBySlug(database, 'opaque-slug-two')).toBeNull()
+    expect(getPublishedServiceBySlug(database, 'opaque-slug-two', 60)).toBeNull()
   } finally {
     database.close()
   }

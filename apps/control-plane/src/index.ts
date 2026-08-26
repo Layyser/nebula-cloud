@@ -62,6 +62,7 @@ import { WorkerHealthMonitor } from './workerHealthMonitor'
 import { PublishedServiceGateway } from './publishedServiceGateway'
 import { workspacePublicationAuthenticated } from './workspacePublicationAuth'
 import { parsePublishedServiceOrigin } from './publishedServiceRouting'
+import { hashPublishedServiceToken } from './publishedServiceAccess'
 
 const hostname = process.env.NEBULA_CLOUD_BIND?.trim() || '127.0.0.1'
 const port = Number.parseInt(process.env.NEBULA_CLOUD_PORT || '7790', 10)
@@ -333,7 +334,10 @@ function publishedServiceSummary(service: ReturnType<typeof upsertPublishedServi
     protocol: service.protocol,
     targetPort: service.targetPort,
     state: 'active' as const,
+    visibility: service.visibility,
+    authPolicy: service.authPolicy,
     publicUrl: publishedServiceURL(service.slug),
+    expiresAt: service.expiresAt,
     createdAt: service.createdAt,
     updatedAt: service.updatedAt,
   }
@@ -539,15 +543,26 @@ const controlPlaneHandler = createControlPlaneHandler({
   listWorkspacePublications: ({ workspaceId }) => ({
     publications: listPublishedServices(database, workspaceId).map(publishedServiceSummary),
   }),
-  upsertWorkspacePublication: ({ workspaceId, name, port }) => {
+  upsertWorkspacePublication: ({ workspaceId, name, port, visibility, ttlSeconds }) => {
     const owner = getWorkspaceOwnerIdentity(database, workspaceId)
     if (!owner) throw new Error('Workspace owner was not found')
+    const accessToken = visibility === 'private'
+      ? randomBytes(32).toString('base64url')
+      : undefined
+    const timestamp = Date.now()
     const publication = upsertPublishedService(database, {
       id: randomUUID(),
       workspaceId,
       name,
       slug: randomBytes(18).toString('hex'),
       targetPort: port,
+      visibility,
+      authPolicy: visibility === 'private' ? 'token' : 'none',
+      accessTokenHash: accessToken
+        ? hashPublishedServiceToken(accessToken)
+        : null,
+      expiresAt: timestamp + ttlSeconds * 1000,
+      now: () => timestamp,
     })
     recordAuditEvent(database, {
       userId: owner.userId,
@@ -559,9 +574,15 @@ const controlPlaneHandler = createControlPlaneHandler({
         name: publication.name,
         protocol: publication.protocol,
         targetPort: publication.targetPort,
+        visibility: publication.visibility,
+        authPolicy: publication.authPolicy,
+        expiresAt: publication.expiresAt,
       },
     })
-    return { publication: publishedServiceSummary(publication) }
+    return {
+      publication: publishedServiceSummary(publication),
+      ...(accessToken ? { accessToken } : {}),
+    }
   },
   revokeWorkspacePublication: ({ workspaceId, name }) => {
     const owner = getWorkspaceOwnerIdentity(database, workspaceId)
@@ -578,6 +599,9 @@ const controlPlaneHandler = createControlPlaneHandler({
         name: publication.name,
         protocol: publication.protocol,
         targetPort: publication.targetPort,
+        visibility: publication.visibility,
+        authPolicy: publication.authPolicy,
+        expiresAt: publication.expiresAt,
       },
     })
     return true

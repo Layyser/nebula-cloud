@@ -166,7 +166,10 @@ test('authenticates workspace publication commands before listing, exposing, or 
     protocol: 'http' as const,
     targetPort: 3000,
     state: 'active' as const,
+    visibility: 'public' as const,
+    authPolicy: 'none' as const,
     publicUrl: 'https://app.nubols.com/p/opaque-slug',
+    expiresAt: 86_400_010,
     createdAt: 10,
     updatedAt: 10,
   }
@@ -213,6 +216,16 @@ test('authenticates workspace publication commands before listing, exposing, or 
   expect(exposed.status).toBe(200)
   expect(await exposed.json()).toEqual({ publication })
 
+  const privateExposed = await handler(new Request(
+    'http://control-plane.test/api/workspaces/workspace-1/publications/api',
+    {
+      method: 'PUT',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ port: 3000, visibility: 'private', ttlSeconds: 3600 }),
+    },
+  ))
+  expect(privateExposed.status).toBe(200)
+
   const revoked = await handler(new Request(
     'http://control-plane.test/api/workspaces/workspace-1/publications/api',
     { method: 'DELETE', headers },
@@ -220,7 +233,20 @@ test('authenticates workspace publication commands before listing, exposing, or 
   expect(revoked.status).toBe(204)
   expect(calls).toEqual([
     ['list', { workspaceId: 'workspace-1' }],
-    ['upsert', { workspaceId: 'workspace-1', name: 'api', port: 3000 }],
+    ['upsert', {
+      workspaceId: 'workspace-1',
+      name: 'api',
+      port: 3000,
+      visibility: 'public',
+      ttlSeconds: 86400,
+    }],
+    ['upsert', {
+      workspaceId: 'workspace-1',
+      name: 'api',
+      port: 3000,
+      visibility: 'private',
+      ttlSeconds: 3600,
+    }],
     ['revoke', { workspaceId: 'workspace-1', name: 'api' }],
   ])
 })
@@ -239,6 +265,9 @@ test('rejects publication inputs that could target runtime or inject routing sta
     { port: 80 },
     { port: 3000, host: 'other-workspace' },
     { port: '3000' },
+    { port: 3000, visibility: 'shared' },
+    { port: 3000, visibility: 'private', ttlSeconds: 299 },
+    { port: 3000, visibility: 'public', ttlSeconds: 604801 },
   ]) {
     const response = await handler(new Request(
       'http://control-plane.test/api/workspaces/workspace-1/publications/api',
