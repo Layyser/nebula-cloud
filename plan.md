@@ -530,6 +530,9 @@ organization invite, and receive every message with SPF/DKIM/DMARC passing.
 **Recommended beta model:** one organization subscription with a quantity equal
 to entitled members. Each paid seat grants one Operator. Keep the exact price in
 Stripe/configuration rather than hard-coding it in access-control logic.
+Owners and admins explicitly assign purchased seats to organization members;
+enabling a membership does not consume a seat automatically, and active paid
+assignments may never exceed the locally projected subscription quantity.
 
 Stripe is preferable to a Merchant of Record for the B2B beta because Nubols
 needs organization subscriptions, tax IDs, invoices, and direct customer
