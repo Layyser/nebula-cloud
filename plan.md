@@ -594,7 +594,7 @@ stripe_event
 - [ ] Collect legal/business name, billing address, country, and tax ID where
       relevant; enable automatic tax only after the gestor validates product tax
       code and registrations.
-- [ ] Add a signed webhook endpoint. Persist the event ID before processing;
+- [x] Add a signed webhook endpoint. Persist the event ID before processing;
       make handlers idempotent and tolerant of duplicates and out-of-order events.
 - [ ] Project Stripe state into local subscription/entitlement tables. Never call
       Stripe synchronously on every authorization request.

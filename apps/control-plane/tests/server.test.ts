@@ -7,9 +7,62 @@ import {
   OperatorEntitlementRequiredError,
   WorkspaceMembershipNotFoundError,
 } from '@nebula-cloud/database'
+import { StripeWebhookVerificationError } from '../src/stripeWebhook'
 
 test('allows lifecycle requests to outlive the worker timeout', () => {
   expect(CONTROL_PLANE_IDLE_TIMEOUT_SECONDS).toBeGreaterThan(120)
+})
+
+test('accepts only bounded raw Stripe webhook bodies through the configured verifier', async () => {
+  const calls: unknown[] = []
+  const handler = createControlPlaneHandler({
+    handleStripeWebhook: (rawBody, signature) => {
+      calls.push({ body: new TextDecoder().decode(rawBody), signature })
+      if (signature === 'bad') throw new StripeWebhookVerificationError()
+      if (signature === 'processing-failure') throw new Error('projection failed')
+      return {
+        eventId: 'evt_1',
+        type: 'customer.created',
+        duplicate: false,
+        processingResult: 'applied',
+      }
+    },
+  })
+  const endpoint = 'http://control-plane.test/api/webhooks/stripe'
+  const payload = '{\n  "id": "evt_1"\n}'
+
+  const accepted = await handler(new Request(endpoint, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'stripe-signature': 'signed' },
+    body: payload,
+  }))
+  expect(accepted.status).toBe(200)
+  expect(await accepted.json()).toMatchObject({ received: true, eventId: 'evt_1' })
+  expect(calls).toEqual([{ body: payload, signature: 'signed' }])
+
+  const rejected = await handler(new Request(endpoint, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'stripe-signature': 'bad' },
+    body: payload,
+  }))
+  expect(rejected.status).toBe(400)
+  expect((await rejected.json()).code).toBe('stripe_webhook_verification_failed')
+
+  const retryable = await handler(new Request(endpoint, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'stripe-signature': 'processing-failure' },
+    body: payload,
+  }))
+  expect(retryable.status).toBe(503)
+  expect((await retryable.json()).code).toBe('stripe_webhook_processing_failed')
+
+  const oversized = await handler(new Request(endpoint, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'stripe-signature': 'signed' },
+    body: 'x'.repeat(256 * 1024 + 1),
+  }))
+  expect(oversized.status).toBe(413)
+  expect(calls).toHaveLength(3)
 })
 
 test('reports liveness and version without product capabilities', async () => {

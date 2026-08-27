@@ -45,6 +45,10 @@ import {
   WorkspaceMembershipNotFoundError,
 } from '@nebula-cloud/database'
 import { matchPublishedServiceHostname } from './publishedServiceRouting'
+import {
+  StripeWebhookVerificationError,
+  type StripeWebhookResult,
+} from './stripeWebhook'
 
 const service = 'nebula-cloud-control-plane' as const
 const personalUsagePath = '/api/usage/me'
@@ -68,6 +72,7 @@ const publishedServicePath = /^\/p\/([^/]+)(\/.*)?$/
 const workerAdministrationPath = '/internal/v1/workers'
 const workerAdministrationMemberPath = /^\/internal\/v1\/workers\/([^/]+)$/
 const operatorEntitlementAdministrationPath = /^\/internal\/v1\/entitlements\/operator\/([^/]+)$/
+const stripeWebhookPath = '/api/webhooks/stripe'
 
 // Workspace replacement may legitimately run for up to two minutes. Bun's
 // ten-second default would close the request while the worker was converging
@@ -78,6 +83,10 @@ export interface ControlPlaneHandlerOptions {
   version?: string
   isReady?: () => boolean
   authHandler?: (request: Request) => Response | Promise<Response>
+  handleStripeWebhook?: (
+    rawBody: Uint8Array,
+    signature: string,
+  ) => StripeWebhookResult | Promise<StripeWebhookResult>
   resolveSession?: (
     request: Request,
   ) => Promise<{
@@ -348,6 +357,7 @@ const contactRequestMaximumBytes = 16 * 1024
 const contactAdministrationMaximumBytes = 1024
 const contactExportMaximumRows = 5000
 const publicationRequestMaximumBytes = 1024
+const stripeWebhookMaximumBytes = 256 * 1024
 
 function isPublishedServiceName(value: string): boolean {
   return /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/.test(value)
@@ -423,12 +433,12 @@ function contactRequestsCSV(requests: ContactRequestRecord[]): string {
   return `${header.map(csvCell).join(',')}\r\n${rows.join('\r\n')}\r\n`
 }
 
-async function readBoundedJSON(request: Request, maximumBytes: number): Promise<unknown> {
+async function readBoundedBytes(request: Request, maximumBytes: number): Promise<Uint8Array> {
   const declaredLength = Number(request.headers.get('content-length'))
   if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
     throw new Error('request_too_large')
   }
-  if (!request.body) throw new Error('invalid_json')
+  if (!request.body) return new Uint8Array()
   const reader = request.body.getReader()
   const chunks: Uint8Array[] = []
   let length = 0
@@ -448,6 +458,12 @@ async function readBoundedJSON(request: Request, maximumBytes: number): Promise<
     bytes.set(chunk, offset)
     offset += chunk.byteLength
   }
+  return bytes
+}
+
+async function readBoundedJSON(request: Request, maximumBytes: number): Promise<unknown> {
+  const bytes = await readBoundedBytes(request, maximumBytes)
+  if (bytes.byteLength === 0) throw new Error('invalid_json')
   try {
     return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
   } catch {
@@ -502,6 +518,7 @@ export function createControlPlaneHandler({
   version = 'dev',
   isReady = () => true,
   authHandler,
+  handleStripeWebhook,
   resolveSession,
   ensurePersonalWorkspace,
   ensureWorkspaceRunning,
@@ -576,6 +593,58 @@ export function createControlPlaneHandler({
         })
       } catch {
         return json({ error: 'published service is unavailable', code: 'published_service_unavailable', retryable: true } satisfies CloudErrorResponse, 503)
+      }
+    }
+
+    if (url.pathname === stripeWebhookPath) {
+      if (request.method !== 'POST') {
+        return json({ error: 'method not allowed', code: 'method_not_allowed' } satisfies CloudErrorResponse, 405)
+      }
+      if (!handleStripeWebhook) {
+        return json({
+          error: 'Stripe webhooks are unavailable',
+          code: 'stripe_webhook_unavailable',
+          retryable: true,
+        } satisfies CloudErrorResponse, 503)
+      }
+      const signature = request.headers.get('stripe-signature')?.trim() ?? ''
+      if (!signature) {
+        return json({
+          error: 'Stripe webhook signature required',
+          code: 'stripe_webhook_verification_failed',
+        } satisfies CloudErrorResponse, 400)
+      }
+      if (!(request.headers.get('content-type') ?? '').toLowerCase().startsWith('application/json')) {
+        return json({ error: 'invalid Stripe webhook', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+      }
+      let rawBody: Uint8Array
+      try {
+        rawBody = await readBoundedBytes(request, stripeWebhookMaximumBytes)
+      } catch (error) {
+        const tooLarge = error instanceof Error && error.message === 'request_too_large'
+        return json({
+          error: tooLarge ? 'Stripe webhook is too large' : 'invalid Stripe webhook',
+          code: tooLarge ? 'request_too_large' : 'invalid_request',
+        } satisfies CloudErrorResponse, tooLarge ? 413 : 400)
+      }
+      if (rawBody.byteLength === 0) {
+        return json({ error: 'invalid Stripe webhook', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+      }
+      try {
+        const result = await handleStripeWebhook(rawBody, signature)
+        return json({ received: true, ...result })
+      } catch (error) {
+        if (error instanceof StripeWebhookVerificationError) {
+          return json({
+            error: error.message,
+            code: error.code,
+          } satisfies CloudErrorResponse, 400)
+        }
+        return json({
+          error: 'Stripe webhook processing failed',
+          code: 'stripe_webhook_processing_failed',
+          retryable: true,
+        } satisfies CloudErrorResponse, 503)
       }
     }
 

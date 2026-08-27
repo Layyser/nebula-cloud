@@ -3264,6 +3264,16 @@ export function getBillingCustomer(
   return row ? toBillingCustomer(row) : null
 }
 
+export function getBillingCustomerByStripeId(
+  database: Database,
+  stripeCustomerId: string,
+): BillingCustomer | null {
+  const row = database.query<BillingCustomerRow, [string]>(`
+    SELECT * FROM billing_customer WHERE stripe_customer_id = ? LIMIT 1
+  `).get(requiredStripeText(stripeCustomerId, 'stripeCustomerId'))
+  return row ? toBillingCustomer(row) : null
+}
+
 export function getBillingSubscription(
   database: Database,
   organizationId: string,
@@ -3271,6 +3281,16 @@ export function getBillingSubscription(
   const row = database.query<BillingSubscriptionRow, [string]>(`
     SELECT * FROM subscription WHERE organization_id = ? LIMIT 1
   `).get(organizationId.trim())
+  return row ? toBillingSubscription(row) : null
+}
+
+export function getBillingSubscriptionByStripeId(
+  database: Database,
+  stripeSubscriptionId: string,
+): BillingSubscription | null {
+  const row = database.query<BillingSubscriptionRow, [string]>(`
+    SELECT * FROM subscription WHERE stripe_subscription_id = ? LIMIT 1
+  `).get(requiredStripeText(stripeSubscriptionId, 'stripeSubscriptionId'))
   return row ? toBillingSubscription(row) : null
 }
 
@@ -3410,6 +3430,57 @@ function completeStripeEvent(
   const event = getStripeEvent(database, input.stripeEventId)
   if (!event) throw new Error('Stripe event could not be resolved')
   return event
+}
+
+export function ignoreStripeEvent(
+  database: Database,
+  input: {
+    stripeEventId: string
+    type: string
+    eventCreatedAt: number
+    receivedAt?: number
+    processingMessage: string
+    now?: () => number
+  },
+): { event: StripeEventRecord; duplicate: boolean } {
+  const registration = registerStripeEvent(database, input)
+  if (
+    registration.event.processingResult === 'applied'
+    || registration.event.processingResult === 'ignored'
+  ) {
+    return { event: registration.event, duplicate: true }
+  }
+  const event = completeStripeEvent(database, {
+    stripeEventId: registration.event.stripeEventId,
+    processingResult: 'ignored',
+    processingMessage: input.processingMessage,
+    processedAt: stripeTimestamp((input.now ?? Date.now)(), 'processedAt'),
+  })
+  return { event, duplicate: !registration.inserted }
+}
+
+export function failStripeEvent(
+  database: Database,
+  input: {
+    stripeEventId: string
+    type: string
+    eventCreatedAt: number
+    receivedAt?: number
+    processingMessage: string
+    now?: () => number
+  },
+): StripeEventRecord {
+  const registration = registerStripeEvent(database, input)
+  if (
+    registration.event.processingResult === 'applied'
+    || registration.event.processingResult === 'ignored'
+  ) return registration.event
+  return completeStripeEvent(database, {
+    stripeEventId: registration.event.stripeEventId,
+    processingResult: 'failed',
+    processingMessage: input.processingMessage,
+    processedAt: stripeTimestamp((input.now ?? Date.now)(), 'processedAt'),
+  })
 }
 
 export function applyStripeBillingProjection(

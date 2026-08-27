@@ -73,6 +73,7 @@ import { workspacePublicationAuthenticated } from './workspacePublicationAuth'
 import { parsePublishedServiceOrigin } from './publishedServiceRouting'
 import { hashPublishedServiceToken } from './publishedServiceAccess'
 import { TCPIngress } from './tcpIngress'
+import { StripeWebhookProcessor } from './stripeWebhook'
 
 const hostname = process.env.NEBULA_CLOUD_BIND?.trim() || '127.0.0.1'
 const port = Number.parseInt(process.env.NEBULA_CLOUD_PORT || '7790', 10)
@@ -117,6 +118,7 @@ const workerCredentialKeyId = process.env.NEBULA_WORKER_CREDENTIAL_KEY_ID?.trim(
   || 'local-worker-token'
 const workerCredentialsFile = process.env.NEBULA_WORKER_CREDENTIALS_FILE?.trim()
 const platformAdminToken = process.env.NEBULA_PLATFORM_ADMIN_TOKEN?.trim() || ''
+const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET?.trim() || ''
 
 function positiveIntegerEnvironment(name: string, fallback: number): number {
   const raw = process.env[name]?.trim()
@@ -249,6 +251,9 @@ const { database, auth } = await initializePersistence({
   emailSender,
   requireEmailVerification,
 })
+const stripeWebhookProcessor = stripeWebhookSecret
+  ? new StripeWebhookProcessor({ database, webhookSecret: stripeWebhookSecret })
+  : null
 
 function purgeExpiredContactRequests(): number {
   const retentionMs = contactRetentionDays * 24 * 60 * 60 * 1000
@@ -441,6 +446,9 @@ function parseBooleanEnvironment(
 
 const controlPlaneHandler = createControlPlaneHandler({
   version,
+  handleStripeWebhook: stripeWebhookProcessor
+    ? (rawBody, signature) => stripeWebhookProcessor.process(rawBody, signature)
+    : undefined,
   publishedServiceHostnameSuffix: publishedServiceOrigin?.hostnameSuffix,
   authorizeWorkerAdministration: platformAdminToken
     ? authorizePlatformAdministration

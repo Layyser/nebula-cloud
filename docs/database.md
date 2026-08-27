@@ -63,12 +63,33 @@ the database projection boundary. That boundary:
 4. ignores an older snapshot using the event creation time and event ID as a
    deterministic tie-breaker.
 
+The public `POST /api/webhooks/stripe` adapter exists only when
+`STRIPE_WEBHOOK_SECRET` is configured. It preserves the raw body, caps it at
+256 KiB, verifies Stripe's signature with the official Node SDK, and reveals no
+verification details to the sender. The currently projected event set is:
+
+- `customer.created` and `customer.updated`;
+- `checkout.session.completed`; and
+- `customer.subscription.created`, `.updated`, and `.deleted`.
+
+Customer, Checkout, or Subscription metadata must carry
+`nubols_organization_id` until an existing Stripe customer mapping can resolve
+the organization. Nubols subscriptions require exactly one Stripe Price, and
+its quantity becomes the local `entitled_seats` snapshot.
+
 The inbox intentionally stores bounded processing metadata instead of the raw
 webhook payload. Nubols only returns webhook success after projection; a crash
 or failure therefore relies on Stripe redelivery (or an explicit resend) to
-provide the signed payload again. `source=stripe` Operator entitlement
-projection is still separate work because paid seats must first have an
-explicit membership-assignment policy.
+provide the signed payload again. Do not subscribe this endpoint to
+`invoice.paid` or `invoice.payment_failed` yet: those recognized events are
+durably marked failed and return a retryable response until the grace-state
+projector exists. `source=stripe` Operator entitlement projection is also
+separate work because paid seats need an explicit membership-assignment policy.
+
+Stripe requires signature verification against the unmodified request body,
+and documents subscription lifecycle events as asynchronous webhook signals:
+[webhook signatures](https://docs.stripe.com/webhooks/signature) and
+[subscription webhooks](https://docs.stripe.com/billing/subscriptions/webhooks).
 
 ## Runtime settings
 

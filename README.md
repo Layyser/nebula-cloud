@@ -55,6 +55,8 @@ builds reproducible until it is replaced by a package-registry release.
 - Authenticated personal-workspace resolution under `/api/workspaces/personal`
 - Durable ensure-running jobs under
   `/api/workspaces/personal/ensure-running`
+- An optional signed, raw-body Stripe webhook adapter backed by a durable
+  idempotent local billing projection
 - An authenticated Nebula Worker client and durable provisioning processor
   that drives queued personal workspaces to `ready`
 - An authenticated streaming Runtime API gateway that resolves private
