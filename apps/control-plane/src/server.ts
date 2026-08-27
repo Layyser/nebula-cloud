@@ -13,6 +13,7 @@ import {
   type OperatorRuntimeResponse,
   type OrganizationAdminResponse,
   type OrganizationAuditResponse,
+  type OrganizationDashboardResponse,
   type OrganizationMembersResponse,
   type OrganizationOperatorsResponse,
   type JoinOrganizationRequest,
@@ -52,6 +53,7 @@ const organizationUsagePath = /^\/api\/organizations\/([^/]+)\/usage$/
 const organizationMembersPath = /^\/api\/organizations\/([^/]+)\/members$/
 const organizationMemberPath = /^\/api\/organizations\/([^/]+)\/members\/([^/]+)$/
 const organizationOperatorsPath = /^\/api\/organizations\/([^/]+)\/operators$/
+const organizationDashboardPath = /^\/api\/organizations\/([^/]+)\/dashboard$/
 const organizationAdminPath = /^\/api\/organizations\/([^/]+)\/admin$/
 const organizationAuditPath = /^\/api\/organizations\/([^/]+)\/audit$/
 const organizationJoinCodePath = /^\/api\/organizations\/([^/]+)\/admin\/join-code$/
@@ -154,6 +156,11 @@ export interface ControlPlaneHandlerOptions {
     userId: string
     organizationId: string
   }) => OrganizationOperatorsResponse
+  getOrganizationDashboard?: (input: {
+    userId: string
+    organizationId: string
+    since: number
+  }) => OrganizationDashboardResponse
   getOrganizationAdmin?: (input: {
     userId: string
     organizationId: string
@@ -479,6 +486,7 @@ export function createControlPlaneHandler({
   getOrganizationMembers,
   setOrganizationMemberDisabled,
   getOrganizationOperators,
+  getOrganizationDashboard,
   getOrganizationAdmin,
   getOrganizationAudit,
   rotateOrganizationJoinCode,
@@ -922,12 +930,13 @@ export function createControlPlaneHandler({
     const membersMatch = url.pathname.match(organizationMembersPath)
     const memberMatch = url.pathname.match(organizationMemberPath)
     const operatorsMatch = url.pathname.match(organizationOperatorsPath)
+    const dashboardMatch = url.pathname.match(organizationDashboardPath)
     const adminMatch = url.pathname.match(organizationAdminPath)
     const auditMatch = url.pathname.match(organizationAuditPath)
     const joinCodeMatch = url.pathname.match(organizationJoinCodePath)
     const organizationMatch = url.pathname.match(organizationPath)
     if (
-      membersMatch || memberMatch || operatorsMatch || adminMatch || auditMatch
+      membersMatch || memberMatch || operatorsMatch || dashboardMatch || adminMatch || auditMatch
       || joinCodeMatch || (organizationMatch && request.method === 'PATCH')
     ) {
       const session = resolveSession ? await resolveSession(request) : null
@@ -935,7 +944,7 @@ export function createControlPlaneHandler({
         return json({ error: 'authentication required', code: 'authentication_required' } satisfies CloudErrorResponse, 401)
       }
       const encodedOrganizationId = (
-        membersMatch?.[1] ?? memberMatch?.[1] ?? operatorsMatch?.[1]
+        membersMatch?.[1] ?? memberMatch?.[1] ?? operatorsMatch?.[1] ?? dashboardMatch?.[1]
         ?? adminMatch?.[1] ?? auditMatch?.[1] ?? joinCodeMatch?.[1] ?? organizationMatch?.[1]
       )!
       let organizationId: string
@@ -971,6 +980,13 @@ export function createControlPlaneHandler({
         }
         if (request.method === 'GET' && operatorsMatch && getOrganizationOperators) {
           return json(getOrganizationOperators({ userId: session.userId, organizationId }))
+        }
+        if (request.method === 'GET' && dashboardMatch && getOrganizationDashboard) {
+          return json(getOrganizationDashboard({
+            userId: session.userId,
+            organizationId,
+            since: Date.now() - 30 * 24 * 60 * 60 * 1000,
+          }))
         }
         if (request.method === 'GET' && adminMatch && getOrganizationAdmin) {
           return json(getOrganizationAdmin({ userId: session.userId, organizationId }))

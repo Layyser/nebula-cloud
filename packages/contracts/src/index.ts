@@ -306,6 +306,28 @@ export interface OrganizationOperatorsResponse {
   operators: OrganizationOperator[]
 }
 
+export interface OrganizationDashboardResponse {
+  organizationId: string
+  scope: 'personal' | 'organization'
+  rangeDays: 30
+  enabledMembers: number | null
+  operators: {
+    ready: number
+    total: number
+  }
+  usage: {
+    sessions: number
+    modelTurns: number
+    totalTokens: number
+    estimatedCostMicrousd: number
+  }
+  provisioningFailures: number
+  workers: {
+    healthy: number
+    total: number
+  }
+}
+
 export interface OrganizationAdminResponse {
   organization: {
     id: string

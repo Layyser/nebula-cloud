@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import {
   cloudPreviewModes,
+  cloudPreviewDashboard,
   cloudPreviewOrganization,
   cloudPreviewUser,
   createCloudPreviewTransport,
@@ -21,6 +22,11 @@ test('Cloud preview manifest covers every required baseline state', () => {
   expect(isCloudPreviewMode('unknown')).toBe(false)
   expect(cloudPreviewUser).toMatchObject({ name: 'Jorge' })
   expect(cloudPreviewOrganization).toMatchObject({ name: 'Nebula Labs' })
+  expect(cloudPreviewDashboard).toMatchObject({
+    scope: 'organization',
+    operators: { ready: 3, total: 4 },
+    workers: { healthy: 2, total: 2 },
+  })
 })
 
 test('Cloud preview transport is deterministic and backend-free', async () => {

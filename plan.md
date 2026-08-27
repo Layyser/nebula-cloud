@@ -811,6 +811,11 @@ audit_event
 - [ ] Dashboard P0 cards: entitled members, ready/active Operators, sessions,
       model turns, tokens, estimated model cost, provisioning failures, and
       worker health. No fake “tasks completed” metric without a task definition.
+- [x] Add the persisted role-aware 30-day dashboard overview for enabled members,
+      ready Operators, sessions, model turns, tokens, estimated model cost,
+      provisioning failures, and only the workers assigned to the visible
+      workspaces. Owners/admins see organization scope; members see personal
+      scope. Keep enabled-member counts labelled separately from entitlements.
 - [ ] Add UTC storage and organization-local display; document aggregation
       windows and delayed events.
 - [ ] Add retention: detailed usage/audit retained for a defined beta period;
@@ -1099,10 +1104,12 @@ Continue locally without purchasing infrastructure in this order:
    lifecycle requests. Completed locally on 23 August; the remaining event
    families stay explicitly open in G6.
 2. [ ] Complete the honest G6 dashboard minimum from persisted events; do not
-   add synthetic operator-health or task-completion figures. The persisted
-   personal/organization usage views and member/operator subviews are already
-   implemented. Entitled-member, provisioning-failure, and worker-health cards
-   remain blocked on the entitlement and worker-registry contracts below.
+   add synthetic operator-health or task-completion figures. Personal and
+   organization usage views, member/operator subviews, and the role-aware
+   overview cards are implemented. The overview derives provisioning failures
+   and assigned-worker health from durable state. Entitled-member reporting
+   remains blocked until the entitlement contract exists; enabled members are
+   labelled separately in the meantime.
 3. [x] Implement verified email, password recovery, and invitation delivery
    behind a provider interface that can use a local test transport before
    DNS/email service purchase. A production Resend adapter now exists; provider

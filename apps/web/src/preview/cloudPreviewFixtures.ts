@@ -4,6 +4,7 @@ import type {
   RuntimeSubscription,
   RuntimeTransport,
 } from '@nebula/runtime-ui/transport'
+import type { OrganizationDashboardResponse } from '@nebula-cloud/contracts'
 
 export const cloudPreviewModes = [
   'runtime',
@@ -26,6 +27,22 @@ export const cloudPreviewOrganization = {
   id: 'org-preview',
   name: 'Nebula Labs',
   slug: 'nebula-labs',
+}
+
+export const cloudPreviewDashboard: OrganizationDashboardResponse = {
+  organizationId: cloudPreviewOrganization.id,
+  scope: 'organization',
+  rangeDays: 30,
+  enabledMembers: 4,
+  operators: { ready: 3, total: 4 },
+  usage: {
+    sessions: 18,
+    modelTurns: 146,
+    totalTokens: 3_094_000,
+    estimatedCostMicrousd: 18_420_000,
+  },
+  provisioningFailures: 1,
+  workers: { healthy: 2, total: 2 },
 }
 
 const previewChats = [

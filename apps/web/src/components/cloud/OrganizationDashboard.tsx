@@ -1,21 +1,28 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import {
+  Activity,
   BarChart3,
   BookOpen,
   Building2,
   Check,
+  CircleDollarSign,
   Copy,
   Cpu,
   KeyRound,
+  MessageSquare,
   PlugZap,
   RefreshCw,
+  Server,
   ShieldCheck,
+  TriangleAlert,
   UsersRound,
+  Zap,
   X,
 } from 'lucide-react'
 import type {
   OrganizationAdminResponse,
+  OrganizationDashboardResponse,
   OrganizationMember,
   OrganizationMembersResponse,
   OrganizationOperatorsResponse,
@@ -45,6 +52,7 @@ interface OrganizationDashboardProps {
   userKey: string
   organizationId: string
   organizationName: string
+  previewOverview?: OrganizationDashboardResponse
   onBackgroundChange?: (overShader: boolean) => void
 }
 
@@ -52,7 +60,32 @@ const documentationUrl = '/docs'
 
 export function OrganizationDashboard(props: OrganizationDashboardProps) {
   const [view, setView] = useState<DashboardView>('home')
+  const [overview, setOverview] = useState<LoadState<OrganizationDashboardResponse>>(
+    props.previewOverview
+      ? { status: 'ready', data: props.previewOverview }
+      : { status: 'loading' },
+  )
   const reduceMotion = useReducedMotion()
+
+  const loadOverview = useCallback(async () => {
+    if (props.previewOverview) {
+      setOverview({ status: 'ready', data: props.previewOverview })
+      return
+    }
+    setOverview({ status: 'loading' })
+    try {
+      setOverview({
+        status: 'ready',
+        data: await getJson<OrganizationDashboardResponse>(
+          `/api/organizations/${encodeURIComponent(props.organizationId)}/dashboard`,
+        ),
+      })
+    } catch (error) {
+      setOverview({ status: 'error', message: errorMessage(error) })
+    }
+  }, [props.organizationId, props.previewOverview])
+
+  useEffect(() => { void loadOverview() }, [loadOverview])
 
   useEffect(() => {
     props.onBackgroundChange?.(view === 'home')
@@ -147,6 +180,10 @@ export function OrganizationDashboard(props: OrganizationDashboardProps) {
             description={`Manage usage, people, and operators across ${props.organizationName}.`}
             spacing="comfortable"
           />
+          <DashboardOverview state={overview} onRetry={loadOverview} />
+          <h2 className="mb-3 mt-8 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--color-text-subtle)]">
+            Manage
+          </h2>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
             {cards.map((card, index) => (
               <motion.div
@@ -180,6 +217,125 @@ export function OrganizationDashboard(props: OrganizationDashboardProps) {
       </ContentContainer>
     </div>
   )
+}
+
+function DashboardOverview({
+  state,
+  onRetry,
+}: {
+  state: LoadState<OrganizationDashboardResponse>
+  onRetry: () => void | Promise<void>
+}) {
+  if (state.status === 'loading') {
+    return (
+      <section aria-label="Loading dashboard overview" className="grid grid-cols-2 gap-3 md:grid-cols-4 2xl:grid-cols-8">
+        {Array.from({ length: 8 }, (_, index) => (
+          <Surface key={index} variant="panel" density="none" radius="surface" className="h-28 animate-pulse" />
+        ))}
+      </section>
+    )
+  }
+  if (state.status === 'error') {
+    return (
+      <Surface variant="panel" density="comfortable" radius="surface" className="flex items-center justify-between gap-5">
+        <div>
+          <p className="text-sm font-medium text-[var(--color-text-primary)]">Overview unavailable</p>
+          <p className="mt-1 text-xs text-[var(--color-text-muted)]">{state.message}</p>
+        </div>
+        <Button variant="secondary" size="compact" onClick={() => { void onRetry() }}>Try again</Button>
+      </Surface>
+    )
+  }
+
+  const data = state.data
+  const metrics = [
+    ...(data.enabledMembers === null ? [] : [{
+      label: 'Enabled users',
+      value: formatDashboardNumber(data.enabledMembers),
+      detail: 'Entitlements pending',
+      icon: <UsersRound size={14} />,
+    }]),
+    {
+      label: 'Ready operators',
+      value: `${formatDashboardNumber(data.operators.ready)} / ${formatDashboardNumber(data.operators.total)}`,
+      detail: data.scope === 'organization' ? 'Organization scope' : 'Your operator',
+      icon: <Cpu size={14} />,
+    },
+    {
+      label: 'Sessions',
+      value: formatDashboardNumber(data.usage.sessions),
+      detail: 'Last 30 days',
+      icon: <MessageSquare size={14} />,
+    },
+    {
+      label: 'Model turns',
+      value: formatDashboardNumber(data.usage.modelTurns),
+      detail: 'Last 30 days',
+      icon: <Zap size={14} />,
+    },
+    {
+      label: 'Tokens',
+      value: formatDashboardCompactNumber(data.usage.totalTokens),
+      detail: 'Input + output',
+      icon: <Activity size={14} />,
+    },
+    {
+      label: 'Estimated cost',
+      value: formatDashboardCost(data.usage.estimatedCostMicrousd),
+      detail: 'Public API rates',
+      icon: <CircleDollarSign size={14} />,
+    },
+    {
+      label: 'Provisioning failures',
+      value: formatDashboardNumber(data.provisioningFailures),
+      detail: 'Last 30 days',
+      icon: <TriangleAlert size={14} />,
+    },
+    {
+      label: 'Worker health',
+      value: `${formatDashboardNumber(data.workers.healthy)} / ${formatDashboardNumber(data.workers.total)}`,
+      detail: 'Assigned workers',
+      icon: <Server size={14} />,
+    },
+  ]
+
+  return (
+    <section aria-label="Dashboard overview" className="grid grid-cols-2 gap-3 md:grid-cols-4 2xl:grid-cols-8">
+      {metrics.map(metric => (
+        <Surface key={metric.label} variant="panel" density="default" radius="surface" className="min-w-0">
+          <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-subtle)]">
+            {metric.icon}
+            <span className="truncate">{metric.label}</span>
+          </div>
+          <p className="mt-4 truncate text-xl font-medium tabular-nums tracking-[-0.035em] text-[var(--color-text-primary)]">
+            {metric.value}
+          </p>
+          <p className="mt-1 truncate text-[11px] text-[var(--color-text-muted)]">{metric.detail}</p>
+        </Surface>
+      ))}
+    </section>
+  )
+}
+
+function formatDashboardNumber(value: number): string {
+  return new Intl.NumberFormat('en-US').format(Math.max(0, Number.isFinite(value) ? value : 0))
+}
+
+function formatDashboardCompactNumber(value: number): string {
+  const normalized = Math.max(0, Number.isFinite(value) ? value : 0)
+  return new Intl.NumberFormat('en-US', {
+    notation: normalized >= 10_000 ? 'compact' : 'standard',
+    maximumFractionDigits: 1,
+  }).format(normalized)
+}
+
+function formatDashboardCost(value: number): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: value > 0 && value < 10_000 ? 4 : 2,
+  }).format(Math.max(0, Number.isFinite(value) ? value : 0) / 1_000_000)
 }
 
 function DashboardSubmenu({

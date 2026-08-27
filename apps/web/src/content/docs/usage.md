@@ -20,6 +20,13 @@ Dollar figures are **estimates**, computed at public list prices for known model
 
 ## Dashboards
 
+- The dashboard home summarizes the last 30 days from persisted state: ready
+  operators, sessions, model turns, tokens, estimated cost, provisioning
+  failures, and the health of workers assigned to those operators.
+- Owners and admins see organization scope. Members see only their own operator,
+  usage, provisioning, and assigned-worker health.
+- Enabled-member counts are not subscription entitlements; entitlement reporting
+  remains unavailable until billing enforcement exists.
 - **Personal view**: totals for your own operators over the selected range.
 - **Organization view** (admins): the same metrics across every member's operators.
 - A totals strip shows processed tokens, cached versus uncached input, output including reasoning tokens, and cache savings.

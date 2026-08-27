@@ -847,6 +847,28 @@ export interface OrganizationOperatorSummary {
   updatedAt: number | null
 }
 
+export interface OrganizationDashboardSummary {
+  organizationId: string
+  scope: 'personal' | 'organization'
+  rangeDays: 30
+  enabledMembers: number | null
+  operators: { ready: number; total: number }
+  usage: {
+    sessions: number
+    modelTurns: number
+    totalTokens: number
+    estimatedCostMicrousd: number
+  }
+  provisioningFailures: number
+  workers: { healthy: number; total: number }
+}
+
+export interface OrganizationDashboardOptions extends OrganizationAccessOptions {
+  since: number
+  heartbeatMaxAgeMs?: number
+  now?: () => number
+}
+
 export interface OrganizationAdminSummary {
   organizationId: string
   name: string
@@ -2890,6 +2912,142 @@ export function getOrganizationOperators(
     createdAt: row.created_at === null ? null : Number(row.created_at),
     updatedAt: row.updated_at === null ? null : Number(row.updated_at),
   }))
+}
+
+export function getOrganizationDashboardSummary(
+  database: Database,
+  options: OrganizationDashboardOptions,
+): OrganizationDashboardSummary {
+  const actor = database.query<{
+    membership_id: string
+    role: OrganizationRole
+    disabled: number
+  }, [string, string]>(`
+    SELECT member.id AS membership_id,
+      member.role,
+      COALESCE(organization_member_state.disabled, 0) AS disabled
+    FROM member
+    LEFT JOIN organization_member_state
+      ON organization_member_state.member_id = member.id
+    WHERE member.userId = ? AND member.organizationId = ?
+    LIMIT 1
+  `).get(options.userId, options.organizationId)
+  if (!actor || actor.disabled === 1) throw new OrganizationAccessDeniedError()
+
+  const timestamp = (options.now ?? Date.now)()
+  const heartbeatMaxAgeMs = options.heartbeatMaxAgeMs ?? 30_000
+  if (!Number.isSafeInteger(options.since) || options.since < 0 || options.since > timestamp) {
+    throw new Error('Dashboard range is invalid')
+  }
+  if (!Number.isSafeInteger(heartbeatMaxAgeMs) || heartbeatMaxAgeMs < 1_000) {
+    throw new Error('Dashboard worker heartbeat age is invalid')
+  }
+
+  const organizationScope = actor.role === 'owner' || actor.role === 'admin'
+  const includeOrganization = organizationScope ? 1 : 0
+  const enabledMembers = organizationScope
+    ? database.query<{ count: number }, [string]>(`
+        SELECT COUNT(*) AS count
+        FROM member
+        LEFT JOIN organization_member_state
+          ON organization_member_state.member_id = member.id
+        WHERE member.organizationId = ?
+          AND COALESCE(organization_member_state.disabled, 0) = 0
+      `).get(options.organizationId)?.count ?? 0
+    : null
+  const operators = database.query<{
+    total: number
+    ready: number
+  }, [string, number, string]>(`
+    SELECT COUNT(*) AS total,
+      COALESCE(SUM(CASE WHEN state = 'ready' THEN 1 ELSE 0 END), 0) AS ready
+    FROM workspace
+    WHERE organization_id = ?
+      AND (? = 1 OR member_id = ?)
+  `).get(options.organizationId, includeOrganization, actor.membership_id)
+  const usage = database.query<{
+    model_turns: number
+    input_tokens: number
+    output_tokens: number
+    estimated_cost_microusd: number
+  }, [string, number, string, number]>(`
+    SELECT COUNT(*) AS model_turns,
+      COALESCE(SUM(input_tokens), 0) AS input_tokens,
+      COALESCE(SUM(output_tokens), 0) AS output_tokens,
+      COALESCE(SUM(estimated_cost_microusd), 0) AS estimated_cost_microusd
+    FROM usage_event
+    WHERE organization_id = ?
+      AND (? = 1 OR membership_id = ?)
+      AND occurred_at >= ?
+  `).get(options.organizationId, includeOrganization, actor.membership_id, options.since)
+  const sessions = database.query<{ count: number }, [string, number, string, number]>(`
+    SELECT COUNT(*) AS count
+    FROM (
+      SELECT workspace_id, session_id
+      FROM usage_event
+      WHERE organization_id = ?
+        AND (? = 1 OR membership_id = ?)
+        AND occurred_at >= ?
+      GROUP BY workspace_id, session_id
+    )
+  `).get(options.organizationId, includeOrganization, actor.membership_id, options.since)
+  const provisioningFailures = database.query<{ count: number }, [string, number, string, number]>(`
+    SELECT COUNT(*) AS count
+    FROM provisioning_job
+    INNER JOIN workspace ON workspace.id = provisioning_job.workspace_id
+    WHERE workspace.organization_id = ?
+      AND (? = 1 OR workspace.member_id = ?)
+      AND provisioning_job.status = 'failed'
+      AND COALESCE(provisioning_job.completed_at, provisioning_job.updated_at) >= ?
+  `).get(
+    options.organizationId,
+    includeOrganization,
+    actor.membership_id,
+    options.since,
+  )?.count ?? 0
+  const workers = database.query<{
+    total: number
+    healthy: number
+  }, [number, string, number, string]>(`
+    SELECT COUNT(DISTINCT worker_host.id) AS total,
+      COUNT(DISTINCT CASE
+        WHEN worker_host.enabled = 1
+          AND worker_host.state = 'healthy'
+          AND worker_host.last_heartbeat_at >= ?
+        THEN worker_host.id
+      END) AS healthy
+    FROM workspace
+    INNER JOIN worker_host ON worker_host.id = workspace.worker_host_id
+    WHERE workspace.organization_id = ?
+      AND (? = 1 OR workspace.member_id = ?)
+  `).get(
+    timestamp - heartbeatMaxAgeMs,
+    options.organizationId,
+    includeOrganization,
+    actor.membership_id,
+  )
+
+  return {
+    organizationId: options.organizationId,
+    scope: organizationScope ? 'organization' : 'personal',
+    rangeDays: 30,
+    enabledMembers,
+    operators: {
+      ready: operators?.ready ?? 0,
+      total: operators?.total ?? 0,
+    },
+    usage: {
+      sessions: sessions?.count ?? 0,
+      modelTurns: usage?.model_turns ?? 0,
+      totalTokens: (usage?.input_tokens ?? 0) + (usage?.output_tokens ?? 0),
+      estimatedCostMicrousd: usage?.estimated_cost_microusd ?? 0,
+    },
+    provisioningFailures,
+    workers: {
+      healthy: workers?.healthy ?? 0,
+      total: workers?.total ?? 0,
+    },
+  }
 }
 
 export function getOrganizationAdminSummary(

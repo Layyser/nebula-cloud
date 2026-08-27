@@ -11,6 +11,7 @@ import {
   getPublishedServiceBySlug,
   getWorkspaceOwnerIdentity,
   getOrganizationUsageSummary,
+  getOrganizationDashboardSummary,
   getWorkerHost,
   getOrganizationMembers,
   getPersonalUsageSummary,
@@ -884,6 +885,109 @@ test('deduplicates usage and authorizes personal and organization summaries', ()
       workspaceId: workspace1.id, sessionId: 'chat-x',
       inputTokens: 1, outputTokens: 1,
     })).toThrow('usage event scope does not match workspace ownership')
+  } finally {
+    database.close()
+  }
+})
+
+test('builds role-aware dashboard metrics only from persisted organization state', () => {
+  const database = openCloudDatabase({ path: ':memory:' })
+  try {
+    database.exec(`
+      CREATE TABLE user (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL);
+      CREATE TABLE organization (id TEXT PRIMARY KEY);
+      CREATE TABLE member (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL REFERENCES user(id),
+        organizationId TEXT NOT NULL REFERENCES organization(id),
+        role TEXT NOT NULL DEFAULT 'member'
+      );
+      INSERT INTO user (id, name, email) VALUES
+        ('owner', 'Owner', 'owner@example.com'),
+        ('member', 'Member', 'member@example.com');
+      INSERT INTO organization (id) VALUES ('org-1');
+      INSERT INTO member (id, userId, organizationId, role) VALUES
+        ('owner-member', 'owner', 'org-1', 'owner'),
+        ('regular-member', 'member', 'org-1', 'member');
+    `)
+    migrateCloudSchema(database)
+    const ownerWorkspace = ensurePersonalWorkspace(database, {
+      userId: 'owner', organizationId: 'org-1', createId: () => 'workspace-owner', now: () => 90_000,
+    })
+    const memberWorkspace = ensurePersonalWorkspace(database, {
+      userId: 'member', organizationId: 'org-1', createId: () => 'workspace-member', now: () => 90_000,
+    })
+    upsertWorkerHost(database, {
+      id: 'worker-1', name: 'Worker 1', provider: 'local', region: 'local',
+      baseURL: 'http://127.0.0.1:7780', credentialKeyId: 'worker-token',
+      totalMemoryBytes: 8_192, totalCpuMillis: 8_000,
+      totalDiskBytes: 16_384, totalWorkspaceSlots: 4, now: () => 100_000,
+    })
+    recordWorkerHealth(database, {
+      workerHostId: 'worker-1', state: 'healthy', now: () => 100_000,
+    })
+    for (const workspace of [ownerWorkspace, memberWorkspace]) {
+      assignWorkspaceWorker(database, {
+        workspaceId: workspace.id,
+        requirements: { memoryBytes: 1_024, cpuMillis: 1_000, diskBytes: 2_048 },
+        now: () => 100_000,
+      })
+    }
+    database.prepare("UPDATE workspace SET state = 'ready' WHERE id = ?")
+      .run(ownerWorkspace.id)
+
+    const failed = ensureWorkspaceRunning(database, {
+      userId: 'member', organizationId: 'org-1', createJobId: () => 'job-failed', now: () => 100_100,
+    })
+    expect(failed.job?.id).toBe('job-failed')
+    const claimed = claimProvisioningJob(database, { leaseOwner: 'processor', now: () => 100_100 })
+    finishProvisioningJob(database, {
+      jobId: claimed!.id,
+      leaseOwner: 'processor',
+      outcome: 'failed',
+      retryable: false,
+      now: () => 100_200,
+    })
+
+    for (const event of [
+      { eventId: 'turn-owner-1', membershipId: 'owner-member', workspaceId: ownerWorkspace.id, sessionId: 'session-a', inputTokens: 100, outputTokens: 20, estimatedCostMicrousd: 1_000 },
+      { eventId: 'turn-owner-2', membershipId: 'owner-member', workspaceId: ownerWorkspace.id, sessionId: 'session-a', inputTokens: 50, outputTokens: 10, estimatedCostMicrousd: 500 },
+      { eventId: 'turn-member-1', membershipId: 'regular-member', workspaceId: memberWorkspace.id, sessionId: 'session-a', inputTokens: 80, outputTokens: 40, estimatedCostMicrousd: 900 },
+    ]) {
+      recordUsageEvent(database, {
+        ...event,
+        organizationId: 'org-1',
+        provider: 'openai',
+        model: 'gpt-test',
+        occurredAt: 100_300,
+        receivedAt: 100_300,
+      })
+    }
+
+    expect(getOrganizationDashboardSummary(database, {
+      userId: 'owner', organizationId: 'org-1', since: 90_000,
+      heartbeatMaxAgeMs: 30_000, now: () => 120_000,
+    })).toEqual({
+      organizationId: 'org-1',
+      scope: 'organization',
+      rangeDays: 30,
+      enabledMembers: 2,
+      operators: { ready: 1, total: 2 },
+      usage: { sessions: 2, modelTurns: 3, totalTokens: 300, estimatedCostMicrousd: 2_400 },
+      provisioningFailures: 1,
+      workers: { healthy: 1, total: 1 },
+    })
+    expect(getOrganizationDashboardSummary(database, {
+      userId: 'member', organizationId: 'org-1', since: 90_000,
+      heartbeatMaxAgeMs: 30_000, now: () => 120_000,
+    })).toMatchObject({
+      scope: 'personal',
+      enabledMembers: null,
+      operators: { ready: 0, total: 1 },
+      usage: { sessions: 1, modelTurns: 1, totalTokens: 120, estimatedCostMicrousd: 900 },
+      provisioningFailures: 1,
+      workers: { healthy: 1, total: 1 },
+    })
   } finally {
     database.close()
   }

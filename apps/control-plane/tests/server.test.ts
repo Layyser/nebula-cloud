@@ -617,6 +617,54 @@ test('does not allow organization usage through a different active organization'
   expect(calls).toBe(0)
 })
 
+test('serves the persisted dashboard overview only for the active organization', async () => {
+  const calls: Array<{ userId: string; organizationId: string; since: number }> = []
+  const handler = createControlPlaneHandler({
+    resolveSession: async () => ({
+      userId: 'member-1',
+      activeOrganizationId: 'org-1',
+    }),
+    getOrganizationDashboard: input => {
+      calls.push(input)
+      return {
+        organizationId: input.organizationId,
+        scope: 'personal',
+        rangeDays: 30,
+        enabledMembers: null,
+        operators: { ready: 1, total: 1 },
+        usage: {
+          sessions: 3,
+          modelTurns: 8,
+          totalTokens: 12_500,
+          estimatedCostMicrousd: 42_000,
+        },
+        provisioningFailures: 0,
+        workers: { healthy: 1, total: 1 },
+      }
+    },
+  })
+  const earliestSince = Date.now() - 30 * 24 * 60 * 60 * 1000
+  const response = await handler(new Request(
+    'http://control-plane.test/api/organizations/org-1/dashboard',
+  ))
+
+  expect(response.status).toBe(200)
+  expect(await response.json()).toMatchObject({
+    organizationId: 'org-1',
+    scope: 'personal',
+    usage: { sessions: 3, modelTurns: 8, totalTokens: 12_500 },
+  })
+  expect(calls).toHaveLength(1)
+  expect(calls[0]).toMatchObject({ userId: 'member-1', organizationId: 'org-1' })
+  expect(calls[0]!.since).toBeGreaterThanOrEqual(earliestSince)
+
+  const crossOrganization = await handler(new Request(
+    'http://control-plane.test/api/organizations/org-2/dashboard',
+  ))
+  expect(crossOrganization.status).toBe(403)
+  expect(calls).toHaveLength(1)
+})
+
 test('serves the bounded organization audit stream only through the active organization', async () => {
   const calls: unknown[] = []
   const handler = createControlPlaneHandler({

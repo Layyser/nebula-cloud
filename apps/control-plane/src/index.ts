@@ -10,6 +10,7 @@ import {
   ensurePersonalWorkspace,
   ensureWorkspaceRunning,
   getOrganizationAdminSummary,
+  getOrganizationDashboardSummary,
   getOrganizationMembers,
   getOrganizationOperators,
   getOrganizationUsageSummary,
@@ -699,6 +700,10 @@ const controlPlaneHandler = createControlPlaneHandler({
   },
   getOrganizationOperators: input => ({
     operators: getOrganizationOperators(database, input),
+  }),
+  getOrganizationDashboard: input => getOrganizationDashboardSummary(database, {
+    ...input,
+    heartbeatMaxAgeMs: workerHeartbeatStaleMs,
   }),
   getOrganizationAdmin: input => {
     const summary = getOrganizationAdminSummary(database, input)
