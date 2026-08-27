@@ -591,6 +591,52 @@ const migrations = [
         ON published_service(ingress_port, state, expires_at);
     `,
   },
+  {
+    id: '0018_operator_entitlement',
+    sql: `
+      CREATE TABLE entitlement (
+        membership_id TEXT PRIMARY KEY REFERENCES member(id) ON DELETE CASCADE,
+        organization_id TEXT NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL DEFAULT 'operator' CHECK (kind = 'operator'),
+        state TEXT NOT NULL
+          CHECK (state IN ('pending', 'active', 'grace', 'suspended', 'revoked')),
+        source TEXT NOT NULL CHECK (source IN ('beta', 'stripe', 'admin')),
+        starts_at INTEGER NOT NULL,
+        ends_at INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        CHECK (ends_at IS NULL OR ends_at > starts_at),
+        CHECK (source != 'beta' OR ends_at IS NOT NULL)
+      );
+
+      CREATE INDEX entitlement_organization_state_idx
+        ON entitlement(organization_id, kind, state, ends_at);
+
+      CREATE TRIGGER entitlement_membership_organization_insert_guard
+      BEFORE INSERT ON entitlement
+      FOR EACH ROW
+      WHEN NOT EXISTS (
+        SELECT 1 FROM member
+        WHERE member.id = NEW.membership_id
+          AND member.organizationId = NEW.organization_id
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'entitlement membership does not belong to organization');
+      END;
+
+      CREATE TRIGGER entitlement_membership_organization_update_guard
+      BEFORE UPDATE OF membership_id, organization_id ON entitlement
+      FOR EACH ROW
+      WHEN NOT EXISTS (
+        SELECT 1 FROM member
+        WHERE member.id = NEW.membership_id
+          AND member.organizationId = NEW.organization_id
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'entitlement membership does not belong to organization');
+      END;
+    `,
+  },
 ] as const
 
 export type WorkspaceState = 'pending' | 'provisioning' | 'ready' | 'stopped' | 'failed'
@@ -852,6 +898,7 @@ export interface OrganizationDashboardSummary {
   scope: 'personal' | 'organization'
   rangeDays: 30
   enabledMembers: number | null
+  entitledMembers: number
   operators: { ready: number; total: number }
   usage: {
     sessions: number
@@ -867,6 +914,30 @@ export interface OrganizationDashboardOptions extends OrganizationAccessOptions 
   since: number
   heartbeatMaxAgeMs?: number
   now?: () => number
+}
+
+export type OperatorEntitlementState = 'pending' | 'active' | 'grace' | 'suspended' | 'revoked'
+export type OperatorEntitlementSource = 'beta' | 'stripe' | 'admin'
+
+export interface OperatorEntitlement {
+  membershipId: string
+  organizationId: string
+  kind: 'operator'
+  state: OperatorEntitlementState
+  source: OperatorEntitlementSource
+  startsAt: number
+  endsAt: number | null
+  createdAt: number
+  updatedAt: number
+}
+
+export class OperatorEntitlementRequiredError extends Error {
+  readonly code = 'operator_entitlement_required'
+
+  constructor() {
+    super('An active Operator entitlement is required')
+    this.name = 'OperatorEntitlementRequiredError'
+  }
 }
 
 export interface OrganizationAdminSummary {
@@ -1075,6 +1146,18 @@ interface WorkspaceRow {
   reserved_disk_bytes: number
   reserved_workspace_slots: number
   state: WorkspaceState
+  created_at: number
+  updated_at: number
+}
+
+interface OperatorEntitlementRow {
+  membership_id: string
+  organization_id: string
+  kind: 'operator'
+  state: OperatorEntitlementState
+  source: OperatorEntitlementSource
+  starts_at: number
+  ends_at: number | null
   created_at: number
   updated_at: number
 }
@@ -2775,6 +2858,143 @@ export function isOrganizationMemberEnabled(
   return row?.enabled === 1
 }
 
+function toOperatorEntitlement(row: OperatorEntitlementRow): OperatorEntitlement {
+  return {
+    membershipId: row.membership_id,
+    organizationId: row.organization_id,
+    kind: row.kind,
+    state: row.state,
+    source: row.source,
+    startsAt: Number(row.starts_at),
+    endsAt: row.ends_at === null ? null : Number(row.ends_at),
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+  }
+}
+
+export function getOperatorEntitlement(
+  database: Database,
+  input: { membershipId: string; organizationId: string },
+): OperatorEntitlement | null {
+  const row = database.query<OperatorEntitlementRow, [string, string]>(`
+    SELECT * FROM entitlement
+    WHERE membership_id = ? AND organization_id = ? AND kind = 'operator'
+    LIMIT 1
+  `).get(input.membershipId.trim(), input.organizationId.trim())
+  return row ? toOperatorEntitlement(row) : null
+}
+
+export function hasActiveOperatorEntitlement(
+  database: Database,
+  input: { membershipId: string; organizationId: string; now?: number },
+): boolean {
+  const timestamp = input.now ?? Date.now()
+  if (!Number.isSafeInteger(timestamp) || timestamp < 0) return false
+  const row = database.query<{ entitled: number }, [string, string, number, number]>(`
+    SELECT 1 AS entitled
+    FROM entitlement
+    INNER JOIN member ON member.id = entitlement.membership_id
+    LEFT JOIN organization_member_state
+      ON organization_member_state.member_id = member.id
+    WHERE entitlement.membership_id = ?
+      AND entitlement.organization_id = ?
+      AND entitlement.kind = 'operator'
+      AND entitlement.state IN ('active', 'grace')
+      AND entitlement.starts_at <= ?
+      AND (entitlement.ends_at IS NULL OR entitlement.ends_at > ?)
+      AND member.organizationId = entitlement.organization_id
+      AND COALESCE(organization_member_state.disabled, 0) = 0
+    LIMIT 1
+  `).get(input.membershipId.trim(), input.organizationId.trim(), timestamp, timestamp)
+  return row?.entitled === 1
+}
+
+export function upsertOperatorEntitlement(
+  database: Database,
+  input: {
+    membershipId: string
+    organizationId: string
+    state: OperatorEntitlementState
+    source: OperatorEntitlementSource
+    startsAt: number
+    endsAt: number | null
+    now?: () => number
+  },
+): OperatorEntitlement {
+  const membershipId = input.membershipId.trim()
+  const organizationId = input.organizationId.trim()
+  if (!membershipId || !organizationId) throw new Error('Entitlement scope is required')
+  if (!['pending', 'active', 'grace', 'suspended', 'revoked'].includes(input.state)) {
+    throw new Error('Entitlement state is invalid')
+  }
+  if (!['beta', 'stripe', 'admin'].includes(input.source)) {
+    throw new Error('Entitlement source is invalid')
+  }
+  if (!Number.isSafeInteger(input.startsAt) || input.startsAt < 0) {
+    throw new Error('Entitlement start is invalid')
+  }
+  if (
+    input.endsAt !== null
+    && (!Number.isSafeInteger(input.endsAt) || input.endsAt <= input.startsAt)
+  ) {
+    throw new Error('Entitlement end is invalid')
+  }
+  if (input.source === 'beta' && input.endsAt === null) {
+    throw new Error('Beta entitlements must expire')
+  }
+  const member = database.query<{ id: string }, [string, string]>(`
+    SELECT id FROM member
+    WHERE id = ? AND organizationId = ?
+    LIMIT 1
+  `).get(membershipId, organizationId)
+  if (!member) throw new Error('Entitlement membership was not found')
+
+  const timestamp = (input.now ?? Date.now)()
+  if (!Number.isSafeInteger(timestamp) || timestamp < 0) {
+    throw new Error('Entitlement update timestamp is invalid')
+  }
+  database.prepare(`
+    INSERT INTO entitlement (
+      membership_id, organization_id, kind, state, source,
+      starts_at, ends_at, created_at, updated_at
+    ) VALUES (?, ?, 'operator', ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(membership_id) DO UPDATE SET
+      organization_id = excluded.organization_id,
+      kind = excluded.kind,
+      state = excluded.state,
+      source = excluded.source,
+      starts_at = excluded.starts_at,
+      ends_at = excluded.ends_at,
+      updated_at = excluded.updated_at
+  `).run(
+    membershipId,
+    organizationId,
+    input.state,
+    input.source,
+    input.startsAt,
+    input.endsAt,
+    timestamp,
+    timestamp,
+  )
+  const entitlement = getOperatorEntitlement(database, { membershipId, organizationId })
+  if (!entitlement) throw new Error('Operator entitlement could not be resolved')
+  return entitlement
+}
+
+export function revokeOperatorEntitlement(
+  database: Database,
+  input: { membershipId: string; organizationId: string; now?: () => number },
+): OperatorEntitlement | null {
+  const timestamp = (input.now ?? Date.now)()
+  const result = database.prepare(`
+    UPDATE entitlement
+    SET state = 'revoked', updated_at = ?
+    WHERE membership_id = ? AND organization_id = ? AND kind = 'operator'
+  `).run(timestamp, input.membershipId.trim(), input.organizationId.trim())
+  if (result.changes !== 1) return null
+  return getOperatorEntitlement(database, input)
+}
+
 export function getOrganizationMembers(
   database: Database,
   options: OrganizationAccessOptions,
@@ -2955,6 +3175,27 @@ export function getOrganizationDashboardSummary(
           AND COALESCE(organization_member_state.disabled, 0) = 0
       `).get(options.organizationId)?.count ?? 0
     : null
+  const entitledMembers = database.query<{ count: number }, [string, number, string, number, number]>(`
+    SELECT COUNT(*) AS count
+    FROM entitlement
+    INNER JOIN member ON member.id = entitlement.membership_id
+    LEFT JOIN organization_member_state
+      ON organization_member_state.member_id = member.id
+    WHERE entitlement.organization_id = ?
+      AND (? = 1 OR entitlement.membership_id = ?)
+      AND entitlement.kind = 'operator'
+      AND entitlement.state IN ('active', 'grace')
+      AND entitlement.starts_at <= ?
+      AND (entitlement.ends_at IS NULL OR entitlement.ends_at > ?)
+      AND member.organizationId = entitlement.organization_id
+      AND COALESCE(organization_member_state.disabled, 0) = 0
+  `).get(
+    options.organizationId,
+    includeOrganization,
+    actor.membership_id,
+    timestamp,
+    timestamp,
+  )?.count ?? 0
   const operators = database.query<{
     total: number
     ready: number
@@ -3032,6 +3273,7 @@ export function getOrganizationDashboardSummary(
     scope: organizationScope ? 'organization' : 'personal',
     rangeDays: 30,
     enabledMembers,
+    entitledMembers,
     operators: {
       ready: operators?.ready ?? 0,
       total: operators?.total ?? 0,

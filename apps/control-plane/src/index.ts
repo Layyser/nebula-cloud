@@ -19,6 +19,8 @@ import {
   getPublishedServiceByIngressPort,
   getPublishedServiceByName,
   getWorkspaceOwnerIdentity,
+  getWorkspaceById,
+  hasActiveOperatorEntitlement,
   isOrganizationMemberEnabled,
   joinOrganizationById,
   listContactRequests,
@@ -26,11 +28,13 @@ import {
   listPublishedServices,
   listTCPPublishedServices,
   OrganizationMemberMutationError,
+  OperatorEntitlementRequiredError,
   recordAuditEvent,
   recordUsageEvent,
   resolveOrganizationJoinCode,
   resolveWorkspaceAccess,
   revokePublishedService,
+  revokeOperatorEntitlement,
   rotateOrganizationJoinCode,
   setOrganizationMemberDisabled,
   setContactNotificationResult,
@@ -38,6 +42,7 @@ import {
   updateContactRequestStatus,
   updateOrganizationName,
   upsertPublishedService,
+  upsertOperatorEntitlement,
 } from '@nebula-cloud/database'
 import {
   contactNotificationEmail,
@@ -147,6 +152,11 @@ const workerHealthTimeoutMs = positiveIntegerEnvironment(
 const workerHeartbeatStaleMs = positiveIntegerEnvironment(
   'NEBULA_WORKER_HEARTBEAT_STALE_MS',
   30000,
+)
+const entitlementsRequired = parseBooleanEnvironment(
+  'NEBULA_ENTITLEMENTS_REQUIRED',
+  process.env.NEBULA_ENTITLEMENTS_REQUIRED,
+  false,
 )
 const tcpIngressEnabled = parseBooleanEnvironment(
   'NEBULA_TCP_INGRESS_ENABLED',
@@ -324,21 +334,44 @@ for (const workspace of legacyWorkspaceIds) {
   }
 }
 
+function workspaceHasOperatorEntitlement(workspaceId: string): boolean {
+  if (!entitlementsRequired) return true
+  const workspace = getWorkspaceById(database, workspaceId)
+  return workspace !== null && hasActiveOperatorEntitlement(database, {
+    membershipId: workspace.memberId,
+    organizationId: workspace.organizationId,
+  })
+}
+
+function resolveEntitledWorkspaceAccess(
+  input: Parameters<typeof resolveWorkspaceAccess>[1],
+) {
+  const workspace = resolveWorkspaceAccess(database, input)
+  if (!workspace || !workspaceHasOperatorEntitlement(workspace.id)) return null
+  return workspace
+}
+
 const provisioningProcessor = new ProvisioningProcessor({
   database,
   worker: workerDirectory,
   processorId: `control-plane-${randomUUID()}`,
+  authorizeWorkspace: workspaceHasOperatorEntitlement,
 })
 
 const runtimeGateway = new RuntimeGateway({
   worker: workerDirectory,
-  resolveWorkspace: input => resolveWorkspaceAccess(database, input),
+  resolveWorkspace: resolveEntitledWorkspaceAccess,
   recordUsageEvent: input => recordUsageEvent(database, input),
 })
 
 const publishedServiceGateway = new PublishedServiceGateway({
   worker: workerDirectory,
-  resolveService: slug => getPublishedServiceBySlug(database, slug),
+  resolveService: slug => {
+    const service = getPublishedServiceBySlug(database, slug)
+    return service && workspaceHasOperatorEntitlement(service.workspaceId)
+      ? service
+      : null
+  },
 })
 
 function publishedServiceURL(slug: string): string {
@@ -371,7 +404,7 @@ const tcpIngress = tcpIngressEnabled
       bindHost: tcpIngressBind,
       resolveRoute: ingressPort => {
         const service = getPublishedServiceByIngressPort(database, ingressPort)
-        return service
+        return service && workspaceHasOperatorEntitlement(service.workspaceId)
           ? { ingressPort, workspaceId: service.workspaceId, targetPort: service.targetPort }
           : null
       },
@@ -390,7 +423,7 @@ if (tcpIngress) {
 
 const consoleGateway = new ConsoleGateway({
   resolveWorkerConnection: workspaceId => workerDirectory.connectionForWorkspace(workspaceId),
-  resolveWorkspace: input => resolveWorkspaceAccess(database, input),
+  resolveWorkspace: resolveEntitledWorkspaceAccess,
 })
 const workerAdministration = new WorkerAdministration(database)
 
@@ -417,6 +450,33 @@ const controlPlaneHandler = createControlPlaneHandler({
   updateWorkerHost: ({ workerHostId, update }) => (
     workerAdministration.update(workerHostId, update)
   ),
+  authorizeEntitlementAdministration: platformAdminToken
+    ? authorizePlatformAdministration
+    : undefined,
+  upsertOperatorEntitlement: input => {
+    const entitlement = upsertOperatorEntitlement(database, input)
+    console.info(JSON.stringify({
+      event: 'operator_entitlement_updated',
+      membershipId: entitlement.membershipId,
+      organizationId: entitlement.organizationId,
+      state: entitlement.state,
+      source: entitlement.source,
+      startsAt: entitlement.startsAt,
+      endsAt: entitlement.endsAt,
+    }))
+    return entitlement
+  },
+  revokeOperatorEntitlement: input => {
+    const entitlement = revokeOperatorEntitlement(database, input)
+    if (entitlement) {
+      console.info(JSON.stringify({
+        event: 'operator_entitlement_revoked',
+        membershipId: entitlement.membershipId,
+        organizationId: entitlement.organizationId,
+      }))
+    }
+    return entitlement
+  },
   authorizeContactAdministration: platformAdminToken
     ? authorizePlatformAdministration
     : undefined,
@@ -443,6 +503,7 @@ const controlPlaneHandler = createControlPlaneHandler({
           userId,
           organizationId,
         })
+        if (!workspaceHasOperatorEntitlement(workspace.id)) return
         await runtimeGateway.reconcileWorkspaceUsage({
           workspaceId: workspace.id,
           userId,
@@ -482,6 +543,10 @@ const controlPlaneHandler = createControlPlaneHandler({
     }
   },
   ensureWorkspaceRunning: ({ userId, organizationId }) => {
+    const workspace = ensurePersonalWorkspace(database, { userId, organizationId })
+    if (!workspaceHasOperatorEntitlement(workspace.id)) {
+      throw new OperatorEntitlementRequiredError()
+    }
     const result = ensureWorkspaceRunning(database, {
       userId,
       organizationId,
@@ -521,7 +586,7 @@ const controlPlaneHandler = createControlPlaneHandler({
   },
   restartWorkspace: workerDirectory
     ? async ({ workspaceId, userId, organizationId }) => {
-        const workspace = resolveWorkspaceAccess(database, {
+        const workspace = resolveEntitledWorkspaceAccess({
           workspaceId,
           userId,
           organizationId,
@@ -550,7 +615,7 @@ const controlPlaneHandler = createControlPlaneHandler({
     : undefined,
   getOperatorRuntime: workerDirectory
     ? async ({ workspaceId, userId, organizationId }) => {
-        const workspace = resolveWorkspaceAccess(database, {
+        const workspace = resolveEntitledWorkspaceAccess({
           workspaceId,
           userId,
           organizationId,
@@ -582,7 +647,10 @@ const controlPlaneHandler = createControlPlaneHandler({
       request,
       workspaceId,
       worker: workerDirectory,
-      workspaceEnabled: id => getWorkspaceOwnerIdentity(database, id) !== null,
+      workspaceEnabled: id => (
+        getWorkspaceOwnerIdentity(database, id) !== null
+        && workspaceHasOperatorEntitlement(id)
+      ),
     })
   },
   listWorkspacePublications: ({ workspaceId }) => ({

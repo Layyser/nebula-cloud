@@ -15,6 +15,12 @@ A workspace moves through a small set of states:
 
 Your operator starts automatically when you open the app. Provisioning runs through a durable background job queue with retries and leases, so transient hiccups on the infrastructure side heal themselves without losing your request.
 
+Operator access is resolved from a local entitlement ledger rather than a live
+billing-provider call. Manual beta grants must have a fixed expiry; active and
+grace states allow access, while pending, suspended, revoked, or expired grants
+do not. Enforcement is enabled only after grants have been seeded for a
+deployment, so local development is not accidentally locked out.
+
 ## Persistent storage
 
 Every workspace owns a durable home directory mounted at `/home/nebula`:

@@ -76,6 +76,29 @@ export interface UpdateWorkerHostRequest {
   action?: WorkerHostLifecycleAction
 }
 
+export type OperatorEntitlementState = 'pending' | 'active' | 'grace' | 'suspended' | 'revoked'
+export type OperatorEntitlementSource = 'beta' | 'stripe' | 'admin'
+
+export interface OperatorEntitlementSummary {
+  membershipId: string
+  organizationId: string
+  kind: 'operator'
+  state: OperatorEntitlementState
+  source: OperatorEntitlementSource
+  startsAt: number
+  endsAt: number | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface UpsertOperatorEntitlementRequest {
+  organizationId: string
+  state: OperatorEntitlementState
+  source: Extract<OperatorEntitlementSource, 'beta' | 'admin'>
+  startsAt: number
+  endsAt: number | null
+}
+
 export interface CloudErrorResponse {
   error: string
   code: string
@@ -311,6 +334,7 @@ export interface OrganizationDashboardResponse {
   scope: 'personal' | 'organization'
   rangeDays: 30
   enabledMembers: number | null
+  entitledMembers: number
   operators: {
     ready: number
     total: number

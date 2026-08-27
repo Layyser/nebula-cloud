@@ -575,6 +575,13 @@ stripe_event
 
 #### Integration order
 
+- [x] Add the provider-neutral local Operator entitlement ledger with effective
+      date, membership-state, and organization-ownership checks. Runtime,
+      Console, HTTP/TCP publication, and provisioning now share this local
+      authorization boundary when `NEBULA_ENTITLEMENTS_REQUIRED=true`.
+- [x] Add platform-admin grant/revoke operations for expiring `source=beta`
+      entitlements. The API cannot create a permanent beta grant and does not
+      accept `source=stripe`; Stripe remains an internal projector only.
 - [ ] Create Nubols Cloud product and monthly recurring seat price in Stripe
       sandbox; use a single currency for beta.
 - [ ] Create one Stripe Customer per organization, not per user.
@@ -808,7 +815,7 @@ audit_event
       capability policy, Console open, billing, and deletion audit events.
 - [x] Implement organization authorization on every aggregate query. Members see
       their own usage; owners/admins see organization totals and per-member data.
-- [ ] Dashboard P0 cards: entitled members, ready/active Operators, sessions,
+- [x] Dashboard P0 cards: entitled members, ready/active Operators, sessions,
       model turns, tokens, estimated model cost, provisioning failures, and
       worker health. No fake “tasks completed” metric without a task definition.
 - [x] Add the persisted role-aware 30-day dashboard overview for enabled members,
@@ -1089,7 +1096,9 @@ Never cut:
 5. Create a Nubols-owned password manager/vault and email admin account.
 6. Configure `nubols.com` DNS, `app` staging, and transactional sending domain.
 7. Write and approve database migrations for entitlements, worker registry,
-   workspace assignment, Stripe events, usage events, and audit events.
+   workspace assignment, Stripe events, usage events, and audit events. The
+   entitlement, worker-registry, workspace-assignment, usage-event, and
+   audit-event migrations now exist locally; Stripe-event persistence remains.
 8. Implement email verification first; it is a dependency for safe invitations,
    billing identity, and workspace provisioning.
 9. Keep strong prospects as non-binding design-partner candidates; do not accept
@@ -1103,13 +1112,13 @@ Continue locally without purchasing infrastructure in this order:
    beginning with organization membership/access-code changes and Operator
    lifecycle requests. Completed locally on 23 August; the remaining event
    families stay explicitly open in G6.
-2. [ ] Complete the honest G6 dashboard minimum from persisted events; do not
+2. [x] Complete the honest G6 dashboard minimum from persisted events; do not
    add synthetic operator-health or task-completion figures. Personal and
    organization usage views, member/operator subviews, and the role-aware
    overview cards are implemented. The overview derives provisioning failures
-   and assigned-worker health from durable state. Entitled-member reporting
-   remains blocked until the entitlement contract exists; enabled members are
-   labelled separately in the meantime.
+   and assigned-worker health from durable state. Entitled-member reporting now
+   uses the provider-neutral local ledger; enabled membership remains a separate
+   concept and label.
 3. [x] Implement verified email, password recovery, and invitation delivery
    behind a provider interface that can use a local test transport before
    DNS/email service purchase. A production Resend adapter now exists; provider

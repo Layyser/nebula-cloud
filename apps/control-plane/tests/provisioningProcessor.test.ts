@@ -103,3 +103,38 @@ test('requeues retryable worker failures without losing the job', async () => {
     database.close()
   }
 })
+
+test('fails a queued job closed when its Operator entitlement is no longer effective', async () => {
+  const database = provisioningDatabase()
+  let workerCalls = 0
+  try {
+    const processor = new ProvisioningProcessor({
+      database,
+      processorId: 'processor-1',
+      authorizeWorkspace: () => false,
+      worker: {
+        ensureWorkspaceRunning: async input => {
+          workerCalls += 1
+          return { workspaceId: input.workspaceId, observedState: 'ready' }
+        },
+      },
+    })
+
+    expect(await processor.processNext()).toBe(true)
+    expect(workerCalls).toBe(0)
+    expect(database.query<{
+      status: string
+      error: string | null
+    }, []>(`
+      SELECT status, error_code AS error FROM provisioning_job
+    `).get()).toEqual({
+      status: 'failed',
+      error: 'operator_entitlement_required',
+    })
+    expect(database.query<{ state: string }, []>(
+      'SELECT state FROM workspace',
+    ).get()?.state).toBe('failed')
+  } finally {
+    database.close()
+  }
+})

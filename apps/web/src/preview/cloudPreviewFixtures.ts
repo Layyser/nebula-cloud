@@ -34,6 +34,7 @@ export const cloudPreviewDashboard: OrganizationDashboardResponse = {
   scope: 'organization',
   rangeDays: 30,
   enabledMembers: 4,
+  entitledMembers: 3,
   operators: { ready: 3, total: 4 },
   usage: {
     sessions: 18,

@@ -12,9 +12,11 @@ import {
   getWorkspaceOwnerIdentity,
   getOrganizationUsageSummary,
   getOrganizationDashboardSummary,
+  getOperatorEntitlement,
   getWorkerHost,
   getOrganizationMembers,
   getPersonalUsageSummary,
+  hasActiveOperatorEntitlement,
   listOrganizationAuditEvents,
   listContactRequests,
   listPublishedServices,
@@ -25,6 +27,7 @@ import {
   recordUsageEvent,
   recordWorkerHealth,
   revokePublishedService,
+  revokeOperatorEntitlement,
   rotateOrganizationJoinCode,
   resolveWorkspaceAccess,
   setWorkerHostScheduling,
@@ -32,6 +35,7 @@ import {
   updateContactRequestStatus,
   upsertWorkerHost,
   upsertPublishedService,
+  upsertOperatorEntitlement,
   UsageAccessDeniedError,
   WorkspaceMembershipNotFoundError,
   WorkerPlacementUnavailableError,
@@ -62,7 +66,7 @@ test('applies the minimal application schema idempotently', () => {
     expect(tables).toContain('published_service')
     expect(database.query<{ count: number }, []>(
       'SELECT COUNT(*) AS count FROM nebula_migration',
-    ).get()?.count).toBe(17)
+    ).get()?.count).toBe(18)
   } finally {
     database.close()
   }
@@ -890,6 +894,64 @@ test('deduplicates usage and authorizes personal and organization summaries', ()
   }
 })
 
+test('projects expiring beta grants through the provider-neutral entitlement boundary', () => {
+  const database = openCloudDatabase({ path: ':memory:' })
+  try {
+    database.exec(`
+      CREATE TABLE user (id TEXT PRIMARY KEY);
+      CREATE TABLE organization (id TEXT PRIMARY KEY);
+      CREATE TABLE member (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL REFERENCES user(id),
+        organizationId TEXT NOT NULL REFERENCES organization(id),
+        role TEXT NOT NULL DEFAULT 'member'
+      );
+      INSERT INTO user (id) VALUES ('user-1');
+      INSERT INTO organization (id) VALUES ('org-1'), ('org-2');
+      INSERT INTO member (id, userId, organizationId, role)
+        VALUES ('member-1', 'user-1', 'org-1', 'member');
+    `)
+    migrateCloudSchema(database)
+
+    expect(() => upsertOperatorEntitlement(database, {
+      membershipId: 'member-1', organizationId: 'org-1',
+      state: 'active', source: 'beta', startsAt: 100, endsAt: null,
+    })).toThrow('Beta entitlements must expire')
+    expect(() => upsertOperatorEntitlement(database, {
+      membershipId: 'member-1', organizationId: 'org-2',
+      state: 'active', source: 'admin', startsAt: 100, endsAt: null,
+    })).toThrow('Entitlement membership was not found')
+
+    const entitlement = upsertOperatorEntitlement(database, {
+      membershipId: 'member-1', organizationId: 'org-1',
+      state: 'active', source: 'beta', startsAt: 100, endsAt: 200,
+      now: () => 110,
+    })
+    expect(entitlement).toMatchObject({
+      membershipId: 'member-1', organizationId: 'org-1', kind: 'operator',
+      state: 'active', source: 'beta', startsAt: 100, endsAt: 200,
+    })
+    expect(hasActiveOperatorEntitlement(database, {
+      membershipId: 'member-1', organizationId: 'org-1', now: 150,
+    })).toBe(true)
+    expect(hasActiveOperatorEntitlement(database, {
+      membershipId: 'member-1', organizationId: 'org-1', now: 200,
+    })).toBe(false)
+
+    expect(revokeOperatorEntitlement(database, {
+      membershipId: 'member-1', organizationId: 'org-1', now: () => 160,
+    })?.state).toBe('revoked')
+    expect(getOperatorEntitlement(database, {
+      membershipId: 'member-1', organizationId: 'org-1',
+    })?.createdAt).toBe(110)
+    expect(hasActiveOperatorEntitlement(database, {
+      membershipId: 'member-1', organizationId: 'org-1', now: 170,
+    })).toBe(false)
+  } finally {
+    database.close()
+  }
+})
+
 test('builds role-aware dashboard metrics only from persisted organization state', () => {
   const database = openCloudDatabase({ path: ':memory:' })
   try {
@@ -963,6 +1025,17 @@ test('builds role-aware dashboard metrics only from persisted organization state
         receivedAt: 100_300,
       })
     }
+    for (const membershipId of ['owner-member', 'regular-member']) {
+      upsertOperatorEntitlement(database, {
+        membershipId,
+        organizationId: 'org-1',
+        state: 'active',
+        source: 'beta',
+        startsAt: 90_000,
+        endsAt: 130_000,
+        now: () => 100_400,
+      })
+    }
 
     expect(getOrganizationDashboardSummary(database, {
       userId: 'owner', organizationId: 'org-1', since: 90_000,
@@ -972,6 +1045,7 @@ test('builds role-aware dashboard metrics only from persisted organization state
       scope: 'organization',
       rangeDays: 30,
       enabledMembers: 2,
+      entitledMembers: 2,
       operators: { ready: 1, total: 2 },
       usage: { sessions: 2, modelTurns: 3, totalTokens: 300, estimatedCostMicrousd: 2_400 },
       provisioningFailures: 1,
@@ -983,6 +1057,7 @@ test('builds role-aware dashboard metrics only from persisted organization state
     })).toMatchObject({
       scope: 'personal',
       enabledMembers: null,
+      entitledMembers: 1,
       operators: { ready: 0, total: 1 },
       usage: { sessions: 1, modelTurns: 1, totalTokens: 120, estimatedCostMicrousd: 900 },
       provisioningFailures: 1,

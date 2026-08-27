@@ -11,6 +11,7 @@ import {
   type EnsureWorkspaceRunningResponse,
   type HealthResponse,
   type OperatorRuntimeResponse,
+  type OperatorEntitlementSummary,
   type OrganizationAdminResponse,
   type OrganizationAuditResponse,
   type OrganizationDashboardResponse,
@@ -29,6 +30,7 @@ import {
   type UpdateWorkerHostRequest,
   type UpdateOrganizationMemberRequest,
   type UpdateOrganizationRequest,
+  type UpsertOperatorEntitlementRequest,
   type WorkerHostsResponse,
   type WorkerHostSummary,
 } from '@nebula-cloud/contracts'
@@ -36,6 +38,7 @@ import {
   OrganizationAccessDeniedError,
   ContactRateLimitError,
   OrganizationMemberMutationError,
+  OperatorEntitlementRequiredError,
   publishedServiceMaximumTTLSeconds,
   publishedServiceMinimumTTLSeconds,
   UsageAccessDeniedError,
@@ -64,6 +67,7 @@ const workspacePublicationPath = /^\/api\/workspaces\/([^/]+)\/publications\/([^
 const publishedServicePath = /^\/p\/([^/]+)(\/.*)?$/
 const workerAdministrationPath = '/internal/v1/workers'
 const workerAdministrationMemberPath = /^\/internal\/v1\/workers\/([^/]+)$/
+const operatorEntitlementAdministrationPath = /^\/internal\/v1\/entitlements\/operator\/([^/]+)$/
 
 // Workspace replacement may legitimately run for up to two minutes. Bun's
 // ten-second default would close the request while the worker was converging
@@ -197,6 +201,16 @@ export interface ControlPlaneHandlerOptions {
     workerHostId: string
     update: UpdateWorkerHostRequest
   }) => WorkerHostSummary | null
+  authorizeEntitlementAdministration?: (
+    request: Request,
+  ) => boolean | Promise<boolean>
+  upsertOperatorEntitlement?: (input: UpsertOperatorEntitlementRequest & {
+    membershipId: string
+  }) => OperatorEntitlementSummary
+  revokeOperatorEntitlement?: (input: {
+    membershipId: string
+    organizationId: string
+  }) => OperatorEntitlementSummary | null
   authorizeContactAdministration?: (
     request: Request,
   ) => boolean | Promise<boolean>
@@ -306,6 +320,24 @@ function isUpdateWorkerHostRequest(value: unknown): value is UpdateWorkerHostReq
   return value.action === undefined || [
     'enable', 'disable', 'drain', 'resume',
   ].includes(String(value.action))
+}
+
+function isUpsertOperatorEntitlementRequest(
+  value: unknown,
+): value is UpsertOperatorEntitlementRequest {
+  if (!isRecord(value) || !hasOnlyKeys(value, [
+    'organizationId', 'state', 'source', 'startsAt', 'endsAt',
+  ])) return false
+  return isNonEmptyString(value.organizationId)
+    && ['pending', 'active', 'grace', 'suspended', 'revoked'].includes(String(value.state))
+    && ['beta', 'admin'].includes(String(value.source))
+    && Number.isSafeInteger(value.startsAt)
+    && Number(value.startsAt) >= 0
+    && (
+      value.endsAt === null
+      || (Number.isSafeInteger(value.endsAt) && Number(value.endsAt) > Number(value.startsAt))
+    )
+    && (value.source !== 'beta' || value.endsAt !== null)
 }
 
 const contactTopics = new Set(['sales', 'support', 'security', 'partnerships', 'other'])
@@ -497,6 +529,9 @@ export function createControlPlaneHandler({
   listWorkerHosts,
   registerWorkerHost,
   updateWorkerHost,
+  authorizeEntitlementAdministration,
+  upsertOperatorEntitlement,
+  revokeOperatorEntitlement,
   authorizeContactAdministration,
   listContactRequests,
   updateContactRequestStatus,
@@ -804,6 +839,78 @@ export function createControlPlaneHandler({
     }
 
     const workerMemberMatch = url.pathname.match(workerAdministrationMemberPath)
+    const entitlementMatch = url.pathname.match(operatorEntitlementAdministrationPath)
+    if (entitlementMatch) {
+      if (!authorizeEntitlementAdministration) {
+        return json({
+          error: 'entitlement administration is unavailable',
+          code: 'entitlement_administration_unavailable',
+          retryable: true,
+        } satisfies CloudErrorResponse, 503)
+      }
+      if (!await authorizeEntitlementAdministration(request)) {
+        return json({
+          error: 'entitlement administrator authentication required',
+          code: 'entitlement_administrator_authentication_required',
+        } satisfies CloudErrorResponse, 401)
+      }
+      let membershipId: string
+      try {
+        membershipId = decodeURIComponent(entitlementMatch[1])
+      } catch {
+        return json({ error: 'membership id is invalid', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+      }
+      if (!membershipId.trim()) {
+        return json({ error: 'membership id is required', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+      }
+
+      if (request.method === 'PUT') {
+        if (!upsertOperatorEntitlement) {
+          return json({
+            error: 'entitlement updates are unavailable',
+            code: 'entitlement_update_unavailable',
+            retryable: true,
+          } satisfies CloudErrorResponse, 503)
+        }
+        let body: unknown
+        try {
+          body = await readBoundedJSON(request, contactAdministrationMaximumBytes)
+        } catch {
+          return json({ error: 'request body must be valid JSON', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+        }
+        if (!isUpsertOperatorEntitlementRequest(body)) {
+          return json({ error: 'operator entitlement is invalid', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+        }
+        try {
+          return json(upsertOperatorEntitlement({ membershipId, ...body }))
+        } catch (error) {
+          return json({
+            error: error instanceof Error ? error.message : 'entitlement update failed',
+            code: 'invalid_request',
+          } satisfies CloudErrorResponse, 400)
+        }
+      }
+
+      if (request.method === 'DELETE') {
+        if (!revokeOperatorEntitlement) {
+          return json({
+            error: 'entitlement updates are unavailable',
+            code: 'entitlement_update_unavailable',
+            retryable: true,
+          } satisfies CloudErrorResponse, 503)
+        }
+        const organizationId = url.searchParams.get('organizationId')?.trim() ?? ''
+        if (!organizationId) {
+          return json({ error: 'organizationId is required', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+        }
+        const entitlement = revokeOperatorEntitlement({ membershipId, organizationId })
+        return entitlement
+          ? json(entitlement)
+          : json({ error: 'operator entitlement not found', code: 'not_found' } satisfies CloudErrorResponse, 404)
+      }
+
+      return json({ error: 'route not found', code: 'not_found' } satisfies CloudErrorResponse, 404)
+    }
     if (url.pathname === workerAdministrationPath || workerMemberMatch) {
       if (!authorizeWorkerAdministration) {
         return json({
@@ -1299,6 +1406,12 @@ export function createControlPlaneHandler({
           organizationId: body.organizationId,
         }))
       } catch (error) {
+        if (error instanceof OperatorEntitlementRequiredError) {
+          return json({
+            error: error.message,
+            code: error.code,
+          } satisfies CloudErrorResponse, 403)
+        }
         if (error instanceof WorkspaceMembershipNotFoundError) {
           return json({
             error: 'organization membership required',

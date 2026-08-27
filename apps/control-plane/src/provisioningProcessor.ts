@@ -23,6 +23,7 @@ export interface ProvisioningProcessorOptions {
   pollIntervalMs?: number
   leaseDurationMs?: number
   maximumAttempts?: number
+  authorizeWorkspace?: (workspaceId: string) => boolean
 }
 
 export class ProvisioningProcessor {
@@ -32,6 +33,7 @@ export class ProvisioningProcessor {
   readonly #pollIntervalMs: number
   readonly #leaseDurationMs: number
   readonly #maximumAttempts: number
+  readonly #authorizeWorkspace: (workspaceId: string) => boolean
   #timer: ReturnType<typeof setTimeout> | null = null
   #controller: AbortController | null = null
   #stopped = true
@@ -43,6 +45,7 @@ export class ProvisioningProcessor {
     pollIntervalMs = 1000,
     leaseDurationMs = 180000,
     maximumAttempts = 8,
+    authorizeWorkspace = () => true,
   }: ProvisioningProcessorOptions) {
     this.#database = database
     this.#worker = worker
@@ -50,6 +53,7 @@ export class ProvisioningProcessor {
     this.#pollIntervalMs = pollIntervalMs
     this.#leaseDurationMs = leaseDurationMs
     this.#maximumAttempts = maximumAttempts
+    this.#authorizeWorkspace = authorizeWorkspace
   }
 
   start(): void {
@@ -75,6 +79,14 @@ export class ProvisioningProcessor {
 
     this.#controller = new AbortController()
     try {
+      if (!this.#authorizeWorkspace(job.workspaceId)) {
+        throw new WorkerClientError({
+          message: 'An active Operator entitlement is required',
+          code: 'operator_entitlement_required',
+          retryable: false,
+          status: 403,
+        })
+      }
       const result = await this.#worker.ensureWorkspaceRunning({
         workspaceId: job.workspaceId,
         jobId: job.id,

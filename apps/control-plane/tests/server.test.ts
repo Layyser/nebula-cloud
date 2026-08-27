@@ -3,7 +3,10 @@ import {
   CONTROL_PLANE_IDLE_TIMEOUT_SECONDS,
   createControlPlaneHandler,
 } from '../src/server'
-import { WorkspaceMembershipNotFoundError } from '@nebula-cloud/database'
+import {
+  OperatorEntitlementRequiredError,
+  WorkspaceMembershipNotFoundError,
+} from '@nebula-cloud/database'
 
 test('allows lifecycle requests to outlive the worker timeout', () => {
   expect(CONTROL_PLANE_IDLE_TIMEOUT_SECONDS).toBeGreaterThan(120)
@@ -129,6 +132,90 @@ test('registers and drains workers through the internal administration API', asy
     workerHostId: 'worker-a',
     update: { action: 'drain' },
   }])
+})
+
+test('protects expiring manual Operator entitlement grants with platform authentication', async () => {
+  const updates: unknown[] = []
+  const revocations: unknown[] = []
+  const entitlement = {
+    membershipId: 'membership-1',
+    organizationId: 'org-1',
+    kind: 'operator' as const,
+    state: 'active' as const,
+    source: 'beta' as const,
+    startsAt: 100,
+    endsAt: 200,
+    createdAt: 100,
+    updatedAt: 100,
+  }
+  const handler = createControlPlaneHandler({
+    authorizeEntitlementAdministration: request => (
+      request.headers.get('authorization') === 'Bearer platform-secret'
+    ),
+    upsertOperatorEntitlement: input => {
+      updates.push(input)
+      return entitlement
+    },
+    revokeOperatorEntitlement: input => {
+      revocations.push(input)
+      return { ...entitlement, state: 'revoked', updatedAt: 150 }
+    },
+  })
+  const endpoint = 'http://control-plane.test/internal/v1/entitlements/operator/membership-1'
+  const body = JSON.stringify({
+    organizationId: 'org-1',
+    state: 'active',
+    source: 'beta',
+    startsAt: 100,
+    endsAt: 200,
+  })
+
+  const denied = await handler(new Request(endpoint, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body,
+  }))
+  expect(denied.status).toBe(401)
+  expect(updates).toHaveLength(0)
+
+  const granted = await handler(new Request(endpoint, {
+    method: 'PUT',
+    headers: {
+      authorization: 'Bearer platform-secret',
+      'content-type': 'application/json',
+    },
+    body,
+  }))
+  expect(granted.status).toBe(200)
+  expect(await granted.json()).toMatchObject({ state: 'active', source: 'beta', endsAt: 200 })
+  expect(updates).toEqual([{
+    membershipId: 'membership-1',
+    organizationId: 'org-1',
+    state: 'active',
+    source: 'beta',
+    startsAt: 100,
+    endsAt: 200,
+  }])
+
+  const invalidPermanentBeta = await handler(new Request(endpoint, {
+    method: 'PUT',
+    headers: {
+      authorization: 'Bearer platform-secret',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      organizationId: 'org-1', state: 'active', source: 'beta', startsAt: 100, endsAt: null,
+    }),
+  }))
+  expect(invalidPermanentBeta.status).toBe(400)
+  expect(updates).toHaveLength(1)
+
+  const revoked = await handler(new Request(`${endpoint}?organizationId=org-1`, {
+    method: 'DELETE',
+    headers: { authorization: 'Bearer platform-secret' },
+  }))
+  expect(revoked.status).toBe(200)
+  expect(revocations).toEqual([{ membershipId: 'membership-1', organizationId: 'org-1' }])
 })
 
 test('does not pretend later authentication or organization routes exist', async () => {
@@ -631,6 +718,7 @@ test('serves the persisted dashboard overview only for the active organization',
         scope: 'personal',
         rangeDays: 30,
         enabledMembers: null,
+        entitledMembers: 1,
         operators: { ready: 1, total: 1 },
         usage: {
           sessions: 3,
@@ -853,6 +941,29 @@ test('does not expose ensure-running without a signed-in session', async () => {
 
   expect(response.status).toBe(401)
   expect((await response.json()).code).toBe('authentication_required')
+})
+
+test('returns a stable denial when Operator provisioning requires an entitlement', async () => {
+  const handler = createControlPlaneHandler({
+    resolveSession: async () => ({ userId: 'user-1', activeOrganizationId: 'org-1' }),
+    ensureWorkspaceRunning: () => {
+      throw new OperatorEntitlementRequiredError()
+    },
+  })
+  const response = await handler(new Request(
+    'http://control-plane.test/api/workspaces/personal/ensure-running',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ organizationId: 'org-1' }),
+    },
+  ))
+
+  expect(response.status).toBe(403)
+  expect(await response.json()).toEqual({
+    error: 'An active Operator entitlement is required',
+    code: 'operator_entitlement_required',
+  })
 })
 
 test('restarts only the authenticated active-organization workspace', async () => {

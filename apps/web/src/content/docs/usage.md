@@ -25,8 +25,9 @@ Dollar figures are **estimates**, computed at public list prices for known model
   failures, and the health of workers assigned to those operators.
 - Owners and admins see organization scope. Members see only their own operator,
   usage, provisioning, and assigned-worker health.
-- Enabled-member counts are not subscription entitlements; entitlement reporting
-  remains unavailable until billing enforcement exists.
+- Entitled-user counts come from the local Operator entitlement ledger. Expiring
+  beta grants and future Stripe projections use this same persisted boundary;
+  enabled organization membership is tracked separately.
 - **Personal view**: totals for your own operators over the selected range.
 - **Organization view** (admins): the same metrics across every member's operators.
 - A totals strip shows processed tokens, cached versus uncached input, output including reasoning tokens, and cache savings.
@@ -39,6 +40,7 @@ Dashboards cover 7, 30, or 90-day windows.
 
 ## Beta notes
 
-- Plan tiers described on the Plans page are intended packaging; nothing enforces quotas yet.
+- Plan tiers described on the Plans page are intended packaging; billing and
+  plan quotas are not connected yet.
 - Real limits today come from workspace resource profiles (see [Cloud workspaces](/docs?topic=cloud)), not subscriptions.
 - Estimated-cost labels will remain until provider billing data flows end-to-end.

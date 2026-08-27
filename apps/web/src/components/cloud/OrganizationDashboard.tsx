@@ -249,12 +249,14 @@ function DashboardOverview({
 
   const data = state.data
   const metrics = [
-    ...(data.enabledMembers === null ? [] : [{
-      label: 'Enabled users',
-      value: formatDashboardNumber(data.enabledMembers),
-      detail: 'Entitlements pending',
+    {
+      label: data.scope === 'organization' ? 'Entitled users' : 'Your entitlement',
+      value: data.scope === 'organization'
+        ? formatDashboardNumber(data.entitledMembers)
+        : data.entitledMembers > 0 ? 'Active' : 'Missing',
+      detail: 'Active or grace',
       icon: <UsersRound size={14} />,
-    }]),
+    },
     {
       label: 'Ready operators',
       value: `${formatDashboardNumber(data.operators.ready)} / ${formatDashboardNumber(data.operators.total)}`,
