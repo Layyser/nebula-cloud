@@ -29,6 +29,9 @@ Nebula owns:
 - `provisioning_job`
 - `usage_event` (migrations 0005–0008)
 - `organization_join_code` and `organization_member_state` (migration 0009)
+- `audit_event`, `contact_request`, worker placement, and published-service state
+- `entitlement` (migration 0018)
+- `billing_customer`, `subscription`, and `stripe_event` (migration 0019)
 
 `workspace.member_id` is unique, enforcing one personal workspace per
 organization membership. Database insert and update guards additionally require
@@ -42,11 +45,30 @@ transaction. Repeated requests, page reloads, and duplicate attempts return the
 same workspace identity. They cannot create a second personal workspace.
 
 The tables store durable product identity, desired lifecycle state, usage
-metering, and organization governance. Worker credentials, runtime instances,
-and audit events will receive tables only when those features are implemented.
+metering, organization governance, and provider-neutral billing authorization.
+Worker credentials and runtime instances remain outside this database.
 Provisioning jobs persist an idempotent `ensure_running` operation, claim
 leases, retry timing, attempts, and bounded failure details. See
 [`provisioning-jobs.md`](provisioning-jobs.md).
+
+## Billing projection
+
+Stripe is never queried during an Operator authorization request. A future
+signed webhook adapter will verify and normalize a Stripe event, then pass it to
+the database projection boundary. That boundary:
+
+1. inserts the immutable Stripe event ID before applying business state;
+2. deduplicates completed deliveries and allows failed deliveries to retry;
+3. updates customer and subscription snapshots atomically; and
+4. ignores an older snapshot using the event creation time and event ID as a
+   deterministic tie-breaker.
+
+The inbox intentionally stores bounded processing metadata instead of the raw
+webhook payload. Nubols only returns webhook success after projection; a crash
+or failure therefore relies on Stripe redelivery (or an explicit resend) to
+provide the signed payload again. `source=stripe` Operator entitlement
+projection is still separate work because paid seats must first have an
+explicit membership-assignment policy.
 
 ## Runtime settings
 

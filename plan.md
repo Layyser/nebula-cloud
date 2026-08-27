@@ -582,6 +582,11 @@ stripe_event
 - [x] Add platform-admin grant/revoke operations for expiring `source=beta`
       entitlements. The API cannot create a permanent beta grant and does not
       accept `source=stripe`; Stripe remains an internal projector only.
+- [x] Add the credential-independent Stripe event inbox plus monotonic local
+      customer/subscription projection. Completed deliveries deduplicate,
+      failed deliveries can retry, and older snapshots cannot overwrite newer
+      state. Signature verification and event normalization remain in the
+      webhook adapter.
 - [ ] Create Nubols Cloud product and monthly recurring seat price in Stripe
       sandbox; use a single currency for beta.
 - [ ] Create one Stripe Customer per organization, not per user.
@@ -1097,8 +1102,8 @@ Never cut:
 6. Configure `nubols.com` DNS, `app` staging, and transactional sending domain.
 7. Write and approve database migrations for entitlements, worker registry,
    workspace assignment, Stripe events, usage events, and audit events. The
-   entitlement, worker-registry, workspace-assignment, usage-event, and
-   audit-event migrations now exist locally; Stripe-event persistence remains.
+   entitlement, worker-registry, workspace-assignment, Stripe-event,
+   usage-event, and audit-event migrations now exist locally.
 8. Implement email verification first; it is a dependency for safe invitations,
    billing identity, and workspace provisioning.
 9. Keep strong prospects as non-binding design-partner candidates; do not accept

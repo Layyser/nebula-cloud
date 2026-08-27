@@ -637,6 +637,65 @@ const migrations = [
       END;
     `,
   },
+  {
+    id: '0019_stripe_projection',
+    sql: `
+      CREATE TABLE billing_customer (
+        organization_id TEXT PRIMARY KEY REFERENCES organization(id) ON DELETE CASCADE,
+        stripe_customer_id TEXT NOT NULL UNIQUE,
+        billing_email TEXT,
+        country TEXT,
+        last_event_created_at INTEGER NOT NULL,
+        last_stripe_event_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        CHECK (length(stripe_customer_id) BETWEEN 1 AND 255),
+        CHECK (billing_email IS NULL OR length(billing_email) BETWEEN 1 AND 320),
+        CHECK (country IS NULL OR length(country) = 2)
+      );
+
+      CREATE TABLE subscription (
+        organization_id TEXT PRIMARY KEY REFERENCES organization(id) ON DELETE CASCADE,
+        stripe_subscription_id TEXT NOT NULL UNIQUE,
+        stripe_price_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        entitled_seats INTEGER NOT NULL CHECK (entitled_seats >= 0),
+        cancel_at_period_end INTEGER NOT NULL DEFAULT 0
+          CHECK (cancel_at_period_end IN (0, 1)),
+        current_period_end INTEGER,
+        last_event_created_at INTEGER NOT NULL,
+        last_stripe_event_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        CHECK (length(stripe_subscription_id) BETWEEN 1 AND 255),
+        CHECK (length(stripe_price_id) BETWEEN 1 AND 255),
+        CHECK (length(status) BETWEEN 1 AND 64),
+        CHECK (current_period_end IS NULL OR current_period_end >= 0)
+      );
+
+      CREATE TABLE stripe_event (
+        stripe_event_id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        event_created_at INTEGER NOT NULL,
+        received_at INTEGER NOT NULL,
+        processing_result TEXT NOT NULL DEFAULT 'pending'
+          CHECK (processing_result IN ('pending', 'applied', 'ignored', 'failed')),
+        processing_message TEXT,
+        processed_at INTEGER,
+        attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+        CHECK (length(stripe_event_id) BETWEEN 1 AND 255),
+        CHECK (length(type) BETWEEN 1 AND 255),
+        CHECK (processing_message IS NULL OR length(processing_message) <= 1024),
+        CHECK (
+          (processing_result = 'pending' AND processed_at IS NULL)
+          OR (processing_result != 'pending' AND processed_at IS NOT NULL)
+        )
+      );
+
+      CREATE INDEX stripe_event_result_received_idx
+        ON stripe_event(processing_result, received_at);
+    `,
+  },
 ] as const
 
 export type WorkspaceState = 'pending' | 'provisioning' | 'ready' | 'stopped' | 'failed'
@@ -931,6 +990,75 @@ export interface OperatorEntitlement {
   updatedAt: number
 }
 
+export type StripeEventProcessingResult = 'pending' | 'applied' | 'ignored' | 'failed'
+
+export interface StripeEventRecord {
+  stripeEventId: string
+  type: string
+  eventCreatedAt: number
+  receivedAt: number
+  processingResult: StripeEventProcessingResult
+  processingMessage: string | null
+  processedAt: number | null
+  attemptCount: number
+}
+
+export interface BillingCustomer {
+  organizationId: string
+  stripeCustomerId: string
+  billingEmail: string | null
+  country: string | null
+  lastEventCreatedAt: number
+  lastStripeEventId: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface BillingSubscription {
+  organizationId: string
+  stripeSubscriptionId: string
+  stripePriceId: string
+  status: string
+  entitledSeats: number
+  cancelAtPeriodEnd: boolean
+  currentPeriodEnd: number | null
+  lastEventCreatedAt: number
+  lastStripeEventId: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface StripeBillingProjectionInput {
+  event: {
+    stripeEventId: string
+    type: string
+    eventCreatedAt: number
+    receivedAt?: number
+  }
+  organizationId: string
+  customer?: {
+    stripeCustomerId: string
+    billingEmail: string | null
+    country: string | null
+  }
+  subscription?: {
+    stripeSubscriptionId: string
+    stripePriceId: string
+    status: string
+    entitledSeats: number
+    cancelAtPeriodEnd: boolean
+    currentPeriodEnd: number | null
+  }
+  now?: () => number
+}
+
+export interface StripeBillingProjectionResult {
+  duplicate: boolean
+  processingResult: Extract<StripeEventProcessingResult, 'applied' | 'ignored'>
+  customer: BillingCustomer | null
+  subscription: BillingSubscription | null
+}
+
 export class OperatorEntitlementRequiredError extends Error {
   readonly code = 'operator_entitlement_required'
 
@@ -1158,6 +1286,42 @@ interface OperatorEntitlementRow {
   source: OperatorEntitlementSource
   starts_at: number
   ends_at: number | null
+  created_at: number
+  updated_at: number
+}
+
+interface StripeEventRow {
+  stripe_event_id: string
+  type: string
+  event_created_at: number
+  received_at: number
+  processing_result: StripeEventProcessingResult
+  processing_message: string | null
+  processed_at: number | null
+  attempt_count: number
+}
+
+interface BillingCustomerRow {
+  organization_id: string
+  stripe_customer_id: string
+  billing_email: string | null
+  country: string | null
+  last_event_created_at: number
+  last_stripe_event_id: string
+  created_at: number
+  updated_at: number
+}
+
+interface BillingSubscriptionRow {
+  organization_id: string
+  stripe_subscription_id: string
+  stripe_price_id: string
+  status: string
+  entitled_seats: number
+  cancel_at_period_end: number
+  current_period_end: number | null
+  last_event_created_at: number
+  last_stripe_event_id: string
   created_at: number
   updated_at: number
 }
@@ -2993,6 +3157,339 @@ export function revokeOperatorEntitlement(
   `).run(timestamp, input.membershipId.trim(), input.organizationId.trim())
   if (result.changes !== 1) return null
   return getOperatorEntitlement(database, input)
+}
+
+function requiredStripeText(value: string, field: string, maximum = 255): string {
+  const normalized = value.trim()
+  if (!normalized || normalized.length > maximum) {
+    throw new TypeError(`${field} must contain between 1 and ${maximum} characters`)
+  }
+  return normalized
+}
+
+function stripeTimestamp(value: number, field: string): number {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new TypeError(`${field} must be a non-negative safe integer`)
+  }
+  return value
+}
+
+function toStripeEvent(row: StripeEventRow): StripeEventRecord {
+  return {
+    stripeEventId: row.stripe_event_id,
+    type: row.type,
+    eventCreatedAt: Number(row.event_created_at),
+    receivedAt: Number(row.received_at),
+    processingResult: row.processing_result,
+    processingMessage: row.processing_message,
+    processedAt: row.processed_at === null ? null : Number(row.processed_at),
+    attemptCount: Number(row.attempt_count),
+  }
+}
+
+function toBillingCustomer(row: BillingCustomerRow): BillingCustomer {
+  return {
+    organizationId: row.organization_id,
+    stripeCustomerId: row.stripe_customer_id,
+    billingEmail: row.billing_email,
+    country: row.country,
+    lastEventCreatedAt: Number(row.last_event_created_at),
+    lastStripeEventId: row.last_stripe_event_id,
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+  }
+}
+
+function toBillingSubscription(row: BillingSubscriptionRow): BillingSubscription {
+  return {
+    organizationId: row.organization_id,
+    stripeSubscriptionId: row.stripe_subscription_id,
+    stripePriceId: row.stripe_price_id,
+    status: row.status,
+    entitledSeats: Number(row.entitled_seats),
+    cancelAtPeriodEnd: row.cancel_at_period_end === 1,
+    currentPeriodEnd: row.current_period_end === null ? null : Number(row.current_period_end),
+    lastEventCreatedAt: Number(row.last_event_created_at),
+    lastStripeEventId: row.last_stripe_event_id,
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+  }
+}
+
+export function getStripeEvent(
+  database: Database,
+  stripeEventId: string,
+): StripeEventRecord | null {
+  const eventId = requiredStripeText(stripeEventId, 'stripeEventId')
+  const row = database.query<StripeEventRow, [string]>(`
+    SELECT * FROM stripe_event WHERE stripe_event_id = ? LIMIT 1
+  `).get(eventId)
+  return row ? toStripeEvent(row) : null
+}
+
+export function registerStripeEvent(
+  database: Database,
+  input: {
+    stripeEventId: string
+    type: string
+    eventCreatedAt: number
+    receivedAt?: number
+  },
+): { event: StripeEventRecord; inserted: boolean } {
+  const stripeEventId = requiredStripeText(input.stripeEventId, 'stripeEventId')
+  const type = requiredStripeText(input.type, 'type')
+  const eventCreatedAt = stripeTimestamp(input.eventCreatedAt, 'eventCreatedAt')
+  const receivedAt = stripeTimestamp(input.receivedAt ?? Date.now(), 'receivedAt')
+  const result = database.prepare(`
+    INSERT INTO stripe_event (
+      stripe_event_id, type, event_created_at, received_at, processing_result
+    ) VALUES (?, ?, ?, ?, 'pending')
+    ON CONFLICT(stripe_event_id) DO NOTHING
+  `).run(stripeEventId, type, eventCreatedAt, receivedAt)
+  const event = getStripeEvent(database, stripeEventId)
+  if (!event) throw new Error('Stripe event could not be resolved')
+  if (event.type !== type || event.eventCreatedAt !== eventCreatedAt) {
+    throw new Error('Stripe event identity conflicts with an existing event')
+  }
+  return { event, inserted: result.changes === 1 }
+}
+
+export function getBillingCustomer(
+  database: Database,
+  organizationId: string,
+): BillingCustomer | null {
+  const row = database.query<BillingCustomerRow, [string]>(`
+    SELECT * FROM billing_customer WHERE organization_id = ? LIMIT 1
+  `).get(organizationId.trim())
+  return row ? toBillingCustomer(row) : null
+}
+
+export function getBillingSubscription(
+  database: Database,
+  organizationId: string,
+): BillingSubscription | null {
+  const row = database.query<BillingSubscriptionRow, [string]>(`
+    SELECT * FROM subscription WHERE organization_id = ? LIMIT 1
+  `).get(organizationId.trim())
+  return row ? toBillingSubscription(row) : null
+}
+
+function projectBillingCustomer(
+  database: Database,
+  input: {
+    organizationId: string
+    stripeEventId: string
+    eventCreatedAt: number
+    stripeCustomerId: string
+    billingEmail: string | null
+    country: string | null
+    updatedAt: number
+  },
+): { customer: BillingCustomer; applied: boolean } {
+  const billingEmail = input.billingEmail === null
+    ? null
+    : requiredStripeText(input.billingEmail, 'billingEmail', 320)
+  const country = input.country === null ? null : input.country.trim().toUpperCase()
+  if (country !== null && !/^[A-Z]{2}$/.test(country)) {
+    throw new TypeError('country must be a two-letter code')
+  }
+  const result = database.prepare(`
+    INSERT INTO billing_customer (
+      organization_id, stripe_customer_id, billing_email, country,
+      last_event_created_at, last_stripe_event_id, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(organization_id) DO UPDATE SET
+      stripe_customer_id = excluded.stripe_customer_id,
+      billing_email = excluded.billing_email,
+      country = excluded.country,
+      last_event_created_at = excluded.last_event_created_at,
+      last_stripe_event_id = excluded.last_stripe_event_id,
+      updated_at = excluded.updated_at
+    WHERE excluded.last_event_created_at > billing_customer.last_event_created_at
+       OR (
+         excluded.last_event_created_at = billing_customer.last_event_created_at
+         AND excluded.last_stripe_event_id > billing_customer.last_stripe_event_id
+       )
+  `).run(
+    input.organizationId,
+    requiredStripeText(input.stripeCustomerId, 'stripeCustomerId'),
+    billingEmail,
+    country,
+    input.eventCreatedAt,
+    input.stripeEventId,
+    input.updatedAt,
+    input.updatedAt,
+  )
+  const customer = getBillingCustomer(database, input.organizationId)
+  if (!customer) throw new Error('Billing customer could not be resolved')
+  return { customer, applied: result.changes === 1 }
+}
+
+function projectBillingSubscription(
+  database: Database,
+  input: {
+    organizationId: string
+    stripeEventId: string
+    eventCreatedAt: number
+    stripeSubscriptionId: string
+    stripePriceId: string
+    status: string
+    entitledSeats: number
+    cancelAtPeriodEnd: boolean
+    currentPeriodEnd: number | null
+    updatedAt: number
+  },
+): { subscription: BillingSubscription; applied: boolean } {
+  if (!Number.isSafeInteger(input.entitledSeats) || input.entitledSeats < 0) {
+    throw new TypeError('entitledSeats must be a non-negative safe integer')
+  }
+  const currentPeriodEnd = input.currentPeriodEnd === null
+    ? null
+    : stripeTimestamp(input.currentPeriodEnd, 'currentPeriodEnd')
+  const result = database.prepare(`
+    INSERT INTO subscription (
+      organization_id, stripe_subscription_id, stripe_price_id, status,
+      entitled_seats, cancel_at_period_end, current_period_end,
+      last_event_created_at, last_stripe_event_id, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(organization_id) DO UPDATE SET
+      stripe_subscription_id = excluded.stripe_subscription_id,
+      stripe_price_id = excluded.stripe_price_id,
+      status = excluded.status,
+      entitled_seats = excluded.entitled_seats,
+      cancel_at_period_end = excluded.cancel_at_period_end,
+      current_period_end = excluded.current_period_end,
+      last_event_created_at = excluded.last_event_created_at,
+      last_stripe_event_id = excluded.last_stripe_event_id,
+      updated_at = excluded.updated_at
+    WHERE excluded.last_event_created_at > subscription.last_event_created_at
+       OR (
+         excluded.last_event_created_at = subscription.last_event_created_at
+         AND excluded.last_stripe_event_id > subscription.last_stripe_event_id
+       )
+  `).run(
+    input.organizationId,
+    requiredStripeText(input.stripeSubscriptionId, 'stripeSubscriptionId'),
+    requiredStripeText(input.stripePriceId, 'stripePriceId'),
+    requiredStripeText(input.status, 'status', 64),
+    input.entitledSeats,
+    input.cancelAtPeriodEnd ? 1 : 0,
+    currentPeriodEnd,
+    input.eventCreatedAt,
+    input.stripeEventId,
+    input.updatedAt,
+    input.updatedAt,
+  )
+  const subscription = getBillingSubscription(database, input.organizationId)
+  if (!subscription) throw new Error('Billing subscription could not be resolved')
+  return { subscription, applied: result.changes === 1 }
+}
+
+function completeStripeEvent(
+  database: Database,
+  input: {
+    stripeEventId: string
+    processingResult: Exclude<StripeEventProcessingResult, 'pending'>
+    processingMessage: string
+    processedAt: number
+  },
+): StripeEventRecord {
+  const processingMessage = input.processingMessage.trim().slice(0, 1024) || null
+  const result = database.prepare(`
+    UPDATE stripe_event
+    SET processing_result = ?, processing_message = ?, processed_at = ?,
+        attempt_count = attempt_count + 1
+    WHERE stripe_event_id = ?
+  `).run(
+    input.processingResult,
+    processingMessage,
+    input.processedAt,
+    input.stripeEventId,
+  )
+  if (result.changes !== 1) throw new Error('Stripe event was not found')
+  const event = getStripeEvent(database, input.stripeEventId)
+  if (!event) throw new Error('Stripe event could not be resolved')
+  return event
+}
+
+export function applyStripeBillingProjection(
+  database: Database,
+  input: StripeBillingProjectionInput,
+): StripeBillingProjectionResult {
+  const registration = registerStripeEvent(database, input.event)
+  const organizationId = input.organizationId.trim()
+  if (
+    !registration.inserted
+    && (registration.event.processingResult === 'applied'
+      || registration.event.processingResult === 'ignored')
+  ) {
+    return {
+      duplicate: true,
+      processingResult: registration.event.processingResult,
+      customer: getBillingCustomer(database, organizationId),
+      subscription: getBillingSubscription(database, organizationId),
+    }
+  }
+
+  const processedAt = stripeTimestamp((input.now ?? Date.now)(), 'processedAt')
+  try {
+    return database.transaction(() => {
+      if (!organizationId) throw new TypeError('organizationId is required')
+      const organization = database.query<{ id: string }, [string]>(`
+        SELECT id FROM organization WHERE id = ? LIMIT 1
+      `).get(organizationId)
+      if (!organization) throw new Error('Billing organization was not found')
+
+      let applied = false
+      let customer = getBillingCustomer(database, organizationId)
+      let subscription = getBillingSubscription(database, organizationId)
+      if (input.customer) {
+        const projection = projectBillingCustomer(database, {
+          organizationId,
+          stripeEventId: registration.event.stripeEventId,
+          eventCreatedAt: registration.event.eventCreatedAt,
+          ...input.customer,
+          updatedAt: processedAt,
+        })
+        customer = projection.customer
+        applied ||= projection.applied
+      }
+      if (input.subscription) {
+        const projection = projectBillingSubscription(database, {
+          organizationId,
+          stripeEventId: registration.event.stripeEventId,
+          eventCreatedAt: registration.event.eventCreatedAt,
+          ...input.subscription,
+          updatedAt: processedAt,
+        })
+        subscription = projection.subscription
+        applied ||= projection.applied
+      }
+      const processingResult: StripeBillingProjectionResult['processingResult'] = applied
+        ? 'applied'
+        : 'ignored'
+      completeStripeEvent(database, {
+        stripeEventId: registration.event.stripeEventId,
+        processingResult,
+        processingMessage: applied ? 'local billing projection updated' : 'stale or empty projection',
+        processedAt,
+      })
+      return {
+        duplicate: !registration.inserted,
+        processingResult,
+        customer,
+        subscription,
+      }
+    }).immediate()
+  } catch (error) {
+    completeStripeEvent(database, {
+      stripeEventId: registration.event.stripeEventId,
+      processingResult: 'failed',
+      processingMessage: error instanceof Error ? error.message : 'billing projection failed',
+      processedAt,
+    })
+    throw error
+  }
 }
 
 export function getOrganizationMembers(

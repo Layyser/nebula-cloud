@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 import {
+  applyStripeBillingProjection,
   assignWorkspaceWorker,
   claimProvisioningJob,
   ContactRateLimitError,
@@ -8,11 +9,14 @@ import {
   ensurePersonalWorkspace,
   ensureWorkspaceRunning,
   finishProvisioningJob,
+  getBillingCustomer,
+  getBillingSubscription,
   getPublishedServiceBySlug,
   getWorkspaceOwnerIdentity,
   getOrganizationUsageSummary,
   getOrganizationDashboardSummary,
   getOperatorEntitlement,
+  getStripeEvent,
   getWorkerHost,
   getOrganizationMembers,
   getPersonalUsageSummary,
@@ -26,6 +30,7 @@ import {
   recordAuditEvent,
   recordUsageEvent,
   recordWorkerHealth,
+  registerStripeEvent,
   revokePublishedService,
   revokeOperatorEntitlement,
   rotateOrganizationJoinCode,
@@ -64,9 +69,12 @@ test('applies the minimal application schema idempotently', () => {
     expect(tables).toContain('nebula_migration')
     expect(tables).toContain('workspace')
     expect(tables).toContain('published_service')
+    expect(tables).toContain('billing_customer')
+    expect(tables).toContain('subscription')
+    expect(tables).toContain('stripe_event')
     expect(database.query<{ count: number }, []>(
       'SELECT COUNT(*) AS count FROM nebula_migration',
-    ).get()?.count).toBe(18)
+    ).get()?.count).toBe(19)
   } finally {
     database.close()
   }
@@ -889,6 +897,152 @@ test('deduplicates usage and authorizes personal and organization summaries', ()
       workspaceId: workspace1.id, sessionId: 'chat-x',
       inputTokens: 1, outputTokens: 1,
     })).toThrow('usage event scope does not match workspace ownership')
+  } finally {
+    database.close()
+  }
+})
+
+test('persists Stripe events before idempotent and out-of-order billing projection', () => {
+  const database = openCloudDatabase({ path: ':memory:' })
+  try {
+    database.exec(`
+      CREATE TABLE user (id TEXT PRIMARY KEY);
+      CREATE TABLE organization (id TEXT PRIMARY KEY);
+      CREATE TABLE member (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL REFERENCES user(id),
+        organizationId TEXT NOT NULL REFERENCES organization(id),
+        role TEXT NOT NULL DEFAULT 'member'
+      );
+      INSERT INTO organization (id) VALUES ('org-1');
+    `)
+    migrateCloudSchema(database)
+
+    const registered = registerStripeEvent(database, {
+      stripeEventId: 'evt_registered',
+      type: 'customer.created',
+      eventCreatedAt: 50,
+      receivedAt: 55,
+    })
+    expect(registered.inserted).toBe(true)
+    expect(registerStripeEvent(database, {
+      stripeEventId: 'evt_registered',
+      type: 'customer.created',
+      eventCreatedAt: 50,
+      receivedAt: 60,
+    }).inserted).toBe(false)
+    expect(getStripeEvent(database, 'evt_registered')).toMatchObject({
+      processingResult: 'pending',
+      receivedAt: 55,
+      attemptCount: 0,
+    })
+
+    const currentInput = {
+      event: {
+        stripeEventId: 'evt_current',
+        type: 'customer.subscription.updated',
+        eventCreatedAt: 200,
+        receivedAt: 210,
+      },
+      organizationId: 'org-1',
+      customer: {
+        stripeCustomerId: 'cus_1',
+        billingEmail: 'billing@example.com',
+        country: 'es',
+      },
+      subscription: {
+        stripeSubscriptionId: 'sub_1',
+        stripePriceId: 'price_beta',
+        status: 'active',
+        entitledSeats: 3,
+        cancelAtPeriodEnd: false,
+        currentPeriodEnd: 1_000,
+      },
+      now: () => 220,
+    }
+    expect(applyStripeBillingProjection(database, currentInput)).toMatchObject({
+      duplicate: false,
+      processingResult: 'applied',
+      customer: { stripeCustomerId: 'cus_1', country: 'ES' },
+      subscription: { status: 'active', entitledSeats: 3 },
+    })
+    expect(applyStripeBillingProjection(database, currentInput)).toMatchObject({
+      duplicate: true,
+      processingResult: 'applied',
+    })
+    expect(getStripeEvent(database, 'evt_current')).toMatchObject({
+      processingResult: 'applied',
+      processedAt: 220,
+      attemptCount: 1,
+    })
+
+    const stale = applyStripeBillingProjection(database, {
+      event: {
+        stripeEventId: 'evt_stale',
+        type: 'customer.subscription.updated',
+        eventCreatedAt: 100,
+      },
+      organizationId: 'org-1',
+      customer: {
+        stripeCustomerId: 'cus_stale',
+        billingEmail: 'old@example.com',
+        country: 'US',
+      },
+      subscription: {
+        stripeSubscriptionId: 'sub_stale',
+        stripePriceId: 'price_old',
+        status: 'canceled',
+        entitledSeats: 0,
+        cancelAtPeriodEnd: true,
+        currentPeriodEnd: 500,
+      },
+      now: () => 230,
+    })
+    expect(stale.processingResult).toBe('ignored')
+    expect(getBillingCustomer(database, 'org-1')).toMatchObject({
+      stripeCustomerId: 'cus_1',
+      billingEmail: 'billing@example.com',
+      lastEventCreatedAt: 200,
+    })
+    expect(getBillingSubscription(database, 'org-1')).toMatchObject({
+      stripeSubscriptionId: 'sub_1',
+      status: 'active',
+      entitledSeats: 3,
+      lastEventCreatedAt: 200,
+    })
+    expect(getStripeEvent(database, 'evt_stale')).toMatchObject({
+      processingResult: 'ignored',
+      attemptCount: 1,
+    })
+
+    expect(() => applyStripeBillingProjection(database, {
+      event: {
+        stripeEventId: 'evt_failed',
+        type: 'customer.subscription.updated',
+        eventCreatedAt: 300,
+      },
+      organizationId: 'missing-org',
+      now: () => 310,
+    })).toThrow('Billing organization was not found')
+    expect(getStripeEvent(database, 'evt_failed')).toMatchObject({
+      processingResult: 'failed',
+      processingMessage: 'Billing organization was not found',
+      attemptCount: 1,
+    })
+    database.exec("INSERT INTO organization (id) VALUES ('missing-org')")
+    expect(applyStripeBillingProjection(database, {
+      event: {
+        stripeEventId: 'evt_failed',
+        type: 'customer.subscription.updated',
+        eventCreatedAt: 300,
+      },
+      organizationId: 'missing-org',
+      now: () => 320,
+    })).toMatchObject({ duplicate: true, processingResult: 'ignored' })
+    expect(getStripeEvent(database, 'evt_failed')).toMatchObject({
+      processingResult: 'ignored',
+      attemptCount: 2,
+    })
   } finally {
     database.close()
   }
