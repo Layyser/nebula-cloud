@@ -38,7 +38,7 @@ export default defineConfig({
         target: 'http://127.0.0.1:7790',
         changeOrigin: false,
       },
-      '/p': {
+      '/p/': {
         target: 'http://127.0.0.1:7790',
         changeOrigin: false,
       },

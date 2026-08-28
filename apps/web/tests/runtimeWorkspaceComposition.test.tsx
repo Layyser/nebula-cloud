@@ -47,3 +47,10 @@ test('Vite leaves the source Runtime UI to its GLSL-aware transform pipeline', (
     },
   })
 })
+
+test('Vite only proxies published-service paths under /p/', () => {
+  const proxyRoutes = Object.keys(viteConfig.server?.proxy ?? {})
+
+  expect(proxyRoutes).toContain('/p/')
+  expect(proxyRoutes).not.toContain('/p')
+})
