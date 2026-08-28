@@ -234,7 +234,7 @@ function DashboardOverview({
 }) {
   if (state.status === 'loading') {
     return (
-      <section aria-label="Loading dashboard overview" className="grid grid-cols-2 gap-3 md:grid-cols-4 2xl:grid-cols-8">
+      <section aria-label="Loading dashboard overview" className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {Array.from({ length: 8 }, (_, index) => (
           <Surface key={index} variant="panel" density="none" radius="surface" className="h-28 animate-pulse" />
         ))}
@@ -308,7 +308,7 @@ function DashboardOverview({
   ]
 
   return (
-    <section aria-label="Dashboard overview" className="grid grid-cols-2 gap-3 md:grid-cols-4 2xl:grid-cols-8">
+    <section aria-label="Dashboard overview" className="grid grid-cols-2 gap-3 md:grid-cols-4">
       {metrics.map(metric => (
         <Surface key={metric.label} variant="panel" density="default" radius="surface" className="min-w-0">
           <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-subtle)]">
