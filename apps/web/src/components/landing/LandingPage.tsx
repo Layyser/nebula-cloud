@@ -7,6 +7,7 @@ import {
   ChevronDown,
   Clock,
   LayoutDashboard,
+  Menu,
   MessageSquare,
   Moon,
   Monitor,
@@ -169,6 +170,8 @@ export function Header({
 }) {
   const [scrolled, setScrolled] = useState(() => window.scrollY > 16)
   const [pathname, setPathname] = useState(() => window.location.pathname)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const mobileMenuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const update = () => setScrolled(window.scrollY > 16)
@@ -181,6 +184,24 @@ export function Header({
     window.addEventListener('popstate', update)
     return () => window.removeEventListener('popstate', update)
   }, [])
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return
+
+    const closeOnOutsidePress = (event: globalThis.PointerEvent) => {
+      if (!mobileMenuRef.current?.contains(event.target as Node)) setMobileMenuOpen(false)
+    }
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') setMobileMenuOpen(false)
+    }
+
+    window.addEventListener('pointerdown', closeOnOutsidePress)
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      window.removeEventListener('pointerdown', closeOnOutsidePress)
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [mobileMenuOpen])
 
   return (
     <header className={`landing-header fixed inset-x-0 top-0 z-50 border-b transition-[background-color,border-color] duration-500 ease-out ${scrolled ? 'border-[var(--color-border-default)] bg-[var(--color-surface-header-scrolled)] backdrop-blur-xl' : 'border-transparent bg-transparent'}`}>
@@ -233,12 +254,73 @@ export function Header({
             </NavigationMenu.List>
             <NavigationMenu.Viewport className="absolute left-1/2 top-[calc(100%+0.75rem)] z-50 w-[360px] -translate-x-1/2 overflow-hidden rounded-2xl bg-[var(--color-surface-diagram-node)] p-2 shadow-[var(--shadow-surface)]" />
           </NavigationMenu.Root>
-          <a href="/app" onClick={onLaunch} className="inline-flex h-10 items-center rounded-full bg-[var(--color-control-primary)] px-4 text-sm font-semibold text-[var(--color-control-on-primary)] transition hover:bg-[var(--color-control-primary-hover)]">
+          <a href="/app" onClick={onLaunch} className="hidden h-10 items-center rounded-full bg-[var(--color-control-primary)] px-4 text-sm font-semibold text-[var(--color-control-on-primary)] transition hover:bg-[var(--color-control-primary-hover)] md:inline-flex">
             Launch app
           </a>
+
+          <div ref={mobileMenuRef} className="relative md:hidden">
+            <button
+              type="button"
+              aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+              aria-expanded={mobileMenuOpen}
+              aria-controls="mobile-public-navigation"
+              onClick={() => setMobileMenuOpen(open => !open)}
+              className="flex h-10 w-10 items-center justify-center rounded-[var(--radius-control)] text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-selected)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--focus-ring-color)]"
+            >
+              <Menu size={20} />
+            </button>
+
+            <AnimatePresence>
+              {mobileMenuOpen && (
+                <motion.nav
+                  id="mobile-public-navigation"
+                  aria-label="Mobile navigation"
+                  initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -4, scale: 0.98 }}
+                  transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+                  className="absolute right-0 top-[calc(100%+0.5rem)] w-52 overflow-hidden rounded-[var(--radius-surface)] bg-[var(--color-surface-diagram-node)] p-1.5 shadow-[var(--shadow-surface)]"
+                >
+                  <MobileHeaderLink href="/" label="Product" active={pathname === '/'} onSelect={() => setMobileMenuOpen(false)} />
+                  <MobileHeaderLink href="/docs" label="Docs" active={pathname.startsWith('/docs')} onSelect={() => setMobileMenuOpen(false)} />
+                  <MobileHeaderLink href="/plans" label="Plans" active={pathname === '/plans' || pathname === '/pricing'} onSelect={() => setMobileMenuOpen(false)} />
+                  <MobileHeaderLink href="/legal" label="Privacy" active={pathname.startsWith('/legal')} onSelect={() => setMobileMenuOpen(false)} />
+                  <div className="my-1 h-px bg-[var(--color-border-subtle)]" />
+                  <a
+                    href="/app"
+                    onClick={event => {
+                      setMobileMenuOpen(false)
+                      onLaunch(event)
+                    }}
+                    className="flex h-10 items-center rounded-[var(--radius-control)] bg-[var(--color-control-primary)] px-3 text-sm font-semibold text-[var(--color-control-on-primary)] transition-colors hover:bg-[var(--color-control-primary-hover)]"
+                  >
+                    Launch app
+                  </a>
+                </motion.nav>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       </nav>
     </header>
+  )
+}
+
+function MobileHeaderLink({ href, label, active, onSelect }: {
+  href: string
+  label: string
+  active: boolean
+  onSelect: () => void
+}) {
+  return (
+    <a
+      href={href}
+      aria-current={active ? 'page' : undefined}
+      onClick={onSelect}
+      className={`flex h-10 items-center rounded-[var(--radius-control)] px-3 text-sm font-medium transition-colors ${active ? 'bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-selected)] hover:text-[var(--color-text-primary)]'}`}
+    >
+      {label}
+    </a>
   )
 }
 
