@@ -21,6 +21,12 @@ grace states allow access, while pending, suspended, revoked, or expired grants
 do not. Enforcement is enabled only after grants have been seeded for a
 deployment, so local development is not accidentally locked out.
 
+For paid organizations, owners and admins assign purchased Operator seats to
+specific members from Dashboard → Users. A failed renewal starts one fixed
+14-day grace window; payment retries do not extend it, and a successful payment
+restores access. Grace expiry suspends access without deleting the member's
+persistent workspace data.
+
 ## Persistent storage
 
 Every workspace owns a durable home directory mounted at `/home/nebula`:

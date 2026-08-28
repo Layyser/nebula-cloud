@@ -696,6 +696,24 @@ const migrations = [
         ON stripe_event(processing_result, received_at);
     `,
   },
+  {
+    id: '0020_subscription_payment_grace',
+    sql: `
+      ALTER TABLE subscription
+        ADD COLUMN payment_state TEXT NOT NULL DEFAULT 'current'
+        CHECK (payment_state IN ('current', 'grace', 'delinquent'));
+      ALTER TABLE subscription
+        ADD COLUMN grace_ends_at INTEGER
+        CHECK (grace_ends_at IS NULL OR grace_ends_at >= 0);
+      ALTER TABLE subscription
+        ADD COLUMN last_invoice_event_created_at INTEGER;
+      ALTER TABLE subscription
+        ADD COLUMN last_invoice_event_id TEXT;
+
+      CREATE INDEX entitlement_stripe_assignment_idx
+        ON entitlement(organization_id, source, state);
+    `,
+  },
 ] as const
 
 export type WorkspaceState = 'pending' | 'provisioning' | 'ready' | 'stopped' | 'failed'
@@ -939,6 +957,14 @@ export interface OrganizationMemberSummary {
   role: OrganizationRole
   disabled: boolean
   joinedAt: number
+  operatorEntitlement: Pick<OperatorEntitlement, 'source' | 'state' | 'endsAt'> | null
+}
+
+export interface OrganizationOperatorSeatSummary {
+  purchased: number
+  assigned: number
+  paymentState: BillingSubscription['paymentState']
+  graceEndsAt: number | null
 }
 
 export interface OrganizationOperatorSummary {
@@ -1022,10 +1048,43 @@ export interface BillingSubscription {
   entitledSeats: number
   cancelAtPeriodEnd: boolean
   currentPeriodEnd: number | null
+  paymentState: 'current' | 'grace' | 'delinquent'
+  graceEndsAt: number | null
+  lastInvoiceEventCreatedAt: number | null
+  lastInvoiceEventId: string | null
   lastEventCreatedAt: number
   lastStripeEventId: string
   createdAt: number
   updatedAt: number
+}
+
+export const stripePaymentGraceDurationMs = 14 * 24 * 60 * 60 * 1000
+
+export class OperatorSeatCapacityError extends Error {
+  readonly code = 'operator_seat_capacity_reached'
+
+  constructor() {
+    super('All purchased Operator seats are already assigned')
+    this.name = 'OperatorSeatCapacityError'
+  }
+}
+
+export class BillingSubscriptionRequiredError extends Error {
+  readonly code = 'billing_subscription_required'
+
+  constructor() {
+    super('A Stripe subscription is required before assigning paid Operator seats')
+    this.name = 'BillingSubscriptionRequiredError'
+  }
+}
+
+export class OperatorSeatQuantityConflictError extends Error {
+  readonly code = 'operator_seat_quantity_below_assignments'
+
+  constructor() {
+    super('Stripe seat quantity cannot be lower than assigned Operator seats')
+    this.name = 'OperatorSeatQuantityConflictError'
+  }
 }
 
 export interface StripeBillingProjectionInput {
@@ -1320,6 +1379,10 @@ interface BillingSubscriptionRow {
   entitled_seats: number
   cancel_at_period_end: number
   current_period_end: number | null
+  payment_state: 'current' | 'grace' | 'delinquent'
+  grace_ends_at: number | null
+  last_invoice_event_created_at: number | null
+  last_invoice_event_id: string | null
   last_event_created_at: number
   last_stripe_event_id: string
   created_at: number
@@ -3209,6 +3272,12 @@ function toBillingSubscription(row: BillingSubscriptionRow): BillingSubscription
     entitledSeats: Number(row.entitled_seats),
     cancelAtPeriodEnd: row.cancel_at_period_end === 1,
     currentPeriodEnd: row.current_period_end === null ? null : Number(row.current_period_end),
+    paymentState: row.payment_state,
+    graceEndsAt: row.grace_ends_at === null ? null : Number(row.grace_ends_at),
+    lastInvoiceEventCreatedAt: row.last_invoice_event_created_at === null
+      ? null
+      : Number(row.last_invoice_event_created_at),
+    lastInvoiceEventId: row.last_invoice_event_id,
     lastEventCreatedAt: Number(row.last_event_created_at),
     lastStripeEventId: row.last_stripe_event_id,
     createdAt: Number(row.created_at),
@@ -3294,6 +3363,36 @@ export function getBillingSubscriptionByStripeId(
   return row ? toBillingSubscription(row) : null
 }
 
+function stripeEntitlementAccess(
+  subscription: BillingSubscription,
+  now: number,
+): { state: Extract<OperatorEntitlementState, 'active' | 'grace' | 'suspended'>; endsAt: number | null } {
+  if (
+    subscription.paymentState === 'grace'
+    && subscription.graceEndsAt !== null
+    && subscription.graceEndsAt > now
+  ) return { state: 'grace', endsAt: subscription.graceEndsAt }
+  if (
+    subscription.paymentState === 'current'
+    && (subscription.status === 'active' || subscription.status === 'trialing')
+    && (subscription.currentPeriodEnd === null || subscription.currentPeriodEnd > now)
+  ) return { state: 'active', endsAt: subscription.currentPeriodEnd }
+  return { state: 'suspended', endsAt: subscription.graceEndsAt }
+}
+
+function reconcileStripeAssignedEntitlements(
+  database: Database,
+  subscription: BillingSubscription,
+  now: number,
+): void {
+  const access = stripeEntitlementAccess(subscription, now)
+  database.prepare(`
+    UPDATE entitlement
+    SET state = ?, ends_at = ?, updated_at = ?
+    WHERE organization_id = ? AND source = 'stripe' AND state != 'revoked'
+  `).run(access.state, access.endsAt, now, subscription.organizationId)
+}
+
 function projectBillingCustomer(
   database: Database,
   input: {
@@ -3363,6 +3462,11 @@ function projectBillingSubscription(
   if (!Number.isSafeInteger(input.entitledSeats) || input.entitledSeats < 0) {
     throw new TypeError('entitledSeats must be a non-negative safe integer')
   }
+  const assignedSeats = database.query<{ count: number }, [string]>(`
+    SELECT COUNT(*) AS count FROM entitlement
+    WHERE organization_id = ? AND source = 'stripe' AND state != 'revoked'
+  `).get(input.organizationId)?.count ?? 0
+  if (input.entitledSeats < assignedSeats) throw new OperatorSeatQuantityConflictError()
   const currentPeriodEnd = input.currentPeriodEnd === null
     ? null
     : stripeTimestamp(input.currentPeriodEnd, 'currentPeriodEnd')
@@ -3402,6 +3506,7 @@ function projectBillingSubscription(
   )
   const subscription = getBillingSubscription(database, input.organizationId)
   if (!subscription) throw new Error('Billing subscription could not be resolved')
+  reconcileStripeAssignedEntitlements(database, subscription, input.updatedAt)
   return { subscription, applied: result.changes === 1 }
 }
 
@@ -3504,7 +3609,7 @@ export function applyStripeBillingProjection(
 
   const processedAt = stripeTimestamp((input.now ?? Date.now)(), 'processedAt')
   try {
-    return database.transaction(() => {
+    return database.transaction((): StripeBillingProjectionResult => {
       if (!organizationId) throw new TypeError('organizationId is required')
       const organization = database.query<{ id: string }, [string]>(`
         SELECT id FROM organization WHERE id = ? LIMIT 1
@@ -3563,10 +3668,230 @@ export function applyStripeBillingProjection(
   }
 }
 
+export function applyStripeInvoiceProjection(
+  database: Database,
+  input: {
+    event: {
+      stripeEventId: string
+      type: 'invoice.paid' | 'invoice.payment_failed'
+      eventCreatedAt: number
+      receivedAt?: number
+    }
+    stripeSubscriptionId: string
+    now?: () => number
+  },
+): StripeBillingProjectionResult {
+  const registration = registerStripeEvent(database, input.event)
+  const existingSubscription = getBillingSubscriptionByStripeId(
+    database,
+    input.stripeSubscriptionId,
+  )
+  if (
+    !registration.inserted
+    && (registration.event.processingResult === 'applied'
+      || registration.event.processingResult === 'ignored')
+  ) {
+    return {
+      duplicate: true,
+      processingResult: registration.event.processingResult,
+      customer: existingSubscription
+        ? getBillingCustomer(database, existingSubscription.organizationId)
+        : null,
+      subscription: existingSubscription,
+    }
+  }
+
+  const processedAt = stripeTimestamp((input.now ?? Date.now)(), 'processedAt')
+  try {
+    return database.transaction((): StripeBillingProjectionResult => {
+      const subscription = getBillingSubscriptionByStripeId(
+        database,
+        input.stripeSubscriptionId,
+      )
+      if (!subscription) throw new Error('Stripe invoice subscription was not found')
+      const eventIsNewer = subscription.lastInvoiceEventCreatedAt === null
+        || registration.event.eventCreatedAt > subscription.lastInvoiceEventCreatedAt
+        || (
+          registration.event.eventCreatedAt === subscription.lastInvoiceEventCreatedAt
+          && registration.event.stripeEventId > (subscription.lastInvoiceEventId ?? '')
+        )
+      if (!eventIsNewer) {
+        completeStripeEvent(database, {
+          stripeEventId: registration.event.stripeEventId,
+          processingResult: 'ignored',
+          processingMessage: 'stale invoice projection',
+          processedAt,
+        })
+        return {
+          duplicate: !registration.inserted,
+          processingResult: 'ignored',
+          customer: getBillingCustomer(database, subscription.organizationId),
+          subscription,
+        }
+      }
+
+      let paymentState: BillingSubscription['paymentState'] = 'current'
+      let graceEndsAt: number | null = null
+      if (input.event.type === 'invoice.payment_failed') {
+        graceEndsAt = subscription.graceEndsAt !== null
+          ? subscription.graceEndsAt
+          : registration.event.eventCreatedAt + stripePaymentGraceDurationMs
+        paymentState = graceEndsAt > processedAt ? 'grace' : 'delinquent'
+      }
+      database.prepare(`
+        UPDATE subscription
+        SET payment_state = ?, grace_ends_at = ?,
+            last_invoice_event_created_at = ?, last_invoice_event_id = ?,
+            updated_at = ?
+        WHERE organization_id = ?
+      `).run(
+        paymentState,
+        graceEndsAt,
+        registration.event.eventCreatedAt,
+        registration.event.stripeEventId,
+        processedAt,
+        subscription.organizationId,
+      )
+      const updated = getBillingSubscription(database, subscription.organizationId)
+      if (!updated) throw new Error('Billing subscription could not be resolved')
+      reconcileStripeAssignedEntitlements(database, updated, processedAt)
+      completeStripeEvent(database, {
+        stripeEventId: registration.event.stripeEventId,
+        processingResult: 'applied',
+        processingMessage: input.event.type === 'invoice.paid'
+          ? 'subscription payment restored'
+          : paymentState === 'grace'
+            ? 'subscription entered fixed payment grace'
+            : 'subscription payment grace already expired',
+        processedAt,
+      })
+      return {
+        duplicate: !registration.inserted,
+        processingResult: 'applied',
+        customer: getBillingCustomer(database, subscription.organizationId),
+        subscription: updated,
+      }
+    }).immediate()
+  } catch (error) {
+    const current = getStripeEvent(database, registration.event.stripeEventId)
+    if (current?.attemptCount === registration.event.attemptCount) {
+      failStripeEvent(database, {
+        ...input.event,
+        processingMessage: error instanceof Error ? error.message : 'invoice projection failed',
+        now: () => processedAt,
+      })
+    }
+    throw error
+  }
+}
+
+export function assignStripeOperatorSeat(
+  database: Database,
+  options: OrganizationAccessOptions & { membershipId: string; now?: () => number },
+): OperatorEntitlement {
+  requireOrganizationAdmin(database, options)
+  const membershipId = options.membershipId.trim()
+  const timestamp = stripeTimestamp((options.now ?? Date.now)(), 'seat assignment timestamp')
+  return database.transaction(() => {
+    const target = database.query<{ id: string }, [string, string]>(`
+      SELECT member.id FROM member
+      LEFT JOIN organization_member_state ON organization_member_state.member_id = member.id
+      WHERE member.id = ? AND member.organizationId = ?
+        AND COALESCE(organization_member_state.disabled, 0) = 0
+      LIMIT 1
+    `).get(membershipId, options.organizationId)
+    if (!target) throw new OrganizationAccessDeniedError()
+    const subscription = getBillingSubscription(database, options.organizationId)
+    if (!subscription) throw new BillingSubscriptionRequiredError()
+    const existing = getOperatorEntitlement(database, {
+      membershipId,
+      organizationId: options.organizationId,
+    })
+    const assignedSeats = database.query<{ count: number }, [string, string]>(`
+      SELECT COUNT(*) AS count FROM entitlement
+      WHERE organization_id = ? AND source = 'stripe' AND state != 'revoked'
+        AND membership_id != ?
+    `).get(options.organizationId, membershipId)?.count ?? 0
+    if (assignedSeats >= subscription.entitledSeats) throw new OperatorSeatCapacityError()
+    const access = stripeEntitlementAccess(subscription, timestamp)
+    database.prepare(`
+      INSERT INTO entitlement (
+        membership_id, organization_id, kind, state, source,
+        starts_at, ends_at, created_at, updated_at
+      ) VALUES (?, ?, 'operator', ?, 'stripe', ?, ?, ?, ?)
+      ON CONFLICT(membership_id) DO UPDATE SET
+        organization_id = excluded.organization_id,
+        kind = excluded.kind,
+        state = excluded.state,
+        source = excluded.source,
+        starts_at = excluded.starts_at,
+        ends_at = excluded.ends_at,
+        updated_at = excluded.updated_at
+    `).run(
+      membershipId,
+      options.organizationId,
+      access.state,
+      timestamp,
+      access.endsAt,
+      existing?.createdAt ?? timestamp,
+      timestamp,
+    )
+    recordAuditEvent(database, {
+      userId: options.userId,
+      organizationId: options.organizationId,
+      action: 'billing.operator_seat.assigned',
+      targetType: 'membership',
+      targetId: membershipId,
+      metadata: { source: 'stripe' },
+      now: () => timestamp,
+    })
+    const entitlement = getOperatorEntitlement(database, {
+      membershipId,
+      organizationId: options.organizationId,
+    })
+    if (!entitlement) throw new Error('Operator seat assignment could not be resolved')
+    return entitlement
+  }).immediate()
+}
+
+export function revokeStripeOperatorSeat(
+  database: Database,
+  options: OrganizationAccessOptions & { membershipId: string; now?: () => number },
+): OperatorEntitlement | null {
+  requireOrganizationAdmin(database, options)
+  const membershipId = options.membershipId.trim()
+  const timestamp = stripeTimestamp((options.now ?? Date.now)(), 'seat revocation timestamp')
+  return database.transaction(() => {
+    const result = database.prepare(`
+      UPDATE entitlement SET state = 'revoked', updated_at = ?
+      WHERE membership_id = ? AND organization_id = ?
+        AND source = 'stripe' AND state != 'revoked'
+    `).run(timestamp, membershipId, options.organizationId)
+    if (result.changes !== 1) return null
+    recordAuditEvent(database, {
+      userId: options.userId,
+      organizationId: options.organizationId,
+      action: 'billing.operator_seat.revoked',
+      targetType: 'membership',
+      targetId: membershipId,
+      metadata: { source: 'stripe' },
+      now: () => timestamp,
+    })
+    return getOperatorEntitlement(database, {
+      membershipId,
+      organizationId: options.organizationId,
+    })
+  }).immediate()
+}
+
 export function getOrganizationMembers(
   database: Database,
   options: OrganizationAccessOptions,
-): { actorRole: OrganizationRole; members: OrganizationMemberSummary[] } {
+): {
+  actorRole: OrganizationRole
+  operatorSeats: OrganizationOperatorSeatSummary | null
+  members: OrganizationMemberSummary[]
+} {
   const actorRole = requireOrganizationAdmin(database, options)
   const rows = database.query<{
     membership_id: string
@@ -3576,6 +3901,9 @@ export function getOrganizationMembers(
     role: OrganizationRole
     disabled: number
     joined_at: number
+    entitlement_source: OperatorEntitlementSource | null
+    entitlement_state: OperatorEntitlementState | null
+    entitlement_ends_at: number | null
   }, [string]>(`
     SELECT member.id AS membership_id,
       member.userId AS user_id,
@@ -3583,28 +3911,68 @@ export function getOrganizationMembers(
       user.email,
       member.role,
       COALESCE(organization_member_state.disabled, 0) AS disabled,
-      member.createdAt AS joined_at
+      member.createdAt AS joined_at,
+      entitlement.source AS entitlement_source,
+      entitlement.state AS entitlement_state,
+      entitlement.ends_at AS entitlement_ends_at
     FROM member
     INNER JOIN user ON user.id = member.userId
     LEFT JOIN organization_member_state
       ON organization_member_state.member_id = member.id
+    LEFT JOIN entitlement ON entitlement.membership_id = member.id
     WHERE member.organizationId = ?
     ORDER BY
       CASE member.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,
       user.name COLLATE NOCASE,
       member.id
   `).all(options.organizationId)
+  const subscription = getBillingSubscription(database, options.organizationId)
+  const now = Date.now()
+  const assignedSeats = subscription
+    ? database.query<{ count: number }, [string]>(`
+        SELECT COUNT(*) AS count FROM entitlement
+        WHERE organization_id = ? AND source = 'stripe' AND state != 'revoked'
+      `).get(options.organizationId)?.count ?? 0
+    : 0
+  const effectivePaymentState = subscription?.paymentState === 'grace'
+    && subscription.graceEndsAt !== null
+    && subscription.graceEndsAt <= now
+    ? 'delinquent'
+    : subscription?.paymentState
   return {
     actorRole,
-    members: rows.map(row => ({
-      membershipId: row.membership_id,
-      userId: row.user_id,
-      name: row.name,
-      email: row.email,
-      role: row.role,
-      disabled: row.disabled === 1,
-      joinedAt: Number(row.joined_at),
-    })),
+    operatorSeats: subscription ? {
+      purchased: subscription.entitledSeats,
+      assigned: assignedSeats,
+      paymentState: effectivePaymentState ?? subscription.paymentState,
+      graceEndsAt: subscription.graceEndsAt,
+    } : null,
+    members: rows.map(row => {
+      const entitlementEndsAt = row.entitlement_ends_at === null
+        ? null
+        : Number(row.entitlement_ends_at)
+      const entitlementState = row.entitlement_state === 'grace'
+        && entitlementEndsAt !== null
+        && entitlementEndsAt <= now
+        ? 'suspended'
+        : row.entitlement_state
+      return {
+        membershipId: row.membership_id,
+        userId: row.user_id,
+        name: row.name,
+        email: row.email,
+        role: row.role,
+        disabled: row.disabled === 1,
+        joinedAt: Number(row.joined_at),
+        operatorEntitlement: row.entitlement_source && entitlementState
+          ? {
+              source: row.entitlement_source,
+              state: entitlementState,
+              endsAt: entitlementEndsAt,
+            }
+          : null,
+      }
+    }),
   }
 }
 

@@ -3,6 +3,7 @@ import Stripe from 'stripe'
 import type { Database } from 'bun:sqlite'
 import {
   applyStripeBillingProjection,
+  applyStripeInvoiceProjection,
   failStripeEvent,
   getBillingCustomerByStripeId,
   getStripeEvent,
@@ -153,6 +154,18 @@ function subscriptionProjection(
   }
 }
 
+function invoiceSubscriptionId(object: JsonRecord): string {
+  const legacy = expandableId(object.subscription)
+  if (legacy) return legacy
+  const parent = isRecord(object.parent) ? object.parent : null
+  const details = parent && isRecord(parent.subscription_details)
+    ? parent.subscription_details
+    : null
+  const current = details ? expandableId(details.subscription) : null
+  if (!current) throw new TypeError('Stripe invoice subscription id is required')
+  return current
+}
+
 export class StripeWebhookProcessor {
   readonly #database: Database
   readonly #webhookSecret: string
@@ -216,10 +229,21 @@ export class StripeWebhookProcessor {
         case 'customer.subscription.deleted':
           projection = subscriptionProjection(this.#database, object)
           break
-        default:
-          if (event.type === 'invoice.paid' || event.type === 'invoice.payment_failed') {
-            throw new Error('Stripe invoice grace projection is not implemented')
+        case 'invoice.paid':
+        case 'invoice.payment_failed': {
+          const result = applyStripeInvoiceProjection(this.#database, {
+            event: { ...eventInput, type: event.type },
+            stripeSubscriptionId: invoiceSubscriptionId(object),
+            now: this.#now,
+          })
+          return {
+            eventId: event.id,
+            type: event.type,
+            duplicate: !registration.inserted,
+            processingResult: result.processingResult,
           }
+        }
+        default:
           ignoreStripeEvent(this.#database, {
             ...eventInput,
             processingMessage: 'event type is not projected',

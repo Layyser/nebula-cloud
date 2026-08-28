@@ -303,10 +303,17 @@ export interface OrganizationMember {
   role: OrganizationRole
   disabled: boolean
   joinedAt: number
+  operatorEntitlement: Pick<OperatorEntitlementSummary, 'source' | 'state' | 'endsAt'> | null
 }
 
 export interface OrganizationMembersResponse {
   actorRole: OrganizationRole
+  operatorSeats: {
+    purchased: number
+    assigned: number
+    paymentState: 'current' | 'grace' | 'delinquent'
+    graceEndsAt: number | null
+  } | null
   members: OrganizationMember[]
 }
 

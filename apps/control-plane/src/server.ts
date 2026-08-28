@@ -36,9 +36,11 @@ import {
 } from '@nebula-cloud/contracts'
 import {
   OrganizationAccessDeniedError,
+  BillingSubscriptionRequiredError,
   ContactRateLimitError,
   OrganizationMemberMutationError,
   OperatorEntitlementRequiredError,
+  OperatorSeatCapacityError,
   publishedServiceMaximumTTLSeconds,
   publishedServiceMinimumTTLSeconds,
   UsageAccessDeniedError,
@@ -59,6 +61,7 @@ const contactAdministrationMemberPath = /^\/internal\/v1\/contact-requests\/([^/
 const organizationUsagePath = /^\/api\/organizations\/([^/]+)\/usage$/
 const organizationMembersPath = /^\/api\/organizations\/([^/]+)\/members$/
 const organizationMemberPath = /^\/api\/organizations\/([^/]+)\/members\/([^/]+)$/
+const organizationOperatorSeatPath = /^\/api\/organizations\/([^/]+)\/entitlements\/operator\/([^/]+)$/
 const organizationOperatorsPath = /^\/api\/organizations\/([^/]+)\/operators$/
 const organizationDashboardPath = /^\/api\/organizations\/([^/]+)\/dashboard$/
 const organizationAdminPath = /^\/api\/organizations\/([^/]+)\/admin$/
@@ -165,6 +168,16 @@ export interface ControlPlaneHandlerOptions {
     membershipId: string
     disabled: boolean
   }) => OrganizationMembersResponse['members'][number]
+  assignStripeOperatorSeat?: (input: {
+    userId: string
+    organizationId: string
+    membershipId: string
+  }) => OperatorEntitlementSummary
+  revokeStripeOperatorSeat?: (input: {
+    userId: string
+    organizationId: string
+    membershipId: string
+  }) => OperatorEntitlementSummary | null
   getOrganizationOperators?: (input: {
     userId: string
     organizationId: string
@@ -534,6 +547,8 @@ export function createControlPlaneHandler({
   getOrganizationUsage,
   getOrganizationMembers,
   setOrganizationMemberDisabled,
+  assignStripeOperatorSeat,
+  revokeStripeOperatorSeat,
   getOrganizationOperators,
   getOrganizationDashboard,
   getOrganizationAdmin,
@@ -1105,6 +1120,7 @@ export function createControlPlaneHandler({
 
     const membersMatch = url.pathname.match(organizationMembersPath)
     const memberMatch = url.pathname.match(organizationMemberPath)
+    const operatorSeatMatch = url.pathname.match(organizationOperatorSeatPath)
     const operatorsMatch = url.pathname.match(organizationOperatorsPath)
     const dashboardMatch = url.pathname.match(organizationDashboardPath)
     const adminMatch = url.pathname.match(organizationAdminPath)
@@ -1112,7 +1128,7 @@ export function createControlPlaneHandler({
     const joinCodeMatch = url.pathname.match(organizationJoinCodePath)
     const organizationMatch = url.pathname.match(organizationPath)
     if (
-      membersMatch || memberMatch || operatorsMatch || dashboardMatch || adminMatch || auditMatch
+      membersMatch || memberMatch || operatorSeatMatch || operatorsMatch || dashboardMatch || adminMatch || auditMatch
       || joinCodeMatch || (organizationMatch && request.method === 'PATCH')
     ) {
       const session = resolveSession ? await resolveSession(request) : null
@@ -1120,7 +1136,8 @@ export function createControlPlaneHandler({
         return json({ error: 'authentication required', code: 'authentication_required' } satisfies CloudErrorResponse, 401)
       }
       const encodedOrganizationId = (
-        membersMatch?.[1] ?? memberMatch?.[1] ?? operatorsMatch?.[1] ?? dashboardMatch?.[1]
+        membersMatch?.[1] ?? memberMatch?.[1] ?? operatorSeatMatch?.[1]
+        ?? operatorsMatch?.[1] ?? dashboardMatch?.[1]
         ?? adminMatch?.[1] ?? auditMatch?.[1] ?? joinCodeMatch?.[1] ?? organizationMatch?.[1]
       )!
       let organizationId: string
@@ -1153,6 +1170,41 @@ export function createControlPlaneHandler({
             membershipId,
             disabled: body.disabled,
           }))
+        }
+        if (
+          (request.method === 'PUT' || request.method === 'DELETE')
+          && operatorSeatMatch
+        ) {
+          let membershipId: string
+          try {
+            membershipId = decodeURIComponent(operatorSeatMatch[2])
+          } catch {
+            return json({ error: 'membership id is invalid', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+          }
+          if (!membershipId.trim()) {
+            return json({ error: 'membership id is required', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+          }
+          if (request.method === 'PUT') {
+            if (!assignStripeOperatorSeat) {
+              return json({ error: 'paid seat assignment is unavailable', code: 'seat_assignment_unavailable', retryable: true } satisfies CloudErrorResponse, 503)
+            }
+            return json(assignStripeOperatorSeat({
+              userId: session.userId,
+              organizationId,
+              membershipId,
+            }))
+          }
+          if (!revokeStripeOperatorSeat) {
+            return json({ error: 'paid seat assignment is unavailable', code: 'seat_assignment_unavailable', retryable: true } satisfies CloudErrorResponse, 503)
+          }
+          const entitlement = revokeStripeOperatorSeat({
+            userId: session.userId,
+            organizationId,
+            membershipId,
+          })
+          return entitlement
+            ? json(entitlement)
+            : json({ error: 'paid Operator seat not found', code: 'not_found' } satisfies CloudErrorResponse, 404)
         }
         if (request.method === 'GET' && operatorsMatch && getOrganizationOperators) {
           return json(getOrganizationOperators({ userId: session.userId, organizationId }))
@@ -1202,6 +1254,12 @@ export function createControlPlaneHandler({
         }
         if (error instanceof OrganizationMemberMutationError) {
           return json({ error: error.message, code: error.code } satisfies CloudErrorResponse, 400)
+        }
+        if (error instanceof OperatorSeatCapacityError) {
+          return json({ error: error.message, code: error.code } satisfies CloudErrorResponse, 409)
+        }
+        if (error instanceof BillingSubscriptionRequiredError) {
+          return json({ error: error.message, code: error.code } satisfies CloudErrorResponse, 409)
         }
         return json({ error: 'organization operation failed', code: 'organization_operation_failed' } satisfies CloudErrorResponse, 500)
       }

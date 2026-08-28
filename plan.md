@@ -599,11 +599,11 @@ stripe_event
       code and registrations.
 - [x] Add a signed webhook endpoint. Persist the event ID before processing;
       make handlers idempotent and tolerant of duplicates and out-of-order events.
-- [ ] Project Stripe state into local subscription/entitlement tables. Never call
+- [x] Project Stripe state into local subscription/entitlement tables. Never call
       Stripe synchronously on every authorization request.
 - [ ] At minimum handle successful checkout, invoice paid/failed, subscription
       created/updated/deleted, and customer/tax detail updates.
-- [ ] Provision only after a local entitlement becomes active. Failed payment
+- [x] Provision only after a local entitlement becomes active. Failed payment
       moves through a documented grace period before suspension; never delete
       workspace data automatically because a card failed.
 - [ ] Configure Stripe Customer Portal for payment methods, tax IDs, invoices,
@@ -620,6 +620,10 @@ stripe_event
 **Beta shortcut:** an admin-created `source=beta` entitlement uses exactly the
 same authorization path as Stripe. It expires on a specific date and cannot
 silently become permanent.
+
+**Failed-payment policy:** the first failed renewal starts a fixed 14-day grace
+window. Retry failures never extend it; a paid invoice restores assigned seats.
+After grace, access is suspended but persistent workspace data is retained.
 
 **Acceptance:** payment state and workspace access remain correct when the user
 closes Checkout, webhooks are replayed, events arrive out of order, or Stripe is

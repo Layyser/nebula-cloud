@@ -53,6 +53,7 @@ interface OrganizationDashboardProps {
   organizationId: string
   organizationName: string
   previewOverview?: OrganizationDashboardResponse
+  previewMembers?: OrganizationMembersResponse
   onBackgroundChange?: (overShader: boolean) => void
 }
 
@@ -110,7 +111,12 @@ export function OrganizationDashboard(props: OrganizationDashboardProps) {
           description={viewDescription(view)}
           onClose={() => setView('home')}
         >
-          {view === 'users' && <UsersView organizationId={props.organizationId} />}
+          {view === 'users' && (
+            <UsersView
+              organizationId={props.organizationId}
+              previewMembers={props.previewMembers}
+            />
+          )}
           {view === 'operators' && <OperatorsView organizationId={props.organizationId} />}
           {view === 'providers' && <ProvidersView />}
           {view === 'organization' && (
@@ -384,17 +390,29 @@ function openDashboardCard(
   setView(id)
 }
 
-function UsersView({ organizationId }: { organizationId: string }) {
-  const [state, setState] = useState<LoadState<OrganizationMembersResponse>>({ status: 'loading' })
+function UsersView({
+  organizationId,
+  previewMembers,
+}: {
+  organizationId: string
+  previewMembers?: OrganizationMembersResponse
+}) {
+  const [state, setState] = useState<LoadState<OrganizationMembersResponse>>(
+    previewMembers ? { status: 'ready', data: previewMembers } : { status: 'loading' },
+  )
   const [pendingMember, setPendingMember] = useState('')
   const load = useCallback(async () => {
+    if (previewMembers) {
+      setState({ status: 'ready', data: previewMembers })
+      return
+    }
     setState({ status: 'loading' })
     try {
       setState({ status: 'ready', data: await getJson<OrganizationMembersResponse>(`/api/organizations/${encodeURIComponent(organizationId)}/members`) })
     } catch (error) {
       setState({ status: 'error', message: errorMessage(error) })
     }
-  }, [organizationId])
+  }, [organizationId, previewMembers])
   useEffect(() => { void load() }, [load])
 
   const toggle = async (member: OrganizationMember) => {
@@ -414,12 +432,47 @@ function UsersView({ organizationId }: { organizationId: string }) {
     }
   }
 
+  const updatePaidSeat = async (member: OrganizationMember, assigned: boolean) => {
+    if (previewMembers) return
+    setPendingMember(`seat:${member.membershipId}`)
+    try {
+      await getJson(
+        `/api/organizations/${encodeURIComponent(organizationId)}/entitlements/operator/${encodeURIComponent(member.membershipId)}`,
+        { method: assigned ? 'DELETE' : 'PUT' },
+      )
+      await load()
+    } catch (error) {
+      setState({ status: 'error', message: errorMessage(error) })
+    } finally {
+      setPendingMember('')
+    }
+  }
+
   return <LoadBoundary state={state} onRetry={load}>{data => data.members.length === 0 ? (
     <EmptyState appearance="panel" size="page" title="No organization members" description="Members will appear here after joining this organization." />
   ) : (
-    <div className="space-y-2">
+    <div className="space-y-3">
+      {data.operatorSeats && (
+        <Surface variant="panel" density="default" radius="surface" className="flex flex-wrap items-center gap-4">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-control)] bg-[var(--color-surface-raised)] text-[var(--color-text-muted)]">
+            <CircleDollarSign size={17} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <strong className="block text-sm text-[var(--color-text-primary)]">Operator seats</strong>
+            <span className="mt-1 block text-xs text-[var(--color-text-muted)]">
+              {data.operatorSeats.assigned} of {data.operatorSeats.purchased} purchased seats assigned
+              {data.operatorSeats.paymentState === 'grace' && data.operatorSeats.graceEndsAt
+                ? ` · Payment grace ends ${new Date(data.operatorSeats.graceEndsAt).toLocaleDateString()}`
+                : ''}
+            </span>
+          </span>
+          <StatusBadge tone={data.operatorSeats.paymentState === 'current' ? 'success' : data.operatorSeats.paymentState === 'grace' ? 'warning' : 'danger'}>
+            {data.operatorSeats.paymentState === 'current' ? 'Paid' : data.operatorSeats.paymentState === 'grace' ? 'Payment grace' : 'Payment overdue'}
+          </StatusBadge>
+        </Surface>
+      )}
       {data.members.map(member => (
-        <Surface key={member.membershipId} variant="panel" density="default" radius="surface" className="flex items-center gap-4">
+        <Surface key={member.membershipId} variant="panel" density="default" radius="surface" className="flex flex-wrap items-center gap-4">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--color-surface-raised)] text-sm font-semibold text-[var(--color-text-primary)]">
             {member.name.slice(0, 1).toUpperCase()}
           </span>
@@ -430,9 +483,43 @@ function UsersView({ organizationId }: { organizationId: string }) {
             </span>
             <span className="mt-1 block truncate text-xs text-[var(--color-text-muted)]">{member.email}</span>
           </span>
-          <StatusBadge tone={member.disabled ? 'danger' : 'success'}>
-            {member.disabled ? 'Disabled' : 'Active'}
-          </StatusBadge>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <StatusBadge tone={member.disabled ? 'danger' : 'success'}>
+              {member.disabled ? 'Disabled' : 'Active'}
+            </StatusBadge>
+            <StatusBadge tone={member.operatorEntitlement && member.operatorEntitlement.state !== 'revoked'
+              ? member.operatorEntitlement.state === 'suspended'
+                ? 'danger'
+                : member.operatorEntitlement.state === 'grace' ? 'warning' : 'success'
+              : 'neutral'}>
+              {member.operatorEntitlement && member.operatorEntitlement.state !== 'revoked'
+                ? member.operatorEntitlement.source === 'stripe'
+                  ? member.operatorEntitlement.state === 'suspended'
+                    ? 'Seat suspended'
+                    : member.operatorEntitlement.state === 'grace' ? 'Paid seat · grace' : 'Paid seat'
+                  : `${member.operatorEntitlement.source} access`
+                : 'No Operator seat'}
+            </StatusBadge>
+          </div>
+          {data.operatorSeats && (() => {
+            const assigned = Boolean(
+              member.operatorEntitlement?.source === 'stripe'
+              && member.operatorEntitlement.state !== 'revoked',
+            )
+            if (member.disabled && !assigned) return null
+            const capacityReached = data.operatorSeats.assigned >= data.operatorSeats.purchased
+            return (
+              <Button
+                variant={assigned ? 'secondary' : 'primary'}
+                size="compact"
+                disabled={pendingMember === `seat:${member.membershipId}` || (!assigned && capacityReached)}
+                onClick={() => { void updatePaidSeat(member, assigned) }}
+              >
+                {pendingMember === `seat:${member.membershipId}` ? <Spinner size="compact" label="Updating paid seat" /> : null}
+                {assigned ? 'Remove seat' : 'Assign seat'}
+              </Button>
+            )
+          })()}
           {member.role !== 'owner' && (
             <Button variant={member.disabled ? 'secondary' : 'danger'} size="compact" disabled={pendingMember === member.membershipId} onClick={() => { void toggle(member) }}>
               {pendingMember === member.membershipId ? <Spinner size="compact" label="Updating member" /> : null}

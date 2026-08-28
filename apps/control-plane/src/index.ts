@@ -4,6 +4,7 @@ import {
 } from './server'
 import { initializePersistence } from './persistence'
 import {
+  assignStripeOperatorSeat,
   assignWorkspaceWorker,
   createContactRequest,
   deleteContactRequestsCreatedBefore,
@@ -35,6 +36,7 @@ import {
   resolveWorkspaceAccess,
   revokePublishedService,
   revokeOperatorEntitlement,
+  revokeStripeOperatorSeat,
   rotateOrganizationJoinCode,
   setOrganizationMemberDisabled,
   setContactNotificationResult,
@@ -774,6 +776,8 @@ const controlPlaneHandler = createControlPlaneHandler({
     })
     return member
   },
+  assignStripeOperatorSeat: input => assignStripeOperatorSeat(database, input),
+  revokeStripeOperatorSeat: input => revokeStripeOperatorSeat(database, input),
   getOrganizationOperators: input => ({
     operators: getOrganizationOperators(database, input),
   }),

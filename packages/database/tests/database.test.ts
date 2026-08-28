@@ -1,6 +1,8 @@
 import { expect, test } from 'bun:test'
 import {
   applyStripeBillingProjection,
+  applyStripeInvoiceProjection,
+  assignStripeOperatorSeat,
   assignWorkspaceWorker,
   claimProvisioningJob,
   ContactRateLimitError,
@@ -33,6 +35,7 @@ import {
   registerStripeEvent,
   revokePublishedService,
   revokeOperatorEntitlement,
+  revokeStripeOperatorSeat,
   rotateOrganizationJoinCode,
   resolveWorkspaceAccess,
   setWorkerHostScheduling,
@@ -74,7 +77,7 @@ test('applies the minimal application schema idempotently', () => {
     expect(tables).toContain('stripe_event')
     expect(database.query<{ count: number }, []>(
       'SELECT COUNT(*) AS count FROM nebula_migration',
-    ).get()?.count).toBe(19)
+    ).get()?.count).toBe(20)
   } finally {
     database.close()
   }
@@ -1043,6 +1046,197 @@ test('persists Stripe events before idempotent and out-of-order billing projecti
       processingResult: 'ignored',
       attemptCount: 2,
     })
+  } finally {
+    database.close()
+  }
+})
+
+test('assigns purchased seats explicitly and applies one fixed fourteen-day payment grace', () => {
+  const database = openCloudDatabase({ path: ':memory:' })
+  try {
+    database.exec(`
+      CREATE TABLE user (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL DEFAULT 'User',
+        email TEXT NOT NULL DEFAULT ''
+      );
+      CREATE TABLE organization (id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT 'Organization');
+      CREATE TABLE member (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL REFERENCES user(id),
+        organizationId TEXT NOT NULL REFERENCES organization(id),
+        role TEXT NOT NULL DEFAULT 'member',
+        createdAt INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT INTO user (id) VALUES ('owner'), ('user-1'), ('user-2'), ('user-3');
+      INSERT INTO organization (id) VALUES ('org-1');
+      INSERT INTO member (id, userId, organizationId, role) VALUES
+        ('owner-member', 'owner', 'org-1', 'owner'),
+        ('member-1', 'user-1', 'org-1', 'member'),
+        ('member-2', 'user-2', 'org-1', 'member'),
+        ('member-3', 'user-3', 'org-1', 'member');
+    `)
+    migrateCloudSchema(database)
+    const base = 1_000_000
+    const periodEnd = base + 30 * 24 * 60 * 60 * 1000
+    applyStripeBillingProjection(database, {
+      event: {
+        stripeEventId: 'evt_subscription_initial',
+        type: 'customer.subscription.created',
+        eventCreatedAt: base - 1_000,
+      },
+      organizationId: 'org-1',
+      subscription: {
+        stripeSubscriptionId: 'sub_1',
+        stripePriceId: 'price_1',
+        status: 'active',
+        entitledSeats: 2,
+        cancelAtPeriodEnd: false,
+        currentPeriodEnd: periodEnd,
+      },
+      now: () => base,
+    })
+
+    expect(() => assignStripeOperatorSeat(database, {
+      userId: 'user-1', organizationId: 'org-1', membershipId: 'member-1', now: () => base,
+    })).toThrow('The user cannot administer this organization')
+
+    for (const membershipId of ['member-1', 'member-2']) {
+      expect(assignStripeOperatorSeat(database, {
+        userId: 'owner', organizationId: 'org-1', membershipId, now: () => base,
+      })).toMatchObject({ membershipId, source: 'stripe', state: 'active' })
+    }
+    expect(() => assignStripeOperatorSeat(database, {
+      userId: 'owner', organizationId: 'org-1', membershipId: 'member-3', now: () => base,
+    })).toThrow('All purchased Operator seats are already assigned')
+
+    const failedAt = base + 1_000
+    const graceEndsAt = failedAt + 14 * 24 * 60 * 60 * 1000
+    expect(applyStripeInvoiceProjection(database, {
+      event: {
+        stripeEventId: 'evt_invoice_failed_1',
+        type: 'invoice.payment_failed',
+        eventCreatedAt: failedAt,
+      },
+      stripeSubscriptionId: 'sub_1',
+      now: () => failedAt,
+    }).subscription).toMatchObject({ paymentState: 'grace', graceEndsAt })
+    expect(getOperatorEntitlement(database, {
+      membershipId: 'member-1', organizationId: 'org-1',
+    })).toMatchObject({ state: 'grace', endsAt: graceEndsAt })
+    expect(hasActiveOperatorEntitlement(database, {
+      membershipId: 'member-1', organizationId: 'org-1', now: graceEndsAt - 1,
+    })).toBe(true)
+    expect(hasActiveOperatorEntitlement(database, {
+      membershipId: 'member-1', organizationId: 'org-1', now: graceEndsAt,
+    })).toBe(false)
+
+    expect(applyStripeInvoiceProjection(database, {
+      event: {
+        stripeEventId: 'evt_invoice_failed_2',
+        type: 'invoice.payment_failed',
+        eventCreatedAt: failedAt + 2 * 24 * 60 * 60 * 1000,
+      },
+      stripeSubscriptionId: 'sub_1',
+      now: () => failedAt + 2 * 24 * 60 * 60 * 1000,
+    }).subscription?.graceEndsAt).toBe(graceEndsAt)
+
+    expect(applyStripeInvoiceProjection(database, {
+      event: {
+        stripeEventId: 'evt_invoice_paid',
+        type: 'invoice.paid',
+        eventCreatedAt: failedAt + 3 * 24 * 60 * 60 * 1000,
+      },
+      stripeSubscriptionId: 'sub_1',
+      now: () => failedAt + 3 * 24 * 60 * 60 * 1000,
+    }).subscription).toMatchObject({ paymentState: 'current', graceEndsAt: null })
+    expect(getOperatorEntitlement(database, {
+      membershipId: 'member-1', organizationId: 'org-1',
+    })).toMatchObject({ state: 'active', endsAt: periodEnd })
+
+    const delayedFailureAt = failedAt + 4 * 24 * 60 * 60 * 1000
+    const delayedGraceEndsAt = delayedFailureAt + 14 * 24 * 60 * 60 * 1000
+    expect(applyStripeInvoiceProjection(database, {
+      event: {
+        stripeEventId: 'evt_invoice_failed_delayed',
+        type: 'invoice.payment_failed',
+        eventCreatedAt: delayedFailureAt,
+      },
+      stripeSubscriptionId: 'sub_1',
+      now: () => delayedGraceEndsAt + 1,
+    }).subscription).toMatchObject({
+      paymentState: 'delinquent',
+      graceEndsAt: delayedGraceEndsAt,
+    })
+    expect(applyStripeInvoiceProjection(database, {
+      event: {
+        stripeEventId: 'evt_invoice_failed_after_deadline',
+        type: 'invoice.payment_failed',
+        eventCreatedAt: delayedGraceEndsAt + 2,
+      },
+      stripeSubscriptionId: 'sub_1',
+      now: () => delayedGraceEndsAt + 2,
+    }).subscription).toMatchObject({
+      paymentState: 'delinquent',
+      graceEndsAt: delayedGraceEndsAt,
+    })
+    expect(getOrganizationMembers(database, {
+      userId: 'owner', organizationId: 'org-1',
+    })).toMatchObject({
+      operatorSeats: {
+        purchased: 2,
+        assigned: 2,
+        paymentState: 'delinquent',
+        graceEndsAt: delayedGraceEndsAt,
+      },
+      members: expect.arrayContaining([
+        expect.objectContaining({
+          membershipId: 'member-1',
+          operatorEntitlement: expect.objectContaining({ state: 'suspended' }),
+        }),
+      ]),
+    })
+    applyStripeInvoiceProjection(database, {
+      event: {
+        stripeEventId: 'evt_invoice_paid_after_deadline',
+        type: 'invoice.paid',
+        eventCreatedAt: delayedGraceEndsAt + 3,
+      },
+      stripeSubscriptionId: 'sub_1',
+      now: () => delayedGraceEndsAt + 3,
+    })
+
+    expect(() => applyStripeBillingProjection(database, {
+      event: {
+        stripeEventId: 'evt_quantity_too_small',
+        type: 'customer.subscription.updated',
+        eventCreatedAt: failedAt + 4 * 24 * 60 * 60 * 1000,
+      },
+      organizationId: 'org-1',
+      subscription: {
+        stripeSubscriptionId: 'sub_1',
+        stripePriceId: 'price_1',
+        status: 'active',
+        entitledSeats: 1,
+        cancelAtPeriodEnd: false,
+        currentPeriodEnd: periodEnd,
+      },
+    })).toThrow('Stripe seat quantity cannot be lower than assigned Operator seats')
+
+    expect(revokeStripeOperatorSeat(database, {
+      userId: 'owner', organizationId: 'org-1', membershipId: 'member-1', now: () => base + 5,
+    })).toMatchObject({ source: 'stripe', state: 'revoked' })
+    expect(assignStripeOperatorSeat(database, {
+      userId: 'owner', organizationId: 'org-1', membershipId: 'member-3', now: () => base + 6,
+    })).toMatchObject({ membershipId: 'member-3', source: 'stripe', state: 'active' })
+    expect(listOrganizationAuditEvents(database, {
+      userId: 'owner', organizationId: 'org-1', limit: 20,
+    }).map(event => event.action).sort()).toEqual([
+      'billing.operator_seat.assigned',
+      'billing.operator_seat.assigned',
+      'billing.operator_seat.assigned',
+      'billing.operator_seat.revoked',
+    ])
   } finally {
     database.close()
   }

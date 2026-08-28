@@ -4,7 +4,10 @@ import type {
   RuntimeSubscription,
   RuntimeTransport,
 } from '@nebula/runtime-ui/transport'
-import type { OrganizationDashboardResponse } from '@nebula-cloud/contracts'
+import type {
+  OrganizationDashboardResponse,
+  OrganizationMembersResponse,
+} from '@nebula-cloud/contracts'
 
 export const cloudPreviewModes = [
   'runtime',
@@ -44,6 +47,70 @@ export const cloudPreviewDashboard: OrganizationDashboardResponse = {
   },
   provisioningFailures: 1,
   workers: { healthy: 2, total: 2 },
+}
+
+export const cloudPreviewMembers: OrganizationMembersResponse = {
+  actorRole: 'owner',
+  operatorSeats: {
+    purchased: 4,
+    assigned: 3,
+    paymentState: 'grace',
+    graceEndsAt: Date.UTC(2026, 8, 10),
+  },
+  members: [
+    {
+      membershipId: 'member-owner',
+      userId: 'user-owner',
+      name: 'Jorge',
+      email: 'jorge@nebula.example',
+      role: 'owner',
+      disabled: false,
+      joinedAt: Date.UTC(2026, 1, 14),
+      operatorEntitlement: {
+        source: 'stripe',
+        state: 'grace',
+        endsAt: Date.UTC(2026, 8, 10),
+      },
+    },
+    {
+      membershipId: 'member-admin',
+      userId: 'user-admin',
+      name: 'Amara Chen',
+      email: 'amara@nebula.example',
+      role: 'admin',
+      disabled: false,
+      joinedAt: Date.UTC(2026, 2, 3),
+      operatorEntitlement: {
+        source: 'stripe',
+        state: 'grace',
+        endsAt: Date.UTC(2026, 8, 10),
+      },
+    },
+    {
+      membershipId: 'member-user',
+      userId: 'user-member',
+      name: 'Noah Williams',
+      email: 'noah@nebula.example',
+      role: 'member',
+      disabled: false,
+      joinedAt: Date.UTC(2026, 3, 22),
+      operatorEntitlement: {
+        source: 'stripe',
+        state: 'grace',
+        endsAt: Date.UTC(2026, 8, 10),
+      },
+    },
+    {
+      membershipId: 'member-unassigned',
+      userId: 'user-unassigned',
+      name: 'Mina Patel',
+      email: 'mina@nebula.example',
+      role: 'member',
+      disabled: false,
+      joinedAt: Date.UTC(2026, 5, 9),
+      operatorEntitlement: null,
+    },
+  ],
 }
 
 const previewChats = [

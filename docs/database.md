@@ -70,21 +70,31 @@ verification details to the sender. The currently projected event set is:
 
 - `customer.created` and `customer.updated`;
 - `checkout.session.completed`; and
-- `customer.subscription.created`, `.updated`, and `.deleted`.
+- `customer.subscription.created`, `.updated`, and `.deleted`;
+- `invoice.paid` and `invoice.payment_failed`.
 
 Customer, Checkout, or Subscription metadata must carry
 `nubols_organization_id` until an existing Stripe customer mapping can resolve
 the organization. Nubols subscriptions require exactly one Stripe Price, and
 its quantity becomes the local `entitled_seats` snapshot.
 
+Owners and admins explicitly assign the projected subscription quantity through
+`PUT /api/organizations/:organizationId/entitlements/operator/:membershipId`
+and remove an assignment with `DELETE` on the same route. A quantity reduction
+below the current assignment count is rejected instead of silently choosing a
+member to suspend.
+
+The first `invoice.payment_failed` event starts one fixed 14-day grace period
+for every assigned paid seat. Later failed retry events update the invoice
+cursor but never extend that deadline. `invoice.paid` clears grace and restores
+assigned seats when the subscription itself is active or trialing. At the grace
+deadline the entitlement's effective end time blocks provisioning, Runtime,
+Console, and HTTP/TCP publication access; workspace data is not deleted.
+
 The inbox intentionally stores bounded processing metadata instead of the raw
 webhook payload. Nubols only returns webhook success after projection; a crash
 or failure therefore relies on Stripe redelivery (or an explicit resend) to
-provide the signed payload again. Do not subscribe this endpoint to
-`invoice.paid` or `invoice.payment_failed` yet: those recognized events are
-durably marked failed and return a retryable response until the grace-state
-projector exists. `source=stripe` Operator entitlement projection is also
-separate work because paid seats need an explicit membership-assignment policy.
+provide the signed payload again.
 
 Stripe requires signature verification against the unmodified request body,
 and documents subscription lifecycle events as asynchronous webhook signals:

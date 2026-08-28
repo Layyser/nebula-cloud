@@ -119,14 +119,22 @@ test('verifies, normalizes, deduplicates, and orders Stripe billing webhooks', a
       object: 'event',
       created: 300,
       type: 'invoice.payment_failed',
-      data: { object: { id: 'in_1', object: 'invoice', customer: 'cus_1' } },
+      data: {
+        object: {
+          id: 'in_1',
+          object: 'invoice',
+          customer: 'cus_1',
+          parent: { subscription_details: { subscription: 'sub_1' } },
+        },
+      },
     })
-    await expect(processor.process(invoice.body, invoice.signature)).rejects.toThrow(
-      'Stripe invoice grace projection is not implemented',
-    )
+    expect(await processor.process(invoice.body, invoice.signature)).toMatchObject({
+      duplicate: false,
+      processingResult: 'applied',
+    })
     expect(getStripeEvent(database, 'evt_invoice')).toMatchObject({
-      processingResult: 'failed',
-      processingMessage: 'Stripe invoice grace projection is not implemented',
+      processingResult: 'applied',
+      processingMessage: 'subscription entered fixed payment grace',
     })
   } finally {
     database.close()

@@ -4,7 +4,9 @@ import {
   createControlPlaneHandler,
 } from '../src/server'
 import {
+  BillingSubscriptionRequiredError,
   OperatorEntitlementRequiredError,
+  OperatorSeatCapacityError,
   WorkspaceMembershipNotFoundError,
 } from '@nebula-cloud/database'
 import { StripeWebhookVerificationError } from '../src/stripeWebhook'
@@ -269,6 +271,62 @@ test('protects expiring manual Operator entitlement grants with platform authent
   }))
   expect(revoked.status).toBe(200)
   expect(revocations).toEqual([{ membershipId: 'membership-1', organizationId: 'org-1' }])
+})
+
+test('lets organization owners assign purchased seats within projected capacity', async () => {
+  const assignments: unknown[] = []
+  const revocations: unknown[] = []
+  const entitlement = {
+    membershipId: 'member-1',
+    organizationId: 'org-1',
+    kind: 'operator' as const,
+    state: 'active' as const,
+    source: 'stripe' as const,
+    startsAt: 100,
+    endsAt: 200,
+    createdAt: 100,
+    updatedAt: 100,
+  }
+  const handler = createControlPlaneHandler({
+    resolveSession: async () => ({ userId: 'owner-1', activeOrganizationId: 'org-1' }),
+    assignStripeOperatorSeat: input => {
+      if (input.membershipId === 'member-full') throw new OperatorSeatCapacityError()
+      if (input.membershipId === 'member-no-sub') throw new BillingSubscriptionRequiredError()
+      assignments.push(input)
+      return { ...entitlement, membershipId: input.membershipId }
+    },
+    revokeStripeOperatorSeat: input => {
+      revocations.push(input)
+      return { ...entitlement, membershipId: input.membershipId, state: 'revoked' }
+    },
+  })
+  const endpoint = 'http://control-plane.test/api/organizations/org-1/entitlements/operator/member-1'
+
+  const assigned = await handler(new Request(endpoint, { method: 'PUT' }))
+  expect(assigned.status).toBe(200)
+  expect(await assigned.json()).toMatchObject({ membershipId: 'member-1', source: 'stripe' })
+  expect(assignments).toEqual([{
+    userId: 'owner-1', organizationId: 'org-1', membershipId: 'member-1',
+  }])
+
+  const full = await handler(new Request(endpoint.replace('member-1', 'member-full'), {
+    method: 'PUT',
+  }))
+  expect(full.status).toBe(409)
+  expect((await full.json()).code).toBe('operator_seat_capacity_reached')
+
+  const noSubscription = await handler(new Request(
+    endpoint.replace('member-1', 'member-no-sub'),
+    { method: 'PUT' },
+  ))
+  expect(noSubscription.status).toBe(409)
+  expect((await noSubscription.json()).code).toBe('billing_subscription_required')
+
+  const revoked = await handler(new Request(endpoint, { method: 'DELETE' }))
+  expect(revoked.status).toBe(200)
+  expect(revocations).toEqual([{
+    userId: 'owner-1', organizationId: 'org-1', membershipId: 'member-1',
+  }])
 })
 
 test('does not pretend later authentication or organization routes exist', async () => {

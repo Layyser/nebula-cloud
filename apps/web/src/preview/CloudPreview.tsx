@@ -14,6 +14,7 @@ import { OrganizationSetup } from '../components/organization/OrganizationGate'
 import {
   cloudPreviewOrganization,
   cloudPreviewDashboard,
+  cloudPreviewMembers,
   cloudPreviewUser,
   createCloudPreviewTransport,
   type CloudPreviewMode,
@@ -71,6 +72,7 @@ function WorkspacePreview({
             organizationId={cloudPreviewOrganization.id}
             organizationName={cloudPreviewOrganization.name}
             previewOverview={cloudPreviewDashboard}
+            previewMembers={cloudPreviewMembers}
             onBackgroundChange={handleDashboardBackgroundChange}
           />
         </div>
