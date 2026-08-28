@@ -27,12 +27,12 @@ test('composes the packaged RuntimeWorkspace with the Cloud transport', () => {
 
 test('the vendored Runtime UI archive matches its recorded checksum', () => {
   const archive = readFileSync(new URL(
-    '../../../vendor/nebula-runtime-ui-0.1.39.tgz',
+    '../../../vendor/nebula-runtime-ui-0.1.40.tgz',
     import.meta.url,
   ))
   const checksum = createHash('sha256').update(archive).digest('hex')
   expect(checksum).toBe(
-    'c99acd88b3388030a30f4040abaf47430f28040296327dc7a8ec1e634de39fa8',
+    '77bb7e61875042c6226be6c74f167e31c8362a54d397728f73d6d623cdafc8d0',
   )
 })
 
