@@ -305,6 +305,14 @@ and Compose compatibility are explicitly not promised for this beta.
       token stored only as a hash. Routes are permanent by default and can be
       explicitly stopped; an optional 5-minute-to-7-day TTL fails lookup
       immediately after expiry.
+- [x] Add a founder-controlled local release proof and guarded reset path. On
+      29 August, `bun run demo:prove` completed twice from clean Cloud state
+      using two synthetic identities, an expiring 14-day Operator entitlement,
+      the quota-enforcing local Worker, runtime/Chat routing, Console, actual
+      `nubols expose`/`ps`/`stop`, public and private-token HTTP, allocated raw
+      TCP, usage, Contact Sales, and revocation. Each exact demo workspace was
+      deleted through the Worker's guarded runtime/data operations afterward;
+      normal local workspace state was not reset.
 - [ ] Route HTTP/HTTPS through wildcard TLS on `*.apps.nubols.com`; issue one
       unpredictable hostname per publication and revoke it independently of the
       workspace lifecycle. The application-layer hostname parser, generated
@@ -1099,8 +1107,10 @@ Never cut:
 ## 6. Immediate next actions (next 48 hours)
 
 1. Read `docs/closed-demo-validation.md` and select the first customer segment.
-2. Prepare the synthetic project/CSV demo locally and the private evidence
-   tracker. Do not purchase hosting until the documented purchase gate passes.
+2. [x] Add the isolated synthetic local demo and private evidence tracker. The
+   two-clean-cycle technical proof passed on 29 August via `bun run demo:prove`.
+   Friendly-reviewer rehearsal and one qualified external demo/follow-up signal
+   remain the non-engineering purchase gates.
 3. Build a list of 30 qualified prospects and schedule the first five discovery
    calls. Ask for feedback on their current workflow, not a purchase.
 4. Review the employment/IP section of `docs/company-formation-brief-es.md` now;

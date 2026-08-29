@@ -2,6 +2,9 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
+const controlPlaneTarget = process.env.NEBULA_DEV_CONTROL_PLANE_URL?.trim()
+  || 'http://127.0.0.1:7790'
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   optimizeDeps: {
@@ -19,27 +22,27 @@ export default defineConfig({
   server: {
     proxy: {
       '/api/auth': {
-        target: 'http://127.0.0.1:7790',
+        target: controlPlaneTarget,
         changeOrigin: false,
       },
       '/api/workspaces/personal': {
-        target: 'http://127.0.0.1:7790',
+        target: controlPlaneTarget,
         changeOrigin: false,
       },
       '/api/workspaces': {
-        target: 'http://127.0.0.1:7790',
+        target: controlPlaneTarget,
         changeOrigin: false,
       },
       '/api/usage': {
-        target: 'http://127.0.0.1:7790',
+        target: controlPlaneTarget,
         changeOrigin: false,
       },
       '/api/organizations': {
-        target: 'http://127.0.0.1:7790',
+        target: controlPlaneTarget,
         changeOrigin: false,
       },
       '/p/': {
-        target: 'http://127.0.0.1:7790',
+        target: controlPlaneTarget,
         changeOrigin: false,
       },
     },

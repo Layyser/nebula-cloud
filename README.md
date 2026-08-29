@@ -161,6 +161,30 @@ bun test
 bun run build
 ```
 
+### Isolated closed-demo proof
+
+The demo workflow keeps its Cloud database, email outbox, logs, and process
+state under ignored `.codex-tmp/demo-local`. It reuses the root-managed local
+Worker so the normal XFS project quotas and container security policy remain in
+force, but creates and deletes only workspace IDs recorded in the demo database.
+It never resets the normal Cloud database or other Worker workspaces.
+
+```bash
+bun run demo:prepare  # build Worker and control plane
+bun run demo:up       # Web http://127.0.0.1:5174, Cloud :7791, shared Worker :7780
+bun run demo:smoke    # one synthetic end-to-end proof
+bun run demo:down     # guarded runtime + persistent-data deletion
+bun run demo:prove    # two complete cycles from clean state
+bun run demo:rehearse # leave a proved synthetic demo running for screen-share
+```
+
+The proof covers authentication, two organization members, denial before a
+14-day beta entitlement, Runtime/Chat routing, Console, usage, Contact Sales,
+and the actual `nubols` HTTP/private-HTTP/raw-TCP publication lifecycle. Local
+evidence is written to `.codex-tmp/demo-evidence/`.
+`demo:rehearse` writes mode-`0600` synthetic credentials under
+`.codex-tmp/demo-local/`; `demo:down` removes them with the demo state.
+
 The Web routes remain:
 
 ```text

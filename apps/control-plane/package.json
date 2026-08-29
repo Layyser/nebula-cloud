@@ -7,6 +7,7 @@
     "dev": "bun --watch src/index.ts",
     "bootstrap": "bun src/bootstrap.ts",
     "smoke:console": "bun scripts/console-smoke.ts",
+    "smoke:demo": "bun scripts/demo-smoke.ts",
     "reconcile:usage": "bun scripts/reconcile-usage.ts",
     "build": "bun build src/index.ts --target=bun --outdir=dist",
     "typecheck": "tsc -p tsconfig.json",

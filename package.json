@@ -15,7 +15,14 @@
     "build:web": "bun run --cwd apps/web build",
     "build:control-plane": "bun run --cwd apps/control-plane build",
     "typecheck": "bun run --cwd apps/control-plane typecheck && bun run --cwd packages/contracts typecheck && bun run --cwd packages/database typecheck && bun run --cwd packages/auth typecheck",
-    "test": "bun run --cwd apps/web test && bun run --cwd apps/control-plane test && bun run --cwd packages/contracts test && bun run --cwd packages/database test && bun run --cwd packages/auth test"
+    "test": "bun run --cwd apps/web test && bun run --cwd apps/control-plane test && bun run --cwd packages/contracts test && bun run --cwd packages/database test && bun run --cwd packages/auth test",
+    "demo:prepare": "bash ./scripts/demo-local.sh prepare",
+    "demo:reset": "bash ./scripts/demo-local.sh reset",
+    "demo:up": "bash ./scripts/demo-local.sh up",
+    "demo:smoke": "bash ./scripts/demo-local.sh smoke",
+    "demo:down": "bash ./scripts/demo-local.sh down",
+    "demo:prove": "bash ./scripts/demo-local.sh prove",
+    "demo:rehearse": "bash ./scripts/demo-local.sh rehearse"
   },
   "devDependencies": {
     "@types/bun": "^1.3.10",
