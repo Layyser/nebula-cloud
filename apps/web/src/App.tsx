@@ -270,7 +270,7 @@ function CloudSessionRoute({
   }
 
   return (
-    <OrganizationGate onBack={() => navigate('/')}>
+    <OrganizationGate onBack={() => navigate('/')} onSignedOut={() => navigate('/login')}>
       {(activeOrganization, organizations, addOrganization) => (
         <AuthenticatedCloudApp
           navigate={navigate}

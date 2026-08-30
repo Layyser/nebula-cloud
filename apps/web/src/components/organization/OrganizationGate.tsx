@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { ArrowRight, Building2, Check, KeyRound, LoaderCircle, UserRound } from 'lucide-react'
+import { ArrowRight, Building2, Check, KeyRound, LoaderCircle, LogOut, UserRound } from 'lucide-react'
 import type {
   JoinOrganizationResponse,
   NubolsPlan,
@@ -22,6 +22,7 @@ export interface CloudOrganization {
 
 interface OrganizationGateProps {
   onBack: () => void
+  onSignedOut: () => void
   children: (
     activeOrganization: CloudOrganization,
     organizations: CloudOrganization[],
@@ -29,12 +30,13 @@ interface OrganizationGateProps {
   ) => ReactNode
 }
 
-export function OrganizationGate({ children, onBack }: OrganizationGateProps) {
+export function OrganizationGate({ children, onBack, onSignedOut }: OrganizationGateProps) {
   const organizationsQuery = authClient.useListOrganizations()
   const activeQuery = authClient.useActiveOrganization()
   const [showSetup, setShowSetup] = useState(false)
   const [planAccounts, setPlanAccounts] = useState<PlanAccount[] | null>(null)
   const [planError, setPlanError] = useState('')
+  const [signingOut, setSigningOut] = useState(false)
   const loadPlanAccounts = useCallback(async () => {
     setPlanError('')
     try {
@@ -46,6 +48,20 @@ export function OrganizationGate({ children, onBack }: OrganizationGateProps) {
       setPlanError(error instanceof Error ? error.message : 'Could not load account plans')
     }
   }, [])
+
+  const signOut = useCallback(async () => {
+    if (signingOut) return
+    setSigningOut(true)
+    try {
+      const result = await authClient.signOut()
+      if (result.error) throw new Error(result.error.message || 'Could not sign out')
+      onSignedOut()
+    } catch (error) {
+      setPlanError(error instanceof Error ? error.message : 'Could not sign out')
+    } finally {
+      setSigningOut(false)
+    }
+  }, [onSignedOut, signingOut])
 
   useEffect(() => { void loadPlanAccounts() }, [loadPlanAccounts])
 
@@ -65,7 +81,18 @@ export function OrganizationGate({ children, onBack }: OrganizationGateProps) {
         <div className="relative z-[2] flex min-h-screen items-center justify-center px-5 text-white">
           <div className="w-full max-w-sm rounded-2xl bg-[var(--color-surface-auth)] p-6 text-center">
             <p className="text-sm text-white/70">{planError}</p>
-            <button type="button" onClick={() => void loadPlanAccounts()} className="mt-4 rounded-full bg-white px-4 py-2 text-xs font-semibold text-black">Try again</button>
+            <div className="mt-4 flex items-center justify-center gap-2">
+              <button type="button" onClick={() => void loadPlanAccounts()} className="rounded-full bg-white px-4 py-2 text-xs font-semibold text-black">Try again</button>
+              <button
+                type="button"
+                disabled={signingOut}
+                onClick={() => void signOut()}
+                className="inline-flex items-center gap-1.5 rounded-full border border-white/15 px-4 py-2 text-xs font-medium text-white/65 transition hover:bg-white/[0.06] hover:text-white disabled:opacity-50"
+              >
+                <LogOut size={13} />
+                {signingOut ? 'Signing out…' : 'Sign out'}
+              </button>
+            </div>
           </div>
         </div>
       )
@@ -78,9 +105,10 @@ export function OrganizationGate({ children, onBack }: OrganizationGateProps) {
   }
 
   return (
-    <OrganizationSetup
-      organizations={organizations}
-      onBack={activeOrganization ? () => setShowSetup(false) : onBack}
+      <OrganizationSetup
+        organizations={organizations}
+        onBack={activeOrganization ? () => setShowSetup(false) : onBack}
+        onSignedOut={signOut}
       onChanged={async () => {
         await Promise.all([
           organizationsQuery.refetch(),
@@ -97,10 +125,12 @@ export function OrganizationSetup({
   organizations,
   onChanged,
   onBack,
+  onSignedOut,
 }: {
   organizations: CloudOrganization[]
   onChanged: () => Promise<void>
   onBack: () => void
+  onSignedOut: () => Promise<void>
 }) {
   const [code, setCode] = useState('')
   const [organizationName, setOrganizationName] = useState('')
@@ -321,6 +351,16 @@ export function OrganizationSetup({
             Join organization
           </button>
         </form>
+
+        <button
+          type="button"
+          disabled={Boolean(busy)}
+          onClick={() => void onSignedOut()}
+          className="mx-auto mt-6 inline-flex items-center gap-1.5 text-xs text-white/35 transition hover:text-white/70 disabled:opacity-50"
+        >
+          <LogOut size={13} />
+          Sign out
+        </button>
       </div>
     </div>
   )

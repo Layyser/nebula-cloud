@@ -326,3 +326,47 @@ Create the owner account as `beta@nubols.com`, verify it through the routed
 mailbox, create one workspace, and then run the production-host isolation,
 HTTPS publication, raw TCP publication, restart-persistence, and backup drills
 before sharing the demo externally.
+
+## 9. Provisioning failure: “Provisioning paused”
+
+If the app shows:
+
+```text
+Provisioning paused
+Provisioning failed. Retry to schedule a fresh attempt.
+```
+
+check the Worker logs and Docker images before restarting application services:
+
+```bash
+sudo journalctl -u nebula-worker --since=-15min --no-pager
+sudo docker image inspect "${NEBULA_WORKER_BROWSER_IMAGE}" >/dev/null
+sudo docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+```
+
+The most important failure mode is a missing browser sidecar image. The
+workspace image alone is insufficient: every workspace also gets a private
+`nebula-browser` sidecar. The Worker fails closed when that image is absent;
+older Worker responses may misleadingly surface this as `workspace_not_found`
+in Cloud.
+
+Recover it by building and pinning the browser image, then restarting the
+Worker and Cloud services so they read the updated environment:
+
+```bash
+WORKER_REVISION=$(git -C /opt/nubols/current/nebula-worker rev-parse --short=12 HEAD)
+cd /opt/nubols/current/nebula-worker
+sudo env NEBULA_BROWSER_IMAGE="nebula-browser:$WORKER_REVISION" \
+  NEBULA_BROWSER_IMAGE_VERSION="$WORKER_REVISION" make browser-image
+sudo python3 /opt/nubols/current/nebula-cloud/deploy/scripts/configure-worker-environment.py \
+  --browser-image "nebula-browser:$WORKER_REVISION"
+sudo systemctl restart nebula-worker nubols-cloud
+curl --fail http://127.0.0.1:7780/health/ready
+curl --fail http://127.0.0.1:7790/health/ready
+```
+
+Confirm that both `nebula-runtime-*` and `nebula-browser-*` are healthy. A
+previously paused Cloud job may need one **Try again** click after the repair;
+do not delete the workspace or its persistent volume. If the image exists and
+the failure persists, inspect the Worker log entry immediately following the
+new retry before changing quotas, firewall rules, or the database.

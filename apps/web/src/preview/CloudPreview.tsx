@@ -181,6 +181,7 @@ export function CloudPreview({ mode }: { mode: CloudPreviewMode }) {
       <OrganizationSetup
         organizations={[cloudPreviewOrganization]}
         onBack={() => {}}
+        onSignedOut={async () => {}}
         onChanged={async () => {}}
       />
     )
