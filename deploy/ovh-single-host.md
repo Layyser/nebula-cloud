@@ -177,10 +177,13 @@ make browser-image-contract
 make build
 ```
 
-Build the immutable workspace image from the checked-out agent revision:
+Build the immutable workspace and browser images from the checked-out source
+revisions. Both are required: the Worker creates an isolated browser sidecar
+for every workspace, and provisioning fails closed if that image is absent.
 
 ```bash
 AGENT_REVISION=$(git -C /opt/nubols/releases/<release>/nebula-agent rev-parse --short=12 HEAD)
+WORKER_REVISION=$(git -C /opt/nubols/releases/<release>/nebula-worker rev-parse --short=12 HEAD)
 cd /opt/nubols/releases/<release>/nebula-worker
 sudo env PATH="/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin" \
   NEBULA_CORE_DIR=/opt/nubols/releases/<release>/nebula-agent \
@@ -188,11 +191,21 @@ sudo env PATH="/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin" \
   NEBULA_IMAGE_VERSION="$AGENT_REVISION" \
   make workspace-image
 sudo docker image inspect "nebula-workspace:$AGENT_REVISION" >/dev/null
+sudo env PATH="/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin" \
+  NEBULA_BROWSER_IMAGE="nebula-browser:$WORKER_REVISION" \
+  NEBULA_BROWSER_IMAGE_VERSION="$WORKER_REVISION" \
+  make browser-image
+sudo env \
+  NEBULA_BROWSER_IMAGE="nebula-browser:$WORKER_REVISION" \
+  NEBULA_WORKSPACE_IMAGE="nebula-workspace:$AGENT_REVISION" \
+  make browser-image-smoke
+sudo docker image inspect "nebula-browser:$WORKER_REVISION" >/dev/null
 sudo ln -sfn /opt/nubols/releases/<release> /opt/nubols/current
 ```
 
-Record `AGENT_REVISION`; both Cloud's environment and the live Docker image
-must use that immutable tag.
+Record both revisions. Set Cloud's `NEBULA_WORKSPACE_IMAGE` to the agent tag
+and the Worker's `NEBULA_WORKER_BROWSER_IMAGE` to the browser tag; both tags
+must resolve to local Docker images before starting the services.
 
 ## 5. Secrets and application environments
 
@@ -212,7 +225,20 @@ sudoedit /etc/nubols/worker.env
 Replace every placeholder. Generate independent secrets with
 `openssl rand -base64 48`. The same `NEBULA_WORKER_TOKEN` must be present in
 both files. Set `NEBULA_WORKSPACE_IMAGE` to the immutable agent tag. Never add
-real secrets to either checked-in example.
+real secrets to either checked-in example. Set
+`NEBULA_WORKER_BROWSER_IMAGE` to the immutable Worker revision built in the
+previous section.
+
+For later browser-image rollouts, use the checked-in helper to update the
+root-owned environment without echoing credentials. Add `--rotate-token` only
+when rotating the shared Cloud-to-Worker credential; it updates both files to
+the same newly generated value without printing it:
+
+```bash
+sudo python3 /opt/nubols/current/nebula-cloud/deploy/scripts/configure-worker-environment.py \
+  --browser-image "nebula-browser:$WORKER_REVISION"
+sudo systemctl restart nebula-worker nubols-cloud
+```
 
 Production startup intentionally requires a verified Resend sending domain,
 API key, and signed webhook secret. Configure the webhook destination as:
@@ -289,7 +315,9 @@ sudo systemctl enable nftables
 ```bash
 curl --fail http://127.0.0.1:7780/health/ready
 curl --fail http://127.0.0.1:7790/health/ready
-curl --fail https://app.nubols.com/api/health/ready
+curl --fail https://app.nubols.com/ >/dev/null
+sudo docker image inspect "nebula-workspace:$AGENT_REVISION" >/dev/null
+sudo docker image inspect "nebula-browser:$WORKER_REVISION" >/dev/null
 sudo systemctl --no-pager --full status nebula-worker nubols-cloud nginx
 sudo docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
 ```
