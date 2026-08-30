@@ -120,7 +120,8 @@ bun run demo:prove
 It proves two synthetic users and organization membership, entitlement denial
 before a 14-day beta grant, runtime readiness and Chat routing, Console, real
 `nubols --help`/`expose`/`ps`/`stop`, public HTTP, private HTTP token enforcement,
-raw TCP, usage aggregation, Contact Sales delivery to the filesystem transport,
+PostgreSQL SSL/startup negotiation and a Minecraft server-list ping over two
+separate raw-TCP routes, usage aggregation, Contact Sales delivery to the filesystem transport,
 and route revocation. Per-cycle JSON evidence is retained under the ignored
 `.codex-tmp/demo-evidence/` directory.
 

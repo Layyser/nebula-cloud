@@ -92,6 +92,10 @@ export function OrganizationDashboard(props: OrganizationDashboardProps) {
     props.onBackgroundChange?.(view === 'home')
   }, [props.onBackgroundChange, view])
 
+  useEffect(() => () => {
+    props.onBackgroundChange?.(true)
+  }, [props.onBackgroundChange])
+
   if (view === 'usage') {
     return (
       <div className="min-h-full bg-[var(--color-surface-page)]">
@@ -236,7 +240,7 @@ function DashboardOverview({
     return (
       <section aria-label="Loading dashboard overview" className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {Array.from({ length: 8 }, (_, index) => (
-          <Surface key={index} variant="panel" density="none" radius="surface" className="h-28 animate-pulse" />
+          <Surface key={index} variant="panel" density="none" radius="surface" className="h-28 animate-pulse shadow-[var(--shadow-surface)]" />
         ))}
       </section>
     )
@@ -310,7 +314,7 @@ function DashboardOverview({
   return (
     <section aria-label="Dashboard overview" className="grid grid-cols-2 gap-3 md:grid-cols-4">
       {metrics.map(metric => (
-        <Surface key={metric.label} variant="panel" density="default" radius="surface" className="min-w-0">
+        <Surface key={metric.label} variant="panel" density="default" radius="surface" className="min-w-0 shadow-[var(--shadow-surface)]">
           <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-subtle)]">
             {metric.icon}
             <span className="truncate">{metric.label}</span>

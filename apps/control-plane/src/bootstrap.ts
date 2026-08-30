@@ -1,4 +1,5 @@
 import { initializePersistence } from './persistence'
+import { allowedSignUpEmailsFromEnvironment } from './signUpPolicy'
 
 const databasePath = process.env.NEBULA_CLOUD_DATABASE_PATH?.trim()
   || './data/nebula-cloud.sqlite'
@@ -30,6 +31,7 @@ const { auth, database } = await initializePersistence({
   authSecret: secret,
   authBaseURL: baseURL,
   trustedOrigins,
+  allowedSignUpEmails: allowedSignUpEmailsFromEnvironment(),
 })
 
 try {
@@ -40,7 +42,7 @@ try {
   }))
 
   if (signUp.ok) {
-    console.log(`Bootstrap account created for ${email}`)
+    console.log('Bootstrap account created')
   } else {
     const signIn = await auth.handler(authRequest('/api/auth/sign-in/email', {
       email,
@@ -52,7 +54,7 @@ try {
         + `were rejected (${signIn.status})`,
       )
     }
-    console.log(`Bootstrap account verified for ${email}`)
+    console.log('Bootstrap account verified')
   }
 } finally {
   database.close()

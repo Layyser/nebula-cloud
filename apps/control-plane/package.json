@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "backup": "bun run scripts/backup.ts",
     "dev": "bun --watch src/index.ts",
     "bootstrap": "bun src/bootstrap.ts",
     "smoke:console": "bun scripts/console-smoke.ts",

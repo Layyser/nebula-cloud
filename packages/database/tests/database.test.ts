@@ -4,6 +4,7 @@ import {
   applyStripeInvoiceProjection,
   assignStripeOperatorSeat,
   assignWorkspaceWorker,
+  beginEmailDelivery,
   claimProvisioningJob,
   ContactRateLimitError,
   createContactRequest,
@@ -16,38 +17,91 @@ import {
   getPublishedServiceBySlug,
   getWorkspaceOwnerIdentity,
   getOrganizationUsageSummary,
+  getOrganizationInvitationStatus,
+  getEmailDelivery,
   getOrganizationDashboardSummary,
   getOperatorEntitlement,
   getStripeEvent,
   getWorkerHost,
   getOrganizationMembers,
   getPersonalUsageSummary,
+  getPlatformControl,
   hasActiveOperatorEntitlement,
   listOrganizationAuditEvents,
   listContactRequests,
   listPublishedServices,
+  listPlatformControls,
+  markEmailDeliveryFailed,
+  markEmailDeliverySent,
   migrateCloudSchema,
   openCloudDatabase,
   ProvisioningJobLeaseLostError,
   recordAuditEvent,
+  recordPlatformOperationAuditEvent,
   recordUsageEvent,
   recordWorkerHealth,
+  projectEmailDeliveryStatus,
   registerStripeEvent,
   revokePublishedService,
+  revokeOrganizationPublishedServices,
   revokeOperatorEntitlement,
   revokeStripeOperatorSeat,
   rotateOrganizationJoinCode,
   resolveWorkspaceAccess,
   setWorkerHostScheduling,
   setContactNotificationResult,
+  setPlatformControl,
   updateContactRequestStatus,
   upsertWorkerHost,
   upsertPublishedService,
   upsertOperatorEntitlement,
   UsageAccessDeniedError,
+  isEmailRecipientSuppressed,
   WorkspaceMembershipNotFoundError,
   WorkerPlacementUnavailableError,
 } from '../src'
+
+test('classifies invitation acceptance without leaking it to the wrong account', () => {
+  const database = openCloudDatabase({ path: ':memory:' })
+  try {
+    database.exec(`
+      CREATE TABLE organization (id TEXT PRIMARY KEY, name TEXT NOT NULL);
+      CREATE TABLE invitation (
+        id TEXT PRIMARY KEY,
+        organizationId TEXT NOT NULL,
+        email TEXT NOT NULL,
+        role TEXT,
+        status TEXT NOT NULL,
+        expiresAt INTEGER NOT NULL
+      );
+      INSERT INTO organization (id, name) VALUES ('org-1', 'Example Studio');
+      INSERT INTO invitation (id, organizationId, email, role, status, expiresAt)
+      VALUES
+        ('pending', 'org-1', 'invitee@example.com', 'admin', 'pending', 2000),
+        ('expired', 'org-1', 'invitee@example.com', 'member', 'pending', 999),
+        ('accepted', 'org-1', 'invitee@example.com', 'member', 'accepted', 2000);
+    `)
+    expect(getOrganizationInvitationStatus(database, {
+      invitationId: 'pending', userEmail: 'INVITEE@example.com', now: () => 1000,
+    })).toEqual({
+      state: 'pending', organizationName: 'Example Studio', role: 'admin', expiresAt: 2000,
+    })
+    expect(getOrganizationInvitationStatus(database, {
+      invitationId: 'expired', userEmail: 'invitee@example.com', now: () => 1000,
+    })).toEqual({ state: 'expired' })
+    expect(getOrganizationInvitationStatus(database, {
+      invitationId: 'accepted', userEmail: 'invitee@example.com', now: () => 1000,
+    })).toEqual({ state: 'already_used' })
+    expect(getOrganizationInvitationStatus(database, {
+      invitationId: 'pending', userEmail: 'someone@example.com', now: () => 1000,
+    })).toEqual({ state: 'wrong_account' })
+    expect(getOrganizationInvitationStatus(database, {
+      invitationId: 'missing', userEmail: 'invitee@example.com', now: () => 1000,
+    })).toEqual({ state: 'not_found' })
+  } finally {
+    database.close()
+  }
+})
 
 test('applies the minimal application schema idempotently', () => {
   const database = openCloudDatabase({ path: ':memory:' })
@@ -75,9 +129,160 @@ test('applies the minimal application schema idempotently', () => {
     expect(tables).toContain('billing_customer')
     expect(tables).toContain('subscription')
     expect(tables).toContain('stripe_event')
+    expect(tables).toContain('platform_control')
+    expect(tables).toContain('platform_control_audit_event')
+    expect(tables).toContain('platform_operation_audit_event')
+    expect(tables).toContain('email_delivery')
     expect(database.query<{ count: number }, []>(
       'SELECT COUNT(*) AS count FROM nebula_migration',
-    ).get()?.count).toBe(20)
+    ).get()?.count).toBe(24)
+  } finally {
+    database.close()
+  }
+})
+
+test('records body-free email diagnostics and suppresses permanent delivery failures', () => {
+  const database = openCloudDatabase({ path: ':memory:' })
+  try {
+    database.exec(`
+      CREATE TABLE user (id TEXT PRIMARY KEY);
+      CREATE TABLE organization (id TEXT PRIMARY KEY);
+      CREATE TABLE member (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL REFERENCES user(id),
+        organizationId TEXT NOT NULL REFERENCES organization(id),
+        role TEXT NOT NULL DEFAULT 'member'
+      );
+    `)
+    migrateCloudSchema(database)
+    const recipientHash = 'a'.repeat(64)
+    beginEmailDelivery(database, {
+      id: 'delivery-1', provider: 'resend', kind: 'organization-invitation',
+      recipientHash, now: () => 100,
+    })
+    expect(markEmailDeliverySent(database, {
+      id: 'delivery-1', providerMessageId: 'provider-1', now: () => 110,
+    })?.status).toBe('sent')
+    expect(projectEmailDeliveryStatus(database, {
+      providerMessageId: 'provider-1', status: 'delayed', now: () => 120,
+    })?.status).toBe('delayed')
+    expect(projectEmailDeliveryStatus(database, {
+      providerMessageId: 'provider-1', status: 'delivered', now: () => 130,
+    })?.status).toBe('delivered')
+    expect(projectEmailDeliveryStatus(database, {
+      providerMessageId: 'provider-1', status: 'delayed', now: () => 140,
+    })?.status).toBe('delivered')
+    expect(isEmailRecipientSuppressed(database, recipientHash)).toBe(false)
+    expect(projectEmailDeliveryStatus(database, {
+      providerMessageId: 'provider-1', status: 'complained', now: () => 150,
+    })?.status).toBe('complained')
+    expect(isEmailRecipientSuppressed(database, recipientHash)).toBe(true)
+    expect(getEmailDelivery(database, 'delivery-1')).toMatchObject({
+      providerMessageId: 'provider-1', status: 'complained', recipientHash,
+    })
+
+    beginEmailDelivery(database, {
+      id: 'delivery-2', provider: 'resend', kind: 'password-reset',
+      recipientHash: 'b'.repeat(64), now: () => 200,
+    })
+    expect(markEmailDeliveryFailed(database, {
+      id: 'delivery-2', errorCode: 'provider_rejected', now: () => 210,
+    })?.status).toBe('failed')
+    const columns = database.query<{ name: string }, []>('PRAGMA table_info(email_delivery)')
+      .all().map(column => column.name)
+    expect(columns).not.toContain('email')
+    expect(columns).not.toContain('body')
+  } finally {
+    database.close()
+  }
+})
+
+test('persists platform kill switches with append-only bounded audit evidence', () => {
+  const database = openCloudDatabase({ path: ':memory:' })
+  try {
+    database.exec(`
+      CREATE TABLE user (id TEXT PRIMARY KEY);
+      CREATE TABLE organization (id TEXT PRIMARY KEY);
+      CREATE TABLE member (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL REFERENCES user(id),
+        organizationId TEXT NOT NULL REFERENCES organization(id),
+        role TEXT NOT NULL DEFAULT 'member'
+      );
+    `)
+    migrateCloudSchema(database)
+
+    expect(listPlatformControls(database)).toEqual([
+      { name: 'provisioning', paused: false, reason: '', updatedBy: 'schema-migration', updatedAt: 0 },
+      { name: 'publication', paused: false, reason: '', updatedBy: 'schema-migration', updatedAt: 0 },
+      { name: 'workspace_start', paused: false, reason: '', updatedBy: 'schema-migration', updatedAt: 0 },
+    ])
+    expect(setPlatformControl(database, {
+      name: 'workspace_start',
+      paused: true,
+      reason: 'Investigating worker instability',
+      actor: 'jorge@nubols.com',
+      eventId: 'control-event-1',
+      now: () => 100,
+    })).toEqual({
+      name: 'workspace_start',
+      paused: true,
+      reason: 'Investigating worker instability',
+      updatedBy: 'jorge@nubols.com',
+      updatedAt: 100,
+    })
+    expect(getPlatformControl(database, 'workspace_start').paused).toBe(true)
+    expect(database.query<{
+      actor: string
+      control_name: string
+      previous_paused: number
+      paused: number
+      result: string
+      reason: string
+    }, []>('SELECT * FROM platform_control_audit_event').get()).toMatchObject({
+      actor: 'jorge@nubols.com',
+      control_name: 'workspace_start',
+      previous_paused: 0,
+      paused: 1,
+      result: 'success',
+      reason: 'Investigating worker instability',
+    })
+    expect(() => database.exec(
+      "UPDATE platform_control_audit_event SET reason = 'changed'",
+    )).toThrow('append-only')
+    expect(() => setPlatformControl(database, {
+      name: 'publication',
+      paused: true,
+      reason: '',
+      actor: 'admin',
+    })).toThrow('1 to 256')
+    recordPlatformOperationAuditEvent(database, {
+      actor: 'jorge@nubols.com',
+      action: 'worker.drain',
+      targetType: 'worker_host',
+      targetId: 'worker-a',
+      metadata: { reason: 'Maintenance', schedulable: false },
+      eventId: 'operation-event-1',
+      now: () => 101,
+    })
+    expect(database.query<{
+      actor: string
+      action: string
+      target_type: string
+      target_id: string
+      result: string
+      metadata_json: string
+    }, []>('SELECT * FROM platform_operation_audit_event').get()).toMatchObject({
+      actor: 'jorge@nubols.com',
+      action: 'worker.drain',
+      target_type: 'worker_host',
+      target_id: 'worker-a',
+      result: 'success',
+      metadata_json: JSON.stringify({ reason: 'Maintenance', schedulable: false }),
+    })
+    expect(() => database.exec(
+      "DELETE FROM platform_operation_audit_event",
+    )).toThrow('append-only')
   } finally {
     database.close()
   }
@@ -325,6 +530,61 @@ test('publishes only workspace-scoped ports with stable opaque slugs and revocat
     `)
     expect(getWorkspaceOwnerIdentity(database, workspace.id)).toBeNull()
     expect(getPublishedServiceBySlug(database, 'opaque-slug-two', 60)).toBeNull()
+    expect(revokeOrganizationPublishedServices(database, {
+      organizationId: 'org-1',
+      now: () => 80,
+    }).map(service => service.name)).toEqual(['api', 'docs'])
+    expect(listPublishedServices(database, workspace.id, 80)).toEqual([])
+    expect(listPublishedServices(database, peerWorkspace.id, 80).map(service => service.name))
+      .toEqual(['minecraft', 'web'])
+  } finally {
+    database.close()
+  }
+})
+
+test('enforces an organization publication ceiling across separate workspaces', () => {
+  const database = openCloudDatabase({ path: ':memory:' })
+  try {
+    database.exec(`
+      CREATE TABLE user (id TEXT PRIMARY KEY);
+      CREATE TABLE organization (id TEXT PRIMARY KEY);
+      CREATE TABLE member (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL REFERENCES user(id),
+        organizationId TEXT NOT NULL REFERENCES organization(id),
+        role TEXT NOT NULL DEFAULT 'member'
+      );
+      INSERT INTO user (id) VALUES ('user-1'), ('user-2');
+      INSERT INTO organization (id) VALUES ('org-1');
+      INSERT INTO member (id, userId, organizationId)
+      VALUES
+        ('member-1', 'user-1', 'org-1'),
+        ('member-2', 'user-2', 'org-1');
+    `)
+    migrateCloudSchema(database)
+    const first = ensurePersonalWorkspace(database, {
+      userId: 'user-1', organizationId: 'org-1', createId: () => 'workspace-1', now: () => 1,
+    })
+    const second = ensurePersonalWorkspace(database, {
+      userId: 'user-2', organizationId: 'org-1', createId: () => 'workspace-2', now: () => 1,
+    })
+    upsertPublishedService(database, {
+      id: 'publication-1', workspaceId: first.id, name: 'api', slug: 'slug-one',
+      targetPort: 3000, visibility: 'public', authPolicy: 'none', expiresAt: null,
+      maximumOrganizationActive: 1, now: () => 2,
+    })
+    expect(() => upsertPublishedService(database, {
+      id: 'publication-2', workspaceId: second.id, name: 'web', slug: 'slug-two',
+      targetPort: 4000, visibility: 'public', authPolicy: 'none', expiresAt: null,
+      maximumOrganizationActive: 1, now: () => 3,
+    })).toThrow('Organization published service limit reached')
+
+    revokePublishedService(database, { workspaceId: first.id, name: 'api', now: () => 4 })
+    expect(upsertPublishedService(database, {
+      id: 'publication-2', workspaceId: second.id, name: 'web', slug: 'slug-two',
+      targetPort: 4000, visibility: 'public', authPolicy: 'none', expiresAt: null,
+      maximumOrganizationActive: 1, now: () => 5,
+    })).toMatchObject({ workspaceId: second.id, state: 'active' })
   } finally {
     database.close()
   }

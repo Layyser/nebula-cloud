@@ -53,6 +53,12 @@ Completing a job requires the current lease owner:
 Historical succeeded and failed jobs remain available for diagnosis. Only
 queued and running jobs participate in active-job deduplication.
 
+The durable `workspace_start` platform control is checked before a processor
+claims work. While paused, queued jobs remain queued and their attempt counter
+does not change. The separate `provisioning` control rejects new personal
+workspace assignments but does not delete or hide existing assignments. See
+the emergency controls section in [`worker-connection.md`](worker-connection.md).
+
 ## Ownership boundary
 
 The processor that runs today claims available jobs and drives the worker
@@ -66,4 +72,3 @@ lifecycle API end to end:
 The job row contains product IDs and bounded error information. It must never
 store worker credentials, runtime bearer tokens, container addresses, host
 paths, or Docker identifiers.
-

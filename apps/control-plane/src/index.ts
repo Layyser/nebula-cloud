@@ -11,34 +11,42 @@ import {
   ensurePersonalWorkspace,
   ensureWorkspaceRunning,
   getOrganizationAdminSummary,
+  getOrganizationInvitationStatus,
   getOrganizationDashboardSummary,
   getOrganizationMembers,
   getOrganizationOperators,
   getOrganizationUsageSummary,
   getPersonalUsageSummary,
+  getPersonalWorkspace,
   getPublishedServiceBySlug,
   getPublishedServiceByIngressPort,
   getPublishedServiceByName,
   getWorkspaceOwnerIdentity,
   getWorkspaceById,
   hasActiveOperatorEntitlement,
+  isPlatformControlPaused,
   isOrganizationMemberEnabled,
   joinOrganizationById,
   listContactRequests,
   listOrganizationAuditEvents,
+  listPlatformControls,
   listPublishedServices,
   listTCPPublishedServices,
   OrganizationMemberMutationError,
   OperatorEntitlementRequiredError,
+  PlatformControlPausedError,
   recordAuditEvent,
+  recordPlatformOperationAuditEvent,
   recordUsageEvent,
   resolveOrganizationJoinCode,
   resolveWorkspaceAccess,
   revokePublishedService,
+  revokeOrganizationPublishedServices,
   revokeOperatorEntitlement,
   revokeStripeOperatorSeat,
   rotateOrganizationJoinCode,
   setOrganizationMemberDisabled,
+  setPlatformControl,
   setContactNotificationResult,
   upsertWorkerHost,
   updateContactRequestStatus,
@@ -52,6 +60,7 @@ import {
   createResendEmailSender,
 } from '@nebula-cloud/auth'
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
+import type { Database } from 'bun:sqlite'
 import { ProvisioningProcessor } from './provisioningProcessor'
 import {
   MapWorkerCredentialProvider,
@@ -76,6 +85,15 @@ import { parsePublishedServiceOrigin } from './publishedServiceRouting'
 import { hashPublishedServiceToken } from './publishedServiceAccess'
 import { TCPIngress } from './tcpIngress'
 import { StripeWebhookProcessor } from './stripeWebhook'
+import { PublicationConnectionLimiter } from './publicationConnectionLimiter'
+import { PublicationBandwidthLimiter } from './publicationBandwidthLimiter'
+import { TCPPublicationReconciler } from './tcpPublicationReconciler'
+import { createDiagnosticEmailSender } from './diagnosticEmailSender'
+import { ResendWebhookProcessor } from './resendWebhook'
+import { AuthRateLimiter } from './authRateLimiter'
+import { resolveClientAddress } from './clientAddress'
+import { safeLogJSON } from './safeLog'
+import { allowedSignUpEmailsFromEnvironment } from './signUpPolicy'
 
 const hostname = process.env.NEBULA_CLOUD_BIND?.trim() || '127.0.0.1'
 const port = Number.parseInt(process.env.NEBULA_CLOUD_PORT || '7790', 10)
@@ -94,6 +112,7 @@ const emailOutboxDirectory = process.env.NEBULA_EMAIL_OUTBOX_DIR?.trim()
   || './data/email-outbox'
 const emailFrom = process.env.NEBULA_EMAIL_FROM?.trim() || ''
 const resendApiKey = process.env.RESEND_API_KEY?.trim() || ''
+const resendWebhookSecret = process.env.RESEND_WEBHOOK_SECRET?.trim() || ''
 const contactToEmail = process.env.NEBULA_CONTACT_TO_EMAIL?.trim()
   || 'sales@nubols.com'
 const requireEmailVerification = parseBooleanEnvironment(
@@ -101,6 +120,7 @@ const requireEmailVerification = parseBooleanEnvironment(
   process.env.NEBULA_REQUIRE_EMAIL_VERIFICATION,
   false,
 )
+const allowedSignUpEmails = allowedSignUpEmailsFromEnvironment()
 const organizationCodeSecret = process.env.NEBULA_ORGANIZATION_CODE_SECRET?.trim()
   || authSecret
 const contactSourceHashSecret = process.env.NEBULA_CONTACT_SOURCE_HASH_SECRET?.trim()
@@ -121,6 +141,11 @@ const workerCredentialKeyId = process.env.NEBULA_WORKER_CREDENTIAL_KEY_ID?.trim(
 const workerCredentialsFile = process.env.NEBULA_WORKER_CREDENTIALS_FILE?.trim()
 const platformAdminToken = process.env.NEBULA_PLATFORM_ADMIN_TOKEN?.trim() || ''
 const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET?.trim() || ''
+const trustLocalProxy = parseBooleanEnvironment(
+  'NEBULA_CLOUD_TRUST_LOCAL_PROXY',
+  process.env.NEBULA_CLOUD_TRUST_LOCAL_PROXY,
+  runtimeEnvironment === 'production',
+)
 
 function positiveIntegerEnvironment(name: string, fallback: number): number {
   const raw = process.env[name]?.trim()
@@ -171,11 +196,57 @@ const tcpIngressBind = process.env.NEBULA_TCP_INGRESS_BIND?.trim() || '127.0.0.1
 const tcpIngressHost = process.env.NEBULA_TCP_INGRESS_HOST?.trim() || 'tcp.nubols.com'
 const tcpIngressPortMinimum = positiveIntegerEnvironment('NEBULA_TCP_INGRESS_PORT_MIN', 20000)
 const tcpIngressPortMaximum = positiveIntegerEnvironment('NEBULA_TCP_INGRESS_PORT_MAX', 20999)
+const tcpPublicationReconcileIntervalMs = positiveIntegerEnvironment(
+  'NEBULA_TCP_PUBLICATION_RECONCILE_INTERVAL_MS',
+  5_000,
+)
+const workspacePublicationLimit = positiveIntegerEnvironment(
+  'NEBULA_WORKSPACE_PUBLICATION_LIMIT',
+  5,
+)
+const organizationPublicationLimit = positiveIntegerEnvironment(
+  'NEBULA_ORGANIZATION_PUBLICATION_LIMIT',
+  20,
+)
+const publicationConnectionLimits = {
+  global: positiveIntegerEnvironment('NEBULA_PUBLICATION_MAX_CONNECTIONS', 512),
+  perWorker: positiveIntegerEnvironment('NEBULA_PUBLICATION_MAX_CONNECTIONS_PER_WORKER', 256),
+  perOrganization: positiveIntegerEnvironment(
+    'NEBULA_PUBLICATION_MAX_CONNECTIONS_PER_ORGANIZATION',
+    64,
+  ),
+  perRoute: positiveIntegerEnvironment('NEBULA_PUBLICATION_MAX_CONNECTIONS_PER_ROUTE', 32),
+}
+const mebibyte = 1024 * 1024
+const publicationBandwidthLimits = {
+  windowMs: positiveIntegerEnvironment('NEBULA_PUBLICATION_BANDWIDTH_WINDOW_MS', 60_000),
+  globalBytes: positiveIntegerEnvironment(
+    'NEBULA_PUBLICATION_BANDWIDTH_BYTES_PER_WINDOW',
+    2048 * mebibyte,
+  ),
+  perWorkerBytes: positiveIntegerEnvironment(
+    'NEBULA_PUBLICATION_BANDWIDTH_BYTES_PER_WORKER_WINDOW',
+    1024 * mebibyte,
+  ),
+  perOrganizationBytes: positiveIntegerEnvironment(
+    'NEBULA_PUBLICATION_BANDWIDTH_BYTES_PER_ORGANIZATION_WINDOW',
+    256 * mebibyte,
+  ),
+  perRouteBytes: positiveIntegerEnvironment(
+    'NEBULA_PUBLICATION_BANDWIDTH_BYTES_PER_ROUTE_WINDOW',
+    128 * mebibyte,
+  ),
+}
 if (tcpIngressPortMinimum > tcpIngressPortMaximum
   || (tcpIngressPortMinimum <= 7777 && tcpIngressPortMaximum >= 7777)
   || tcpIngressPortMaximum > 65535) {
   throw new Error('NEBULA_TCP_INGRESS_PORT_MIN/MAX are invalid')
 }
+if (workspacePublicationLimit > 100 || organizationPublicationLimit > 10_000) {
+  throw new Error('Publication limits exceed their safe maximums')
+}
+const publicationConnectionLimiter = new PublicationConnectionLimiter(publicationConnectionLimits)
+const publicationBandwidthLimiter = new PublicationBandwidthLimiter(publicationBandwidthLimits)
 const contactRetentionDays = positiveIntegerEnvironment(
   'NEBULA_CONTACT_RETENTION_DAYS',
   730,
@@ -233,16 +304,31 @@ if (runtimeEnvironment === 'production') {
   if (!process.env.NEBULA_CONTACT_SOURCE_HASH_SECRET?.trim()) {
     throw new Error('Production requires NEBULA_CONTACT_SOURCE_HASH_SECRET')
   }
+  if (!resendWebhookSecret) {
+    throw new Error('Production requires RESEND_WEBHOOK_SECRET')
+  }
 }
 if (platformAdminToken && platformAdminToken.length < 32) {
   throw new Error('NEBULA_PLATFORM_ADMIN_TOKEN must contain at least 32 characters')
 }
 
-const emailSender = emailTransport === 'filesystem'
+const providerEmailSender = emailTransport === 'filesystem'
   ? createFilesystemEmailSender({ directory: emailOutboxDirectory })
   : emailTransport === 'resend'
     ? createResendEmailSender({ apiKey: resendApiKey, from: emailFrom })
     : undefined
+let emailDiagnosticDatabase: Database | null = null
+const emailSender = providerEmailSender
+  ? createDiagnosticEmailSender({
+      sender: providerEmailSender,
+      provider: emailTransport,
+      recipientHashSecret: contactSourceHashSecret,
+      database: () => {
+        if (!emailDiagnosticDatabase) throw new Error('Email diagnostics database is unavailable')
+        return emailDiagnosticDatabase
+      },
+    })
+  : undefined
 
 const { database, auth } = await initializePersistence({
   databasePath,
@@ -252,9 +338,18 @@ const { database, auth } = await initializePersistence({
   trustedOrigins,
   emailSender,
   requireEmailVerification,
+  allowedSignUpEmails,
+})
+emailDiagnosticDatabase = database
+const authRateLimiter = new AuthRateLimiter({
+  database,
+  hashSecret: contactSourceHashSecret,
 })
 const stripeWebhookProcessor = stripeWebhookSecret
   ? new StripeWebhookProcessor({ database, webhookSecret: stripeWebhookSecret })
+  : null
+const resendWebhookProcessor = resendWebhookSecret
+  ? new ResendWebhookProcessor({ database, webhookSecret: resendWebhookSecret })
   : null
 
 function purgeExpiredContactRequests(): number {
@@ -333,7 +428,7 @@ for (const workspace of legacyWorkspaceIds) {
       heartbeatMaxAgeMs: workerHeartbeatStaleMs,
     })
   } catch (error) {
-    console.error(JSON.stringify({
+    console.error(safeLogJSON({
       event: 'legacy_workspace_assignment_failed',
       workspaceId: workspace.id,
       message: error instanceof Error ? error.message : 'unknown error',
@@ -363,6 +458,7 @@ const provisioningProcessor = new ProvisioningProcessor({
   worker: workerDirectory,
   processorId: `control-plane-${randomUUID()}`,
   authorizeWorkspace: workspaceHasOperatorEntitlement,
+  canProcess: () => !isPlatformControlPaused(database, 'workspace_start'),
 })
 
 const runtimeGateway = new RuntimeGateway({
@@ -379,6 +475,18 @@ const publishedServiceGateway = new PublishedServiceGateway({
       ? service
       : null
   },
+  resolveConnectionScope: publication => {
+    const workspace = getWorkspaceById(database, publication.workspaceId)
+    return workspace?.workerHostId
+      ? {
+          workerId: workspace.workerHostId,
+          organizationId: workspace.organizationId,
+          routeId: publication.id,
+        }
+      : null
+  },
+  connectionLimiter: publicationConnectionLimiter,
+  bandwidthLimiter: publicationBandwidthLimiter,
 })
 
 function publishedServiceURL(slug: string): string {
@@ -410,23 +518,44 @@ const tcpIngress = tcpIngressEnabled
   ? new TCPIngress({
       bindHost: tcpIngressBind,
       resolveRoute: ingressPort => {
+        if (isPlatformControlPaused(database, 'publication')) return null
         const service = getPublishedServiceByIngressPort(database, ingressPort)
-        return service && workspaceHasOperatorEntitlement(service.workspaceId)
-          ? { ingressPort, workspaceId: service.workspaceId, targetPort: service.targetPort }
+        if (!service || !workspaceHasOperatorEntitlement(service.workspaceId)) return null
+        const workspace = getWorkspaceById(database, service.workspaceId)
+        return workspace?.workerHostId
+          ? {
+              routeId: service.id,
+              ingressPort,
+              workspaceId: service.workspaceId,
+              organizationId: workspace.organizationId,
+              workerId: workspace.workerHostId,
+              targetPort: service.targetPort,
+            }
           : null
       },
       resolveWorker: workspaceId => {
         const connection = workerDirectory.tcpConnectionForWorkspace(workspaceId)
         return connection
       },
+      connectionLimiter: publicationConnectionLimiter,
+      bandwidthLimiter: publicationBandwidthLimiter,
     })
   : null
-if (tcpIngress) {
-  for (const service of listTCPPublishedServices(database)) {
-    if (service.ingressPort === null) throw new Error('TCP publication has no ingress port')
-    await tcpIngress.activate(service.ingressPort)
-  }
-}
+const tcpPublicationReconciler = tcpIngress
+  ? new TCPPublicationReconciler({
+      ingress: tcpIngress,
+      desiredPorts: () => listTCPPublishedServices(database).map(service => {
+        if (service.ingressPort === null) throw new Error('TCP publication has no ingress port')
+        return service.ingressPort
+      }),
+      intervalMs: tcpPublicationReconcileIntervalMs,
+      onError: error => console.error(safeLogJSON({
+        event: 'tcp_publication_reconciliation_failed',
+        message: error instanceof Error ? error.message : 'unknown error',
+      })),
+    })
+  : null
+await tcpPublicationReconciler?.start()
 
 const consoleGateway = new ConsoleGateway({
   resolveWorkerConnection: workspaceId => workerDirectory.connectionForWorkspace(workspaceId),
@@ -451,15 +580,64 @@ const controlPlaneHandler = createControlPlaneHandler({
   handleStripeWebhook: stripeWebhookProcessor
     ? (rawBody, signature) => stripeWebhookProcessor.process(rawBody, signature)
     : undefined,
+  handleResendWebhook: resendWebhookProcessor
+    ? (rawBody, headers) => resendWebhookProcessor.process(rawBody, headers)
+    : undefined,
   publishedServiceHostnameSuffix: publishedServiceOrigin?.hostnameSuffix,
   authorizeWorkerAdministration: platformAdminToken
     ? authorizePlatformAdministration
     : undefined,
   listWorkerHosts: () => ({ workers: workerAdministration.list() }),
   registerWorkerHost: input => workerAdministration.register(input),
-  updateWorkerHost: ({ workerHostId, update }) => (
-    workerAdministration.update(workerHostId, update)
-  ),
+  updateWorkerHost: ({ workerHostId, update, actor }) => {
+    const worker = workerAdministration.update(workerHostId, update)
+    if (worker && update.action && actor) {
+      recordPlatformOperationAuditEvent(database, {
+        actor,
+        action: `worker.${update.action}`,
+        targetType: 'worker_host',
+        targetId: workerHostId,
+        metadata: {
+          reason: update.reason ?? null,
+          enabled: worker.enabled,
+          schedulable: worker.schedulable,
+          state: worker.state,
+        },
+      })
+    }
+    return worker
+  },
+  authorizePlatformAdministration: platformAdminToken
+    ? authorizePlatformAdministration
+    : undefined,
+  listPlatformControls: () => ({ controls: listPlatformControls(database) }),
+  updatePlatformControl: ({ name, update, actor }) => setPlatformControl(database, {
+    name,
+    paused: update.paused,
+    reason: update.reason,
+    actor,
+  }),
+  platformControlPaused: name => isPlatformControlPaused(database, name),
+  revokeOrganizationPublications: async ({ organizationId, actor, reason }) => {
+    const publications = revokeOrganizationPublishedServices(database, { organizationId })
+    await Promise.all(publications.flatMap(publication => (
+      publication.protocol === 'tcp' && publication.ingressPort !== null && tcpIngress
+        ? [tcpIngress.deactivate(publication.ingressPort)]
+        : []
+    )))
+    recordPlatformOperationAuditEvent(database, {
+      actor,
+      action: 'organization.publications_revoked',
+      targetType: 'organization',
+      targetId: organizationId,
+      metadata: {
+        reason,
+        revokedServices: publications.length,
+        tcpServices: publications.filter(publication => publication.protocol === 'tcp').length,
+      },
+    })
+    return { organizationId, revokedServices: publications.length }
+  },
   authorizeEntitlementAdministration: platformAdminToken
     ? authorizePlatformAdministration
     : undefined,
@@ -521,7 +699,11 @@ const controlPlaneHandler = createControlPlaneHandler({
         })
       }
     : undefined,
-  authHandler: auth.handler,
+  authHandler: (request, clientAddress) => authRateLimiter.handle(
+    request,
+    clientAddress,
+    auth.handler,
+  ),
   resolveSession: async request => {
     const session = await auth.api.getSession({
       headers: request.headers,
@@ -530,6 +712,7 @@ const controlPlaneHandler = createControlPlaneHandler({
     const activeOrganizationId = session.session.activeOrganizationId
     return {
       userId: session.user.id,
+      email: session.user.email,
       activeOrganizationId: activeOrganizationId
         && isOrganizationMemberEnabled(database, {
           userId: session.user.id,
@@ -539,11 +722,15 @@ const controlPlaneHandler = createControlPlaneHandler({
         : null,
     }
   },
+  getInvitationStatus: ({ invitationId, userEmail }) => (
+    getOrganizationInvitationStatus(database, { invitationId, userEmail })
+  ),
   ensurePersonalWorkspace: ({ userId, organizationId }) => {
-    const workspace = ensurePersonalWorkspace(database, {
-      userId,
-      organizationId,
-    })
+    const existing = getPersonalWorkspace(database, { userId, organizationId })
+    if (!existing && isPlatformControlPaused(database, 'provisioning')) {
+      throw new PlatformControlPausedError('provisioning')
+    }
+    const workspace = existing ?? ensurePersonalWorkspace(database, { userId, organizationId })
     return {
       id: workspace.id,
       organizationId: workspace.organizationId,
@@ -553,9 +740,16 @@ const controlPlaneHandler = createControlPlaneHandler({
     }
   },
   ensureWorkspaceRunning: ({ userId, organizationId }) => {
-    const workspace = ensurePersonalWorkspace(database, { userId, organizationId })
+    const existing = getPersonalWorkspace(database, { userId, organizationId })
+    if (!existing && isPlatformControlPaused(database, 'provisioning')) {
+      throw new PlatformControlPausedError('provisioning')
+    }
+    const workspace = existing ?? ensurePersonalWorkspace(database, { userId, organizationId })
     if (!workspaceHasOperatorEntitlement(workspace.id)) {
       throw new OperatorEntitlementRequiredError()
+    }
+    if (workspace.state !== 'ready' && isPlatformControlPaused(database, 'workspace_start')) {
+      throw new PlatformControlPausedError('workspace_start')
     }
     const result = ensureWorkspaceRunning(database, {
       userId,
@@ -596,6 +790,9 @@ const controlPlaneHandler = createControlPlaneHandler({
   },
   restartWorkspace: workerDirectory
     ? async ({ workspaceId, userId, organizationId }) => {
+        if (isPlatformControlPaused(database, 'workspace_start')) {
+          throw new PlatformControlPausedError('workspace_start')
+        }
         const workspace = resolveEntitledWorkspaceAccess({
           workspaceId,
           userId,
@@ -667,6 +864,9 @@ const controlPlaneHandler = createControlPlaneHandler({
     publications: listPublishedServices(database, workspaceId).map(publishedServiceSummary),
   }),
   upsertWorkspacePublication: async ({ workspaceId, name, protocol, port, visibility, ttlSeconds }) => {
+    if (isPlatformControlPaused(database, 'publication')) {
+      throw new PlatformControlPausedError('publication')
+    }
     if (protocol === 'tcp' && !tcpIngress) {
       throw new Error('TCP ingress is not enabled')
     }
@@ -693,6 +893,8 @@ const controlPlaneHandler = createControlPlaneHandler({
       now: () => timestamp,
       tcpIngressPortMinimum: tcpIngressPortMinimum,
       tcpIngressPortMaximum: tcpIngressPortMaximum,
+      maximumActive: workspacePublicationLimit,
+      maximumOrganizationActive: organizationPublicationLimit,
     })
     if (
       previous?.protocol === 'tcp'
@@ -911,8 +1113,12 @@ const server = Bun.serve({
       /^\/api\/workspaces\/([^/]+)\/console(?:\/([^/]+))?$/,
     )
     if (!consoleRoute) {
+      const directAddress = bunServer.requestIP(request)?.address ?? null
       return await controlPlaneHandler(request, {
-        clientAddress: bunServer.requestIP(request)?.address ?? null,
+        clientAddress: resolveClientAddress(request, {
+          directAddress,
+          trustLocalProxy,
+        }),
       })
     }
     const prepared = await prepareConsoleUpgrade({
@@ -974,8 +1180,7 @@ function stop() {
 process.once('SIGINT', stop)
 process.once('SIGTERM', stop)
 
-console.info(JSON.stringify({
+console.info(safeLogJSON({
   event: 'control_plane_started',
-  address: server.url.origin,
-  database: databasePath,
+  port,
 }))

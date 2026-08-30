@@ -66,6 +66,32 @@ test('completes a durable job after the worker reports ready', async () => {
   }
 })
 
+test('leaves queued jobs untouched while workspace starts are paused', async () => {
+  const database = provisioningDatabase()
+  let workerCalls = 0
+  try {
+    const processor = new ProvisioningProcessor({
+      database,
+      processorId: 'processor-1',
+      canProcess: () => false,
+      worker: {
+        ensureWorkspaceRunning: async input => {
+          workerCalls += 1
+          return { workspaceId: input.workspaceId, observedState: 'ready' }
+        },
+      },
+    })
+
+    expect(await processor.processNext()).toBe(false)
+    expect(workerCalls).toBe(0)
+    expect(database.query<{ status: string; attempt: number }, []>(`
+      SELECT status, attempt FROM provisioning_job
+    `).get()).toEqual({ status: 'queued', attempt: 0 })
+  } finally {
+    database.close()
+  }
+})
+
 test('requeues retryable worker failures without losing the job', async () => {
   const database = provisioningDatabase()
   try {

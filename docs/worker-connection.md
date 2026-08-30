@@ -103,17 +103,60 @@ credential key have been verified, resume the host explicitly:
 curl --fail --request PATCH \
   http://127.0.0.1:7790/internal/v1/workers/worker-fsn1-a \
   --header "Authorization: Bearer $NEBULA_PLATFORM_ADMIN_TOKEN" \
+  --header "X-Nebula-Admin-Actor: admin@nubols.com" \
   --header 'Content-Type: application/json' \
-  --data '{"action":"resume"}'
+  --data '{"action":"resume","reason":"Private connectivity and credentials verified"}'
 ```
 
 The same endpoint accepts `drain`, `disable`, and `enable`. Draining rejects new
 placements without moving or deleting assigned workspaces. Enabling leaves a
-host unschedulable until it is explicitly resumed. A configuration patch may
+host unschedulable until it is explicitly resumed. Every lifecycle action
+requires the actor header and a 1–256 character reason and appends a bounded,
+immutable platform audit event. A configuration patch may
 change the name, provider, region, URL, credential key reference, or capacity;
 capacity cannot be reduced below existing reservations. List redacted registry
 state with `GET /internal/v1/workers`. Worker secrets are never accepted by or
 returned from these APIs.
+
+## Platform emergency controls
+
+The control plane stores three independent emergency controls in SQLite:
+
+- `provisioning` rejects creation of new personal workspace assignments while
+  continuing to resolve assignments that already exist.
+- `workspace_start` rejects new starts and restarts. Already-ready workspaces
+  and their runtime traffic remain available, and queued jobs remain queued
+  without consuming an attempt until the control is resumed.
+- `publication` rejects new publication updates and fails HTTP and new raw-TCP
+  connections closed. Publication records are retained so service-specific
+  revocation and a later controlled resume remain possible.
+
+Controls survive control-plane restarts. Every mutation appends the actor,
+control name, previous and requested state, result, bounded reason, and time to
+`platform_control_audit_event`. The audit table rejects updates and deletes.
+The API uses `NEBULA_PLATFORM_ADMIN_TOKEN` on the same private administration
+network as fleet operations. Mutations also require an explicit
+`X-Nebula-Admin-Actor` value and a 1–256 character reason.
+
+```bash
+curl --fail http://127.0.0.1:7790/internal/v1/platform-controls \
+  --header "Authorization: Bearer $NEBULA_PLATFORM_ADMIN_TOKEN"
+
+curl --fail --request PATCH \
+  http://127.0.0.1:7790/internal/v1/platform-controls/workspace_start \
+  --header "Authorization: Bearer $NEBULA_PLATFORM_ADMIN_TOKEN" \
+  --header "X-Nebula-Admin-Actor: admin@nubols.com" \
+  --header "Content-Type: application/json" \
+  --data '{"paused":true,"reason":"Investigating worker instability"}'
+```
+
+Resume by sending the same request with `"paused":false` and a reason that
+identifies the evidence used to reopen the operation. The three valid control
+names are `provisioning`, `workspace_start`, and `publication`.
+
+Worker lifecycle operations and organization-wide publication revocations are
+recorded separately in the append-only `platform_operation_audit_event` table
+with actor, action, target, result, bounded metadata, and timestamp.
 
 ## Processing guarantees
 

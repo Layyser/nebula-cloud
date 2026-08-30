@@ -6,6 +6,8 @@ export function isAuthenticationCallback(pathname: string): boolean {
 export function isPublicAuthenticationRoute(pathname: string): boolean {
   return pathname === '/login'
     || pathname === '/reset-password'
+    || pathname === '/invite'
+    || pathname === '/verify-email'
     || isAuthenticationCallback(pathname)
 }
 

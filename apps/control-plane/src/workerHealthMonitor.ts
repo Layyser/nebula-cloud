@@ -6,6 +6,7 @@ import {
 } from '@nebula-cloud/database'
 import { WorkerClientError, type WorkerStatus } from './workerClient'
 import type { WorkerClientResolver } from './workerDirectory'
+import { safeLogJSON } from './safeLog'
 
 export interface WorkerHealthAlert {
   event: 'worker_unavailable' | 'worker_recovered' | 'worker_heartbeat_stale'
@@ -33,7 +34,7 @@ export class WorkerHealthMonitor {
     timeoutMs = 5000,
     staleAfterMs = 30000,
     now = Date.now,
-    alert = value => console.error(JSON.stringify(value)),
+    alert = value => console.error(safeLogJSON(value)),
   }: {
     database: Database
     clients: WorkerClientResolver

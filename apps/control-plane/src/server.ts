@@ -20,16 +20,22 @@ import {
   type JoinOrganizationRequest,
   type JoinOrganizationResponse,
   type PersonalWorkspaceResponse,
+  type PlatformControlName,
+  type PlatformControlsResponse,
+  type PlatformControlSummary,
   type PublishedServiceResponse,
   type PublishedServicesResponse,
+  type OrganizationInvitationStatusResponse,
   type PersonalUsageResponse,
   type OrganizationUsageResponse,
   type RestartWorkspaceResponse,
   type RotateOrganizationJoinCodeResponse,
   type RegisterWorkerHostRequest,
+  type RevokeOrganizationPublicationsResponse,
   type UpdateWorkerHostRequest,
   type UpdateOrganizationMemberRequest,
   type UpdateOrganizationRequest,
+  type UpdatePlatformControlRequest,
   type UpsertOperatorEntitlementRequest,
   type WorkerHostsResponse,
   type WorkerHostSummary,
@@ -41,6 +47,7 @@ import {
   OrganizationMemberMutationError,
   OperatorEntitlementRequiredError,
   OperatorSeatCapacityError,
+  PlatformControlPausedError,
   publishedServiceMaximumTTLSeconds,
   publishedServiceMinimumTTLSeconds,
   UsageAccessDeniedError,
@@ -51,6 +58,7 @@ import {
   StripeWebhookVerificationError,
   type StripeWebhookResult,
 } from './stripeWebhook'
+import { ResendWebhookVerificationError } from './resendWebhook'
 
 const service = 'nebula-cloud-control-plane' as const
 const personalUsagePath = '/api/usage/me'
@@ -59,6 +67,7 @@ const contactAdministrationPath = '/internal/v1/contact-requests'
 const contactAdministrationExportPath = '/internal/v1/contact-requests/export.csv'
 const contactAdministrationMemberPath = /^\/internal\/v1\/contact-requests\/([^/]+)$/
 const organizationUsagePath = /^\/api\/organizations\/([^/]+)\/usage$/
+const organizationUsageExportPath = /^\/api\/organizations\/([^/]+)\/usage\/export\.csv$/
 const organizationMembersPath = /^\/api\/organizations\/([^/]+)\/members$/
 const organizationMemberPath = /^\/api\/organizations\/([^/]+)\/members\/([^/]+)$/
 const organizationOperatorSeatPath = /^\/api\/organizations\/([^/]+)\/entitlements\/operator\/([^/]+)$/
@@ -74,8 +83,12 @@ const workspacePublicationPath = /^\/api\/workspaces\/([^/]+)\/publications\/([^
 const publishedServicePath = /^\/p\/([^/]+)(\/.*)?$/
 const workerAdministrationPath = '/internal/v1/workers'
 const workerAdministrationMemberPath = /^\/internal\/v1\/workers\/([^/]+)$/
+const platformControlAdministrationPath = '/internal/v1/platform-controls'
+const platformControlAdministrationMemberPath = /^\/internal\/v1\/platform-controls\/([^/]+)$/
+const organizationPublicationRevocationPath = /^\/internal\/v1\/organizations\/([^/]+)\/publications\/revoke$/
 const operatorEntitlementAdministrationPath = /^\/internal\/v1\/entitlements\/operator\/([^/]+)$/
 const stripeWebhookPath = '/api/webhooks/stripe'
+const resendWebhookPath = '/api/webhooks/resend'
 
 // Workspace replacement may legitimately run for up to two minutes. Bun's
 // ten-second default would close the request while the worker was converging
@@ -85,17 +98,29 @@ export const CONTROL_PLANE_IDLE_TIMEOUT_SECONDS = 255
 export interface ControlPlaneHandlerOptions {
   version?: string
   isReady?: () => boolean
-  authHandler?: (request: Request) => Response | Promise<Response>
+  authHandler?: (
+    request: Request,
+    clientAddress: string | null,
+  ) => Response | Promise<Response>
   handleStripeWebhook?: (
     rawBody: Uint8Array,
     signature: string,
   ) => StripeWebhookResult | Promise<StripeWebhookResult>
+  handleResendWebhook?: (
+    rawBody: Uint8Array,
+    headers: Headers,
+  ) => { received: true; projected: boolean } | Promise<{ received: true; projected: boolean }>
   resolveSession?: (
     request: Request,
   ) => Promise<{
     userId: string
+    email?: string
     activeOrganizationId?: string | null
   } | null>
+  getInvitationStatus?: (input: {
+    invitationId: string
+    userEmail: string
+  }) => OrganizationInvitationStatusResponse
   ensurePersonalWorkspace?: (input: {
     userId: string
     organizationId: string
@@ -222,7 +247,23 @@ export interface ControlPlaneHandlerOptions {
   updateWorkerHost?: (input: {
     workerHostId: string
     update: UpdateWorkerHostRequest
+    actor: string | null
   }) => WorkerHostSummary | null
+  authorizePlatformAdministration?: (
+    request: Request,
+  ) => boolean | Promise<boolean>
+  listPlatformControls?: () => PlatformControlsResponse
+  updatePlatformControl?: (input: {
+    name: PlatformControlName
+    update: UpdatePlatformControlRequest
+    actor: string
+  }) => PlatformControlSummary
+  platformControlPaused?: (name: PlatformControlName) => boolean
+  revokeOrganizationPublications?: (input: {
+    organizationId: string
+    actor: string
+    reason: string
+  }) => RevokeOrganizationPublicationsResponse | Promise<RevokeOrganizationPublicationsResponse>
   authorizeEntitlementAdministration?: (
     request: Request,
   ) => boolean | Promise<boolean>
@@ -333,15 +374,39 @@ function isRegisterWorkerHostRequest(value: unknown): value is RegisterWorkerHos
 function isUpdateWorkerHostRequest(value: unknown): value is UpdateWorkerHostRequest {
   if (!isRecord(value) || Object.keys(value).length === 0) return false
   if (!hasOnlyKeys(value, [
-    'name', 'provider', 'region', 'baseURL', 'credentialKeyId', 'capacity', 'action',
+    'name', 'provider', 'region', 'baseURL', 'credentialKeyId', 'capacity', 'action', 'reason',
   ])) return false
   for (const key of ['name', 'provider', 'region', 'baseURL', 'credentialKeyId'] as const) {
     if (value[key] !== undefined && !isNonEmptyString(value[key])) return false
   }
   if (value.capacity !== undefined && !isWorkerCapacity(value.capacity, true)) return false
-  return value.action === undefined || [
+  if (value.action === undefined) return value.reason === undefined
+  if (![
     'enable', 'disable', 'drain', 'resume',
-  ].includes(String(value.action))
+  ].includes(String(value.action))) return false
+  return typeof value.reason === 'string'
+    && value.reason.trim().length >= 1
+    && value.reason.trim().length <= 256
+}
+
+function isPlatformControlName(value: string): value is PlatformControlName {
+  return ['provisioning', 'workspace_start', 'publication'].includes(value)
+}
+
+function isUpdatePlatformControlRequest(value: unknown): value is UpdatePlatformControlRequest {
+  return isRecord(value)
+    && hasOnlyKeys(value, ['paused', 'reason'])
+    && typeof value.paused === 'boolean'
+    && typeof value.reason === 'string'
+    && value.reason.trim().length >= 1
+    && value.reason.trim().length <= 256
+}
+
+function platformAdministratorActor(request: Request): string | null {
+  const actor = request.headers.get('x-nebula-admin-actor')?.trim() ?? ''
+  return actor.length >= 1 && actor.length <= 128 && !/[\u0000-\u001f\u007f]/.test(actor)
+    ? actor
+    : null
 }
 
 function isUpsertOperatorEntitlementRequest(
@@ -446,6 +511,31 @@ function contactRequestsCSV(requests: ContactRequestRecord[]): string {
   return `${header.map(csvCell).join(',')}\r\n${rows.join('\r\n')}\r\n`
 }
 
+function organizationUsageCSV(usage: OrganizationUsageResponse): string {
+  const header = [
+    'organization_id', 'range_days', 'membership_id', 'user_id', 'name',
+    'model_turns', 'input_tokens', 'output_tokens', 'cached_tokens',
+    'reasoning_tokens', 'total_tokens', 'estimated_cost_microusd',
+    'cache_savings_microusd',
+  ]
+  const rows = usage.members.map(member => [
+    usage.organizationId,
+    usage.rangeDays,
+    member.membershipId,
+    member.userId,
+    member.name,
+    member.modelTurns,
+    member.inputTokens,
+    member.outputTokens,
+    member.cachedTokens,
+    member.reasoningTokens,
+    member.totalTokens,
+    member.estimatedCostMicrousd,
+    member.cacheSavingsMicrousd,
+  ].map(csvCell).join(','))
+  return `${header.map(csvCell).join(',')}\r\n${rows.join('\r\n')}\r\n`
+}
+
 async function readBoundedBytes(request: Request, maximumBytes: number): Promise<Uint8Array> {
   const declaredLength = Number(request.headers.get('content-length'))
   if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
@@ -532,7 +622,9 @@ export function createControlPlaneHandler({
   isReady = () => true,
   authHandler,
   handleStripeWebhook,
+  handleResendWebhook,
   resolveSession,
+  getInvitationStatus,
   ensurePersonalWorkspace,
   ensureWorkspaceRunning,
   restartWorkspace,
@@ -561,6 +653,11 @@ export function createControlPlaneHandler({
   listWorkerHosts,
   registerWorkerHost,
   updateWorkerHost,
+  authorizePlatformAdministration,
+  listPlatformControls,
+  updatePlatformControl,
+  platformControlPaused,
+  revokeOrganizationPublications,
   authorizeEntitlementAdministration,
   upsertOperatorEntitlement,
   revokeOperatorEntitlement,
@@ -592,6 +689,13 @@ export function createControlPlaneHandler({
       }
       if (request.headers.has('upgrade')) {
         return json({ error: 'protocol upgrades are not supported', code: 'upgrade_not_supported' } satisfies CloudErrorResponse, 426)
+      }
+      if (platformControlPaused?.('publication')) {
+        return json({
+          error: 'published services are temporarily paused',
+          code: 'platform_publication_paused',
+          retryable: true,
+        } satisfies CloudErrorResponse, 503)
       }
       if (!proxyPublishedService) {
         return json({ error: 'published service not found', code: 'not_found' } satisfies CloudErrorResponse, 404)
@@ -663,6 +767,34 @@ export function createControlPlaneHandler({
       }
     }
 
+    if (url.pathname === resendWebhookPath) {
+      if (request.method !== 'POST') {
+        return json({ error: 'method not allowed', code: 'method_not_allowed' } satisfies CloudErrorResponse, 405)
+      }
+      if (!handleResendWebhook) {
+        return json({
+          error: 'Resend webhooks are unavailable',
+          code: 'resend_webhook_unavailable',
+          retryable: true,
+        } satisfies CloudErrorResponse, 503)
+      }
+      let rawBody: Uint8Array
+      try {
+        rawBody = await readBoundedBytes(request, 256 * 1024)
+        return json(await handleResendWebhook(rawBody, request.headers))
+      } catch (error) {
+        if (error instanceof ResendWebhookVerificationError) {
+          return json({ error: error.message, code: error.code } satisfies CloudErrorResponse, 400)
+        }
+        const tooLarge = error instanceof Error && error.message === 'request_too_large'
+        return json({
+          error: tooLarge ? 'Resend webhook is too large' : 'Resend webhook processing failed',
+          code: tooLarge ? 'request_too_large' : 'resend_webhook_processing_failed',
+          retryable: !tooLarge,
+        } satisfies CloudErrorResponse, tooLarge ? 413 : 503)
+      }
+    }
+
     const publicationCollectionMatch = url.pathname.match(workspacePublicationsPath)
     const publicationMemberMatch = url.pathname.match(workspacePublicationPath)
     if (publicationCollectionMatch || publicationMemberMatch) {
@@ -693,6 +825,13 @@ export function createControlPlaneHandler({
           : json({ error: 'workspace publication is unavailable', code: 'workspace_publication_unavailable', retryable: true } satisfies CloudErrorResponse, 503)
       }
       if (request.method === 'PUT' && name !== null) {
+        if (platformControlPaused?.('publication')) {
+          return json({
+            error: 'publication changes are temporarily paused',
+            code: 'platform_publication_paused',
+            retryable: true,
+          } satisfies CloudErrorResponse, 503)
+        }
         if (!upsertWorkspacePublication) {
           return json({ error: 'workspace publication is unavailable', code: 'workspace_publication_unavailable', retryable: true } satisfies CloudErrorResponse, 503)
         }
@@ -740,12 +879,15 @@ export function createControlPlaneHandler({
             error instanceof Error
             && 'code' in error
             && (error.code === 'published_service_limit_reached'
+              || error.code === 'organization_published_service_limit_reached'
               || error.code === 'published_service_ingress_capacity_reached')
           ) {
             return json({
               error: error.code === 'published_service_ingress_capacity_reached'
                 ? 'TCP ingress capacity reached'
-                : 'published service limit reached',
+                : error.code === 'organization_published_service_limit_reached'
+                  ? 'organization published service limit reached'
+                  : 'published service limit reached',
               code: error.code,
             } satisfies CloudErrorResponse, 409)
           }
@@ -923,6 +1065,8 @@ export function createControlPlaneHandler({
     }
 
     const workerMemberMatch = url.pathname.match(workerAdministrationMemberPath)
+    const platformControlMemberMatch = url.pathname.match(platformControlAdministrationMemberPath)
+    const organizationPublicationRevocationMatch = url.pathname.match(organizationPublicationRevocationPath)
     const entitlementMatch = url.pathname.match(operatorEntitlementAdministrationPath)
     if (entitlementMatch) {
       if (!authorizeEntitlementAdministration) {
@@ -995,6 +1139,144 @@ export function createControlPlaneHandler({
 
       return json({ error: 'route not found', code: 'not_found' } satisfies CloudErrorResponse, 404)
     }
+    if (organizationPublicationRevocationMatch) {
+      if (!authorizePlatformAdministration) {
+        return json({
+          error: 'platform administration is unavailable',
+          code: 'platform_administration_unavailable',
+          retryable: true,
+        } satisfies CloudErrorResponse, 503)
+      }
+      if (!await authorizePlatformAdministration(request)) {
+        return json({
+          error: 'platform administrator authentication required',
+          code: 'platform_administrator_authentication_required',
+        } satisfies CloudErrorResponse, 401)
+      }
+      if (request.method !== 'POST') {
+        return json({ error: 'route not found', code: 'not_found' } satisfies CloudErrorResponse, 404)
+      }
+      if (!revokeOrganizationPublications) {
+        return json({
+          error: 'organization publication revocation is unavailable',
+          code: 'organization_publication_revocation_unavailable',
+          retryable: true,
+        } satisfies CloudErrorResponse, 503)
+      }
+      let organizationId: string
+      try {
+        organizationId = decodeURIComponent(organizationPublicationRevocationMatch[1])
+      } catch {
+        return json({ error: 'organization id is invalid', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+      }
+      if (!organizationId.trim()) {
+        return json({ error: 'organization id is required', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+      }
+      const actor = platformAdministratorActor(request)
+      if (!actor) {
+        return json({
+          error: 'x-nebula-admin-actor is required for platform mutations',
+          code: 'platform_administrator_actor_required',
+        } satisfies CloudErrorResponse, 400)
+      }
+      let body: unknown
+      try {
+        body = await readBoundedJSON(request, 1024)
+      } catch {
+        return json({ error: 'request body must be valid JSON', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+      }
+      if (
+        !isRecord(body)
+        || !hasOnlyKeys(body, ['reason'])
+        || typeof body.reason !== 'string'
+        || body.reason.trim().length < 1
+        || body.reason.trim().length > 256
+      ) {
+        return json({ error: 'organization publication revocation is invalid', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+      }
+      try {
+        return json(await revokeOrganizationPublications({
+          organizationId,
+          actor,
+          reason: body.reason,
+        }))
+      } catch {
+        return json({
+          error: 'organization publications could not be revoked',
+          code: 'organization_publication_revocation_failed',
+          retryable: true,
+        } satisfies CloudErrorResponse, 500)
+      }
+    }
+
+    if (url.pathname === platformControlAdministrationPath || platformControlMemberMatch) {
+      if (!authorizePlatformAdministration) {
+        return json({
+          error: 'platform administration is unavailable',
+          code: 'platform_administration_unavailable',
+          retryable: true,
+        } satisfies CloudErrorResponse, 503)
+      }
+      if (!await authorizePlatformAdministration(request)) {
+        return json({
+          error: 'platform administrator authentication required',
+          code: 'platform_administrator_authentication_required',
+        } satisfies CloudErrorResponse, 401)
+      }
+      if (request.method === 'GET' && url.pathname === platformControlAdministrationPath) {
+        return listPlatformControls
+          ? json(listPlatformControls())
+          : json({
+              error: 'platform controls are unavailable',
+              code: 'platform_controls_unavailable',
+              retryable: true,
+            } satisfies CloudErrorResponse, 503)
+      }
+      if (request.method === 'PATCH' && platformControlMemberMatch) {
+        if (!updatePlatformControl) {
+          return json({
+            error: 'platform control updates are unavailable',
+            code: 'platform_control_update_unavailable',
+            retryable: true,
+          } satisfies CloudErrorResponse, 503)
+        }
+        let name: string
+        try {
+          name = decodeURIComponent(platformControlMemberMatch[1])
+        } catch {
+          return json({ error: 'platform control name is invalid', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+        }
+        if (!isPlatformControlName(name)) {
+          return json({ error: 'platform control name is invalid', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+        }
+        const actor = platformAdministratorActor(request)
+        if (!actor) {
+          return json({
+            error: 'x-nebula-admin-actor is required for platform mutations',
+            code: 'platform_administrator_actor_required',
+          } satisfies CloudErrorResponse, 400)
+        }
+        let body: unknown
+        try {
+          body = await readBoundedJSON(request, 1024)
+        } catch {
+          return json({ error: 'request body must be valid JSON', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+        }
+        if (!isUpdatePlatformControlRequest(body)) {
+          return json({ error: 'platform control update is invalid', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+        }
+        try {
+          return json(updatePlatformControl({ name, update: body, actor }))
+        } catch (error) {
+          return json({
+            error: error instanceof Error ? error.message : 'platform control update failed',
+            code: 'invalid_request',
+          } satisfies CloudErrorResponse, 400)
+        }
+      }
+      return json({ error: 'route not found', code: 'not_found' } satisfies CloudErrorResponse, 404)
+    }
+
     if (url.pathname === workerAdministrationPath || workerMemberMatch) {
       if (!authorizeWorkerAdministration) {
         return json({
@@ -1067,7 +1349,14 @@ export function createControlPlaneHandler({
               code: 'invalid_request',
             } satisfies CloudErrorResponse, 400)
           }
-          const worker = updateWorkerHost({ workerHostId, update })
+          const actor = update.action ? platformAdministratorActor(request) : null
+          if (update.action && !actor) {
+            return json({
+              error: 'x-nebula-admin-actor is required for worker lifecycle mutations',
+              code: 'platform_administrator_actor_required',
+            } satisfies CloudErrorResponse, 400)
+          }
+          const worker = updateWorkerHost({ workerHostId, update, actor })
           return worker
             ? json(worker)
             : json({ error: 'worker host not found', code: 'not_found' } satisfies CloudErrorResponse, 404)
@@ -1083,12 +1372,40 @@ export function createControlPlaneHandler({
     }
 
     if (url.pathname.startsWith('/api/auth/')) {
-      if (authHandler) return await authHandler(request)
+      if (authHandler) return await authHandler(request, context.clientAddress ?? null)
       return json({
         error: 'authentication is unavailable',
         code: 'auth_unavailable',
         retryable: true,
       } satisfies CloudErrorResponse, 503)
+    }
+
+    const invitationStatusMatch = url.pathname.match(/^\/api\/invitations\/([^/]+)\/status$/)
+    if (invitationStatusMatch) {
+      if (request.method !== 'GET') {
+        return json({ error: 'method not allowed', code: 'method_not_allowed' } satisfies CloudErrorResponse, 405)
+      }
+      const session = resolveSession ? await resolveSession(request) : null
+      if (!session) {
+        return json({ error: 'authentication required', code: 'authentication_required' } satisfies CloudErrorResponse, 401)
+      }
+      if (!session.email || !getInvitationStatus) {
+        return json({
+          error: 'invitation status is unavailable',
+          code: 'invitation_status_unavailable',
+          retryable: true,
+        } satisfies CloudErrorResponse, 503)
+      }
+      let invitationId: string
+      try {
+        invitationId = decodeURIComponent(invitationStatusMatch[1])
+      } catch {
+        return json({ error: 'invitation is invalid', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+      }
+      if (!invitationId.trim() || invitationId.length > 256) {
+        return json({ error: 'invitation is invalid', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+      }
+      return json(getInvitationStatus({ invitationId, userEmail: session.email }))
     }
 
     if (request.method === 'POST' && url.pathname === '/api/organizations/join') {
@@ -1375,7 +1692,8 @@ export function createControlPlaneHandler({
     }
 
     const organizationUsageRoute = url.pathname.match(organizationUsagePath)
-    if (request.method === 'GET' && organizationUsageRoute) {
+    const organizationUsageExportRoute = url.pathname.match(organizationUsageExportPath)
+    if (request.method === 'GET' && (organizationUsageRoute || organizationUsageExportRoute)) {
       const range = usageRange(url)
       if (range instanceof Response) return range
       const session = resolveSession ? await resolveSession(request) : null
@@ -1387,7 +1705,7 @@ export function createControlPlaneHandler({
       }
       let organizationId: string
       try {
-        organizationId = decodeURIComponent(organizationUsageRoute[1])
+        organizationId = decodeURIComponent((organizationUsageRoute ?? organizationUsageExportRoute)![1])
       } catch {
         return json({
           error: 'organizationId is invalid',
@@ -1418,12 +1736,22 @@ export function createControlPlaneHandler({
             // Keep serving the durable ledger when live reconciliation fails.
           }
         }
-        return json(getOrganizationUsage({
+        const usage = getOrganizationUsage({
           userId: session.userId,
           organizationId,
           since: range.since,
           rangeDays: range.days,
-        }))
+        })
+        if (organizationUsageExportRoute) {
+          return new Response(organizationUsageCSV(usage), {
+            headers: {
+              'cache-control': 'no-store',
+              'content-disposition': `attachment; filename="nubols-usage-${range.days}d.csv"`,
+              'content-type': 'text/csv; charset=utf-8',
+            },
+          })
+        }
+        return json(usage)
       } catch (error) {
         if (error instanceof UsageAccessDeniedError) {
           return json({
@@ -1478,6 +1806,13 @@ export function createControlPlaneHandler({
         })
         return json({ workspace } satisfies PersonalWorkspaceResponse)
       } catch (error) {
+        if (error instanceof PlatformControlPausedError) {
+          return json({
+            error: error.message,
+            code: error.code,
+            retryable: true,
+          } satisfies CloudErrorResponse, 503)
+        }
         if (error instanceof WorkspaceMembershipNotFoundError) {
           return json({
             error: 'organization membership required',
@@ -1533,6 +1868,13 @@ export function createControlPlaneHandler({
           organizationId: body.organizationId,
         }))
       } catch (error) {
+        if (error instanceof PlatformControlPausedError) {
+          return json({
+            error: error.message,
+            code: error.code,
+            retryable: true,
+          } satisfies CloudErrorResponse, 503)
+        }
         if (error instanceof OperatorEntitlementRequiredError) {
           return json({
             error: error.message,
@@ -1607,7 +1949,14 @@ export function createControlPlaneHandler({
           } satisfies CloudErrorResponse, 404)
         }
         return json(restarted)
-      } catch {
+      } catch (error) {
+        if (error instanceof PlatformControlPausedError) {
+          return json({
+            error: error.message,
+            code: error.code,
+            retryable: true,
+          } satisfies CloudErrorResponse, 503)
+        }
         return json({
           error: 'workspace could not be restarted',
           code: 'workspace_restart_failed',

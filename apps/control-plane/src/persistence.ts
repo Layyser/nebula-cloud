@@ -13,6 +13,7 @@ export interface InitializePersistenceOptions {
   trustedOrigins?: string[]
   emailSender?: TransactionalEmailSender
   requireEmailVerification?: boolean
+  allowedSignUpEmails?: readonly string[]
 }
 
 export async function initializePersistence({
@@ -23,6 +24,7 @@ export async function initializePersistence({
   trustedOrigins,
   emailSender,
   requireEmailVerification,
+  allowedSignUpEmails,
 }: InitializePersistenceOptions) {
   const database = openCloudDatabase({ path: databasePath })
 
@@ -35,6 +37,7 @@ export async function initializePersistence({
       trustedOrigins,
       emailSender,
       requireEmailVerification,
+      allowedSignUpEmails,
     })
     await migrateCloudAuthSchema(auth)
     migrateCloudSchema(database)

@@ -156,18 +156,27 @@ async function runConsoleCommand(
   return output.replace(new RegExp(`${marker}:0`), '')
 }
 
-async function tcpRead(host: string, port: number, timeoutMs = 5_000): Promise<string> {
-  return await new Promise<string>((resolve, reject) => {
+async function postgresProtocolProof(host: string, port: number, timeoutMs = 5_000): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
     const socket = connect({ host, port })
-    let output = ''
+    const chunks: Buffer[] = []
     const timeout = setTimeout(() => {
       socket.destroy()
       reject(new Error(`TCP route ${host}:${port} timed out`))
     }, timeoutMs)
-    socket.setEncoding('utf8')
     socket.on('data', chunk => {
-      output += chunk
-      if (output.includes('\n')) socket.end()
+      chunks.push(Buffer.from(chunk))
+      const output = Buffer.concat(chunks)
+      if (output.length === 1 && output[0] === 0x4e) {
+        const parameters = Buffer.from('user\0nubols_demo\0database\0demo\0\0')
+        const startup = Buffer.alloc(8 + parameters.length)
+        startup.writeUInt32BE(startup.length, 0)
+        startup.writeUInt32BE(196608, 4)
+        parameters.copy(startup, 8)
+        socket.write(startup)
+      } else if (output.length > 1 && output.includes(Buffer.from('NEBULA_POSTGRES_OK'))) {
+        socket.end()
+      }
     })
     socket.on('error', error => {
       clearTimeout(timeout)
@@ -175,7 +184,60 @@ async function tcpRead(host: string, port: number, timeoutMs = 5_000): Promise<s
     })
     socket.on('close', () => {
       clearTimeout(timeout)
-      resolve(output)
+      const output = Buffer.concat(chunks)
+      if (output[0] !== 0x4e || !output.includes(Buffer.from('NEBULA_POSTGRES_OK'))) {
+        reject(new Error('Published PostgreSQL endpoint did not complete SSL/startup negotiation'))
+      } else {
+        resolve()
+      }
+    })
+    socket.write(Buffer.from([0, 0, 0, 8, 4, 210, 22, 47]))
+  })
+}
+
+function varint(value: number): Buffer {
+  const bytes: number[] = []
+  let remaining = value >>> 0
+  do {
+    let byte = remaining & 0x7f
+    remaining >>>= 7
+    if (remaining) byte |= 0x80
+    bytes.push(byte)
+  } while (remaining)
+  return Buffer.from(bytes)
+}
+
+async function minecraftStatusProof(host: string, port: number, timeoutMs = 5_000): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const socket = connect({ host, port })
+    const chunks: Buffer[] = []
+    const timeout = setTimeout(() => {
+      socket.destroy()
+      reject(new Error(`Minecraft route ${host}:${port} timed out`))
+    }, timeoutMs)
+    socket.on('connect', () => {
+      const address = Buffer.from('localhost')
+      const handshake = Buffer.concat([
+        Buffer.from([0]), varint(760), varint(address.length), address,
+        Buffer.from([(port >>> 8) & 0xff, port & 0xff]), Buffer.from([1]),
+      ])
+      socket.write(Buffer.concat([varint(handshake.length), handshake, Buffer.from([1, 0])]))
+    })
+    socket.on('data', chunk => {
+      chunks.push(Buffer.from(chunk))
+      if (Buffer.concat(chunks).includes(Buffer.from('NEBULA_MINECRAFT_OK'))) socket.end()
+    })
+    socket.on('error', error => {
+      clearTimeout(timeout)
+      reject(error)
+    })
+    socket.on('close', () => {
+      clearTimeout(timeout)
+      if (!Buffer.concat(chunks).includes(Buffer.from('NEBULA_MINECRAFT_OK'))) {
+        reject(new Error('Published Minecraft endpoint did not answer a server-list ping'))
+      } else {
+        resolve()
+      }
     })
   })
 }
@@ -286,7 +348,63 @@ if (!consoleProof.includes('NEBULA_CONSOLE_OK') || !consoleProof.includes('/home
   throw new Error(`Console proof failed: ${consoleProof.slice(-1000)}`)
 }
 
-const tcpServer = Buffer.from(`import socket\nlistener = socket.socket()\nlistener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\nlistener.bind(('0.0.0.0', 15432))\nlistener.listen()\nwhile True:\n    client, _ = listener.accept()\n    with client:\n        client.sendall(b'NEBULA_TCP_OK\\n')\n`).toString('base64')
+const tcpServer = Buffer.from(`import json, socket, struct, threading
+
+def read_exact(client, length):
+    output = b''
+    while len(output) < length:
+        chunk = client.recv(length - len(output))
+        if not chunk: raise ConnectionError('closed')
+        output += chunk
+    return output
+
+def read_varint(client):
+    result = 0
+    for offset in range(5):
+        byte = read_exact(client, 1)[0]
+        result |= (byte & 0x7f) << (7 * offset)
+        if not byte & 0x80: return result
+    raise ValueError('varint')
+
+def varint(value):
+    output = bytearray()
+    while True:
+        byte = value & 0x7f
+        value >>= 7
+        output.append(byte | (0x80 if value else 0))
+        if not value: return bytes(output)
+
+def postgres(client):
+    if read_exact(client, 8) != bytes([0,0,0,8,4,210,22,47]): return
+    client.sendall(b'N')
+    length = struct.unpack('!I', read_exact(client, 4))[0]
+    startup = read_exact(client, length - 4)
+    if b'user\\x00nubols_demo\\x00' not in startup: return
+    fields = b'SFATAL\\x00C28000\\x00MNEBULA_POSTGRES_OK\\x00\\x00'
+    client.sendall(b'E' + struct.pack('!I', len(fields) + 4) + fields)
+
+def minecraft(client):
+    read_exact(client, read_varint(client))
+    read_exact(client, read_varint(client))
+    status = json.dumps({'version': {'name': 'Nubols Demo', 'protocol': 760}, 'players': {'max': 1, 'online': 0}, 'description': {'text': 'NEBULA_MINECRAFT_OK'}}, separators=(',', ':')).encode()
+    packet = b'\\x00' + varint(len(status)) + status
+    client.sendall(varint(len(packet)) + packet)
+
+def serve(port, handler):
+    listener = socket.socket()
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(('0.0.0.0', port))
+    listener.listen()
+    while True:
+        client, _ = listener.accept()
+        try:
+            with client: handler(client)
+        except Exception:
+            pass
+
+threading.Thread(target=serve, args=(15432, postgres), daemon=True).start()
+serve(25565, minecraft)
+`).toString('base64')
 await runConsoleCommand(workspaceId, owner, [
   "mkdir -p /home/nebula/workspace/demo-http",
   "printf 'NEBULA_HTTP_OK\\n' > /home/nebula/workspace/demo-http/index.html",
@@ -303,9 +421,10 @@ const privateToken = privateOutput.match(
   /X-Nubols-Publication-Token:\s*([A-Za-z0-9_-]{32,256})/,
 )?.[1]
 if (!privateToken) throw new Error(`Private publication token was not shown once: ${privateOutput}`)
-const tcpOutput = await runConsoleCommand(workspaceId, owner, `${nubols} expose --tcp database 15432`)
+await runConsoleCommand(workspaceId, owner, `${nubols} expose --tcp database 15432`)
+await runConsoleCommand(workspaceId, owner, `${nubols} expose --tcp minecraft 25565`)
 const listOutput = await runConsoleCommand(workspaceId, owner, `${nubols} ps`)
-for (const name of ['web', 'private-api', 'database']) {
+for (const name of ['web', 'private-api', 'database', 'minecraft']) {
   if (!listOutput.includes(name)) throw new Error(`nubols ps omitted ${name}`)
 }
 
@@ -322,7 +441,8 @@ const publications = await json<{
 const webPublication = publications.publications.find(item => item.name === 'web')
 const privatePublication = publications.publications.find(item => item.name === 'private-api')
 const tcpPublication = publications.publications.find(item => item.name === 'database')
-if (!webPublication || !privatePublication || !tcpPublication?.ingressPort) {
+const minecraftPublication = publications.publications.find(item => item.name === 'minecraft')
+if (!webPublication || !privatePublication || !tcpPublication?.ingressPort || !minecraftPublication?.ingressPort) {
   throw new Error(`Publication list is incomplete: ${JSON.stringify(publications)}`)
 }
 
@@ -345,9 +465,8 @@ const allowedPrivate = await fetch(directPublishedURL(privatePublication.publicU
 if (allowedPrivate.status !== 200 || !(await allowedPrivate.text()).includes('NEBULA_HTTP_OK')) {
   throw new Error(`Authenticated private HTTP publication failed (${allowedPrivate.status})`)
 }
-if (!(await tcpRead('127.0.0.1', tcpPublication.ingressPort)).includes('NEBULA_TCP_OK')) {
-  throw new Error(`Raw TCP publication failed: ${tcpOutput}`)
-}
+await postgresProtocolProof('127.0.0.1', tcpPublication.ingressPort)
+await minecraftStatusProof('127.0.0.1', minecraftPublication.ingressPort)
 
 const database = openCloudDatabase({ path: databasePath })
 try {

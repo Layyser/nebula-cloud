@@ -1,6 +1,8 @@
 import { createConnection, createServer, type Socket } from 'node:net'
 import { expect, test } from 'bun:test'
 import { TCPIngress } from './tcpIngress'
+import { PublicationConnectionLimiter } from './publicationConnectionLimiter'
+import { PublicationBandwidthLimiter } from './publicationBandwidthLimiter'
 
 function listenPort(server: ReturnType<typeof createServer>): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -45,12 +47,32 @@ test('TCP ingress allocates a port and bridges raw bytes through the Worker tunn
   const ingress = new TCPIngress({
     bindHost: '127.0.0.1',
     resolveRoute: port => port === ingressPort
-      ? { ingressPort: port, workspaceId: 'workspace-a', targetPort: 5432 }
+      ? {
+          routeId: 'publication-a',
+          ingressPort: port,
+          workspaceId: 'workspace-a',
+          organizationId: 'organization-a',
+          workerId: 'worker-a',
+          targetPort: 5432,
+        }
       : null,
     resolveWorker: workspaceId => ({
       baseURL: `http://127.0.0.1:${workerPort}`,
       token: 'worker-service-secret',
       workspaceId,
+    }),
+    connectionLimiter: new PublicationConnectionLimiter({
+      global: 8,
+      perWorker: 8,
+      perOrganization: 8,
+      perRoute: 8,
+    }),
+    bandwidthLimiter: new PublicationBandwidthLimiter({
+      windowMs: 60_000,
+      globalBytes: 1024 * 1024,
+      perWorkerBytes: 1024 * 1024,
+      perOrganizationBytes: 1024 * 1024,
+      perRouteBytes: 1024 * 1024,
     }),
   })
   await ingress.activate(ingressPort)
@@ -62,8 +84,11 @@ test('TCP ingress allocates a port and bridges raw bytes through the Worker tunn
       client.once('connect', () => client.write('native-postgres-wire'))
       client.on('data', data => resolve(Buffer.from(data)))
     })
-    client.destroy()
     expect(received.toString()).toBe('native-postgres-wire')
+    const closed = new Promise<void>(resolve => client.once('close', () => resolve()))
+    await ingress.deactivate(ingressPort)
+    await closed
+    expect(ingress.activeListenerPorts).toEqual([])
   } finally {
     await ingress.close()
     await new Promise<void>(resolve => worker.close(() => resolve()))

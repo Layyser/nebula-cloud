@@ -82,6 +82,30 @@ Worker client forwards the request to the Worker's private service endpoint;
 the Worker inspects the exact ready workspace and derives its current private
 container address. Revocation removes the slug from routing immediately.
 
+The durable `publication` platform control is a fail-closed emergency gate.
+While paused, HTTP requests and new raw-TCP connections are rejected and new
+publication updates are denied, while listings and explicit service revocation
+remain available. Existing records are retained for diagnosis and controlled
+recovery. See the emergency controls section in
+[`worker-connection.md`](worker-connection.md).
+
+An authenticated platform operator can immediately revoke every publication in
+one organization without deleting its workspaces:
+
+```bash
+curl --fail --request POST \
+  http://127.0.0.1:7790/internal/v1/organizations/ORG_ID/publications/revoke \
+  --header "Authorization: Bearer $NEBULA_PLATFORM_ADMIN_TOKEN" \
+  --header "X-Nebula-Admin-Actor: admin@nubols.com" \
+  --header "Content-Type: application/json" \
+  --data '{"reason":"Organization credential compromise"}'
+```
+
+The database revocation is atomic across the organization. HTTP resolution
+fails immediately; raw-TCP listeners are closed and active tunnels are
+terminated. The ordinary `nubols stop NAME` path remains the narrower
+service-specific revocation mechanism.
+
 Application Authorization and Cookie headers are preserved, but Cloud's Worker
 credential travels separately and is removed before the application receives
 the request. Internal and hop-by-hop response headers are removed while
@@ -124,7 +148,29 @@ and system context; persistent `/home/nebula` data is preserved.
 
 - HTTP publication requests reject WebSocket upgrades, CONNECT, and TRACE;
   raw TCP uses a separate allocated listener and is protocol passthrough.
-- Five active publications per workspace.
+- Five active publications per workspace and twenty active publications per
+  organization. Only non-expired, non-revoked routes consume quota; expiry or
+  revocation releases it. Deployments may tighten these bounds with
+  `NEBULA_WORKSPACE_PUBLICATION_LIMIT` and
+  `NEBULA_ORGANIZATION_PUBLICATION_LIMIT`.
+- HTTP requests and raw TCP tunnels share one in-process connection budget.
+  The defaults are 512 globally, 256 per worker, 64 per organization, and 32
+  per route. `NEBULA_PUBLICATION_MAX_CONNECTIONS`,
+  `NEBULA_PUBLICATION_MAX_CONNECTIONS_PER_WORKER`,
+  `NEBULA_PUBLICATION_MAX_CONNECTIONS_PER_ORGANIZATION`, and
+  `NEBULA_PUBLICATION_MAX_CONNECTIONS_PER_ROUTE` can tighten them. HTTP
+  rejection is a stable `429` response; TCP excess is rejected before opening
+  a worker tunnel.
+- Upload and download bytes for both protocols share fixed-window bandwidth
+  accounting. The default one-minute limits are 2 GiB globally, 1 GiB per
+  worker, 256 MiB per organization, and 128 MiB per route. Configure the
+  window and scopes with `NEBULA_PUBLICATION_BANDWIDTH_WINDOW_MS`,
+  `NEBULA_PUBLICATION_BANDWIDTH_BYTES_PER_WINDOW`,
+  `NEBULA_PUBLICATION_BANDWIDTH_BYTES_PER_WORKER_WINDOW`,
+  `NEBULA_PUBLICATION_BANDWIDTH_BYTES_PER_ORGANIZATION_WINDOW`, and
+  `NEBULA_PUBLICATION_BANDWIDTH_BYTES_PER_ROUTE_WINDOW`. A declared HTTP body
+  that cannot fit is rejected with `429`; a chunked HTTP stream or raw TCP
+  tunnel crossing a limit is terminated immediately.
 - 32 MiB maximum request body.
 - The application-layer wildcard hostname contract exists, but DNS, certificate
   issuance, and production ingress deployment are not completed here.
@@ -133,5 +179,10 @@ and system context; persistent `/home/nebula` data is preserved.
   token; PostgreSQL, Minecraft, or another service must provide its own
   authentication. Browser-oriented organization/session policy is not
   implemented.
-- No global bandwidth/rate controls yet; those remain required before broad
-  public availability.
+- The control plane reconciles the desired set of active, non-expired TCP
+  routes every five seconds by default. Revoked or expired listeners are
+  unbound and their active tunnels are closed; missed activations are retried.
+  `NEBULA_TCP_PUBLICATION_RECONCILE_INTERVAL_MS` controls this interval.
+- The first bandwidth counters are local to one control-plane process. A
+  production multi-replica deployment must move the same atomic scopes into a
+  shared rate-limit store before adding replicas.

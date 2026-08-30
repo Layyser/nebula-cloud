@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite'
 import { betterAuth } from 'better-auth'
+import { APIError, createAuthMiddleware } from 'better-auth/api'
 import { getMigrations } from 'better-auth/db/migration'
 import { organization } from 'better-auth/plugins'
 import { mkdir, writeFile } from 'node:fs/promises'
@@ -145,6 +146,7 @@ export interface CreateCloudAuthOptions {
   trustedOrigins?: string[]
   emailSender?: TransactionalEmailSender
   requireEmailVerification?: boolean
+  allowedSignUpEmails?: readonly string[]
 }
 
 export function createCloudAuth({
@@ -155,6 +157,7 @@ export function createCloudAuth({
   trustedOrigins = [],
   emailSender,
   requireEmailVerification = false,
+  allowedSignUpEmails,
 }: CreateCloudAuthOptions) {
   if (secret.trim().length < 32) {
     throw new Error('Better Auth secret must contain at least 32 characters')
@@ -162,6 +165,12 @@ export function createCloudAuth({
   const publicAppURL = normalizeBaseURL(appBaseURL)
   if (requireEmailVerification && !emailSender) {
     throw new Error('Email verification requires a transactional email sender')
+  }
+  const signUpAllowlist = allowedSignUpEmails
+    ? new Set(allowedSignUpEmails.map(email => email.trim().toLowerCase()))
+    : null
+  if (signUpAllowlist?.has('')) {
+    throw new Error('Allowed sign-up emails cannot contain an empty address')
   }
 
   return betterAuth({
@@ -212,6 +221,24 @@ export function createCloudAuth({
         generateId: 'uuid',
       },
     },
+    ...(signUpAllowlist
+      ? {
+          hooks: {
+            before: createAuthMiddleware(async context => {
+              if (context.path !== '/sign-up/email') return
+              const email = typeof context.body?.email === 'string'
+                ? context.body.email.trim().toLowerCase()
+                : ''
+              if (!signUpAllowlist.has(email)) {
+                throw APIError.from('FORBIDDEN', {
+                  code: 'SIGN_UP_RESTRICTED',
+                  message: 'Account creation is currently restricted.',
+                })
+              }
+            }),
+          },
+        }
+      : {}),
     plugins: [
       organization({
         requireEmailVerificationOnInvitation: true,

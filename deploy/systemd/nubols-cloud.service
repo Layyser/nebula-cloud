@@ -1,0 +1,32 @@
+[Unit]
+Description=Nubols Cloud control plane
+After=network-online.target nebula-worker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nubols
+Group=nubols
+EnvironmentFile=/etc/nubols/cloud.env
+WorkingDirectory=/opt/nubols/current/nebula-cloud/apps/control-plane
+ExecStart=/usr/local/bin/bun /opt/nubols/current/nebula-cloud/apps/control-plane/dist/index.js
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=20s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+ReadWritePaths=/var/lib/nubols-cloud
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

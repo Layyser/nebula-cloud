@@ -28,6 +28,9 @@ export function AuthPage({
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [verificationRequired, setVerificationRequired] = useState(false)
+  const [resetLinkUnavailable, setResetLinkUnavailable] = useState(
+    initialMode === 'reset-password' && !resetToken,
+  )
   const [submitting, setSubmitting] = useState(false)
 
   const submit = async (event: FormEvent) => {
@@ -53,7 +56,7 @@ export function AuthPage({
 
       if (mode === 'reset-password') {
         if (!resetToken) {
-          setError('This password reset link is invalid or incomplete.')
+          setResetLinkUnavailable(true)
           return
         }
         const result = await authClient.resetPassword({
@@ -61,7 +64,11 @@ export function AuthPage({
           token: resetToken,
         })
         if (result.error) {
-          setError(result.error.message || 'Could not reset your password')
+          if (result.error.code === 'INVALID_TOKEN' || result.error.code === 'TOKEN_EXPIRED') {
+            setResetLinkUnavailable(true)
+          } else {
+            setError(result.error.message || 'Could not reset your password')
+          }
           return
         }
         setMode('sign-in')
@@ -76,7 +83,7 @@ export function AuthPage({
             name: name.trim(),
             email: email.trim(),
             password,
-            callbackURL: `${window.location.origin}/app`,
+            callbackURL: `${window.location.origin}/verify-email`,
           })
         : await authClient.signIn.email({ email: email.trim(), password })
 
@@ -104,7 +111,7 @@ export function AuthPage({
     try {
       const result = await authClient.sendVerificationEmail({
         email: email.trim(),
-        callbackURL: `${window.location.origin}/app`,
+        callbackURL: `${window.location.origin}/verify-email`,
       })
       if (result.error) {
         setError(result.error.message || 'Could not resend the verification email')
@@ -173,7 +180,24 @@ export function AuthPage({
           </button>
         )}
 
-        <form onSubmit={submit} className="mt-6 space-y-4">
+        {resetLinkUnavailable ? (
+          <div className="mt-6">
+            <p role="alert" className="rounded-xl bg-[var(--color-status-danger-surface)] px-3 py-2.5 text-xs leading-5 text-[var(--color-status-danger-strong)]">
+              This password reset link has expired or was already used. Request a fresh link to continue.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setMode('forgot-password')
+                setResetLinkUnavailable(false)
+                setPassword('')
+              }}
+              className="mt-5 flex h-11 w-full items-center justify-center rounded-full bg-[var(--color-control-primary)] text-sm font-semibold text-[var(--color-control-on-primary)]"
+            >
+              Request a new reset link
+            </button>
+          </div>
+        ) : <form onSubmit={submit} className="mt-6 space-y-4">
           {notice && (
             <p role="status" className="rounded-xl bg-[var(--color-status-warning-surface)] px-3 py-2.5 text-xs leading-5 text-[var(--color-status-warning-strong)]">
               {notice}
@@ -272,7 +296,7 @@ export function AuthPage({
               </>
             )}
           </button>
-        </form>
+        </form>}
 
         <p className="mt-5 text-center text-[11px] leading-5 text-[var(--color-text-subtle)]">
           Terms and privacy pages will be added before public launch.

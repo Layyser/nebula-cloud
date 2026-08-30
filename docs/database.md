@@ -19,8 +19,9 @@ Better Auth owns and migrates:
 The Better Auth organization plugin is enabled from the beginning so Nebula
 does not create a competing organization or membership schema. Authentication
 routes, login UI, sessions, organization selection, memberships, and invitation
-records are implemented in CLOUD-03. Invitation email delivery remains
-deferred; creating an invitation currently persists the Better Auth record.
+records are implemented in CLOUD-03. Verification, recovery, and invitation
+messages use the configured transactional transport, and `/invite` requires the
+signed-in address to match the recipient.
 
 Nebula owns:
 
@@ -32,6 +33,7 @@ Nebula owns:
 - `audit_event`, `contact_request`, worker placement, and published-service state
 - `entitlement` (migration 0018)
 - `billing_customer`, `subscription`, and `stripe_event` (migration 0019)
+- `email_delivery` diagnostics (migration 0023)
 
 `workspace.member_id` is unique, enforcing one personal workspace per
 organization membership. Database insert and update guards additionally require
@@ -50,6 +52,23 @@ Worker credentials and runtime instances remain outside this database.
 Provisioning jobs persist an idempotent `ensure_running` operation, claim
 leases, retry timing, attempts, and bounded failure details. See
 [`provisioning-jobs.md`](provisioning-jobs.md).
+
+## Transactional email diagnostics
+
+Every configured transactional send creates one `email_delivery` row before
+the provider is called and then records its opaque provider message ID and
+bounded status. The table stores a keyed recipient hash, message kind, provider,
+status, timestamps, and a bounded error code. It never stores the recipient
+address, subject, text, HTML, invitation URL, reset token, or verification
+token.
+
+`POST /api/webhooks/resend` accepts at most 256 KiB and validates the Svix ID,
+timestamp, and HMAC signature against `RESEND_WEBHOOK_SECRET` before parsing the
+body. Delivered, delayed, bounced, complained, and suppressed events project by
+provider message ID; terminal suppression events cannot be regressed by a late
+delivery event. A recipient with a permanent bounce, complaint, or suppression
+is rejected by the diagnostic sender before Resend is called again. Production
+startup requires the webhook secret whenever the Resend transport is used.
 
 ## Billing projection
 

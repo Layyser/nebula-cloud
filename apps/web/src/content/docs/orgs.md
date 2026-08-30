@@ -24,7 +24,7 @@ Admins share a signed join code that looks like `NBL-XXXXXXXXXXXX-XXXXXXXXXXXX`:
 2. Paste the code.
 3. Membership activates immediately — no email round-trips.
 
-There is one active code per organization at any time; rotating it instantly invalidates every copy already shared. Email invitations are not part of this release.
+There is one active code per organization at any time; rotating it instantly invalidates every copy already shared. Owners and administrators can also send email invitations, which must be accepted while signed in with the invited address.
 
 ## Managing members
 

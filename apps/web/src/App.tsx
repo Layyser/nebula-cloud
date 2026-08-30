@@ -49,7 +49,9 @@ import {
 } from './auth/sessionLifecycle'
 import { AuthLoading } from './components/auth/AuthLoading'
 import { AuthPage } from './components/auth/AuthPage'
+import { VerificationResultPage } from './components/auth/VerificationResultPage'
 import { OrganizationDashboard } from './components/cloud/OrganizationDashboard'
+import { InvitationPage } from './components/organization/InvitationPage'
 import { WorkspaceStartup } from './components/cloud/WorkspaceStartup'
 import { ContactPage } from './components/contact/ContactPage'
 import { DocsPage } from './components/docs/DocsPage'
@@ -102,6 +104,8 @@ export default function App() {
   const [cloudBackgroundVisible, setCloudBackgroundVisible] = useState(true)
   const cloudRoute = pathname === '/login'
     || pathname === '/reset-password'
+    || pathname === '/invite'
+    || pathname === '/verify-email'
     || pathname.startsWith('/app')
     || isAuthenticationCallback(pathname)
   const plansRoute = pathname === '/plans' || pathname === '/pricing'
@@ -208,6 +212,16 @@ function CloudSessionRoute({
     if (isAuthenticationCallback(pathname)) {
       return <AuthLoading label="Completing sign in" />
     }
+    if (pathname === '/verify-email') {
+      return (
+        <VerificationResultPage
+          errorCode={new URLSearchParams(window.location.search).get('error') || ''}
+          authenticated={false}
+          onBack={() => navigate('/')}
+          onContinue={() => navigate('/login')}
+        />
+      )
+    }
     return (
       <AuthPage
         onBack={() => navigate('/')}
@@ -218,7 +232,9 @@ function CloudSessionRoute({
         onAuthenticated={() => {
           clearSessionExpired()
           setSessionExpired(false)
-          void sessionQuery.refetch().then(() => navigate('/app'))
+          void sessionQuery.refetch().then(() => navigate(
+            pathname === '/invite' ? `/invite${window.location.search}` : '/app',
+          ))
         }}
         notice={sessionExpired
           ? 'Your session expired. Sign in again to continue.'
@@ -230,6 +246,28 @@ function CloudSessionRoute({
     return <AuthLoading />
   }
   const session = sessionQuery.data
+
+  if (pathname === '/verify-email') {
+    return (
+      <VerificationResultPage
+        errorCode={new URLSearchParams(window.location.search).get('error') || ''}
+        authenticated
+        onBack={() => navigate('/')}
+        onContinue={() => navigate('/app')}
+      />
+    )
+  }
+
+  if (pathname === '/invite') {
+    return (
+      <InvitationPage
+        invitationId={new URLSearchParams(window.location.search).get('id') || ''}
+        userEmail={session.user.email}
+        onBack={() => navigate('/')}
+        onAccepted={() => navigate('/app')}
+      />
+    )
+  }
 
   return (
     <OrganizationGate onBack={() => navigate('/')}>

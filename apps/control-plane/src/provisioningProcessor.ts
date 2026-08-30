@@ -4,6 +4,7 @@ import {
   finishProvisioningJob,
   ProvisioningJobLeaseLostError,
 } from '@nebula-cloud/database'
+import { safeLogJSON } from './safeLog'
 import {
   WorkerClientError,
 } from './workerClient'
@@ -24,6 +25,7 @@ export interface ProvisioningProcessorOptions {
   leaseDurationMs?: number
   maximumAttempts?: number
   authorizeWorkspace?: (workspaceId: string) => boolean
+  canProcess?: () => boolean
 }
 
 export class ProvisioningProcessor {
@@ -34,6 +36,7 @@ export class ProvisioningProcessor {
   readonly #leaseDurationMs: number
   readonly #maximumAttempts: number
   readonly #authorizeWorkspace: (workspaceId: string) => boolean
+  readonly #canProcess: () => boolean
   #timer: ReturnType<typeof setTimeout> | null = null
   #controller: AbortController | null = null
   #stopped = true
@@ -46,6 +49,7 @@ export class ProvisioningProcessor {
     leaseDurationMs = 180000,
     maximumAttempts = 8,
     authorizeWorkspace = () => true,
+    canProcess = () => true,
   }: ProvisioningProcessorOptions) {
     this.#database = database
     this.#worker = worker
@@ -54,6 +58,7 @@ export class ProvisioningProcessor {
     this.#leaseDurationMs = leaseDurationMs
     this.#maximumAttempts = maximumAttempts
     this.#authorizeWorkspace = authorizeWorkspace
+    this.#canProcess = canProcess
   }
 
   start(): void {
@@ -71,6 +76,7 @@ export class ProvisioningProcessor {
   }
 
   async processNext(): Promise<boolean> {
+    if (!this.#canProcess()) return false
     const job = claimProvisioningJob(this.#database, {
       leaseOwner: this.#processorId,
       leaseDurationMs: this.#leaseDurationMs,
@@ -98,7 +104,7 @@ export class ProvisioningProcessor {
         outcome: 'succeeded',
         workerWorkspaceId: result.workspaceId,
       })
-      console.info(JSON.stringify({
+      console.info(safeLogJSON({
         event: 'workspace_provisioned',
         workspaceId: job.workspaceId,
         jobId: job.id,
@@ -131,7 +137,7 @@ export class ProvisioningProcessor {
       } catch (finishError) {
         if (!(finishError instanceof ProvisioningJobLeaseLostError)) throw finishError
       }
-      console.error(JSON.stringify({
+      console.error(safeLogJSON({
         event: 'workspace_provisioning_failed',
         workspaceId: job.workspaceId,
         jobId: job.id,
@@ -151,7 +157,7 @@ export class ProvisioningProcessor {
       this.#timer = null
       void this.processNext()
         .catch(error => {
-          console.error(JSON.stringify({
+          console.error(safeLogJSON({
             event: 'provisioning_processor_error',
             message: error instanceof Error ? error.message : 'unknown error',
           }))

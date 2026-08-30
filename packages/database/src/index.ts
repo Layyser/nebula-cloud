@@ -714,11 +714,184 @@ const migrations = [
         ON entitlement(organization_id, source, state);
     `,
   },
+  {
+    id: '0021_platform_controls',
+    sql: `
+      CREATE TABLE platform_control (
+        name TEXT PRIMARY KEY
+          CHECK (name IN ('provisioning', 'workspace_start', 'publication')),
+        paused INTEGER NOT NULL DEFAULT 0 CHECK (paused IN (0, 1)),
+        reason TEXT NOT NULL DEFAULT '' CHECK (length(reason) <= 256),
+        updated_by TEXT NOT NULL CHECK (length(updated_by) BETWEEN 1 AND 128),
+        updated_at INTEGER NOT NULL CHECK (updated_at >= 0)
+      );
+
+      INSERT INTO platform_control (name, paused, reason, updated_by, updated_at)
+      VALUES
+        ('provisioning', 0, '', 'schema-migration', 0),
+        ('workspace_start', 0, '', 'schema-migration', 0),
+        ('publication', 0, '', 'schema-migration', 0);
+
+      CREATE TABLE platform_control_audit_event (
+        event_id TEXT PRIMARY KEY,
+        actor TEXT NOT NULL CHECK (length(actor) BETWEEN 1 AND 128),
+        control_name TEXT NOT NULL
+          CHECK (control_name IN ('provisioning', 'workspace_start', 'publication')),
+        previous_paused INTEGER NOT NULL CHECK (previous_paused IN (0, 1)),
+        paused INTEGER NOT NULL CHECK (paused IN (0, 1)),
+        result TEXT NOT NULL CHECK (result IN ('success', 'failure')),
+        reason TEXT NOT NULL CHECK (length(reason) BETWEEN 1 AND 256),
+        occurred_at INTEGER NOT NULL CHECK (occurred_at >= 0)
+      );
+
+      CREATE INDEX platform_control_audit_time_idx
+        ON platform_control_audit_event(occurred_at DESC, event_id DESC);
+
+      CREATE TRIGGER platform_control_audit_update_guard
+      BEFORE UPDATE ON platform_control_audit_event
+      BEGIN
+        SELECT RAISE(ABORT, 'platform control audit events are append-only');
+      END;
+
+      CREATE TRIGGER platform_control_audit_delete_guard
+      BEFORE DELETE ON platform_control_audit_event
+      BEGIN
+        SELECT RAISE(ABORT, 'platform control audit events are append-only');
+      END;
+    `,
+  },
+  {
+    id: '0022_platform_operation_audit',
+    sql: `
+      CREATE TABLE platform_operation_audit_event (
+        event_id TEXT PRIMARY KEY,
+        actor TEXT NOT NULL CHECK (length(actor) BETWEEN 1 AND 128),
+        action TEXT NOT NULL CHECK (length(action) BETWEEN 1 AND 128),
+        target_type TEXT NOT NULL CHECK (length(target_type) BETWEEN 1 AND 128),
+        target_id TEXT NOT NULL CHECK (length(target_id) BETWEEN 1 AND 128),
+        result TEXT NOT NULL CHECK (result IN ('success', 'failure')),
+        metadata_json TEXT NOT NULL CHECK (length(metadata_json) <= 4096),
+        occurred_at INTEGER NOT NULL CHECK (occurred_at >= 0)
+      );
+
+      CREATE INDEX platform_operation_audit_time_idx
+        ON platform_operation_audit_event(occurred_at DESC, event_id DESC);
+
+      CREATE TRIGGER platform_operation_audit_update_guard
+      BEFORE UPDATE ON platform_operation_audit_event
+      BEGIN
+        SELECT RAISE(ABORT, 'platform operation audit events are append-only');
+      END;
+
+      CREATE TRIGGER platform_operation_audit_delete_guard
+      BEFORE DELETE ON platform_operation_audit_event
+      BEGIN
+        SELECT RAISE(ABORT, 'platform operation audit events are append-only');
+      END;
+    `,
+  },
+  {
+    id: '0023_email_delivery_diagnostics',
+    sql: `
+      CREATE TABLE email_delivery (
+        id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL CHECK (length(provider) BETWEEN 1 AND 32),
+        provider_message_id TEXT UNIQUE,
+        kind TEXT NOT NULL CHECK (kind IN (
+          'email-verification', 'password-reset',
+          'organization-invitation', 'contact-notification'
+        )),
+        recipient_hash TEXT NOT NULL CHECK (
+          length(recipient_hash) = 64
+          AND recipient_hash NOT GLOB '*[^a-f0-9]*'
+        ),
+        status TEXT NOT NULL CHECK (status IN (
+          'sending', 'sent', 'delivered', 'delayed', 'bounced',
+          'complained', 'suppressed', 'failed'
+        )),
+        error_code TEXT CHECK (error_code IS NULL OR length(error_code) <= 128),
+        created_at INTEGER NOT NULL CHECK (created_at >= 0),
+        updated_at INTEGER NOT NULL CHECK (updated_at >= created_at)
+      );
+
+      CREATE INDEX email_delivery_recipient_status_idx
+        ON email_delivery(recipient_hash, status, updated_at DESC);
+      CREATE INDEX email_delivery_status_time_idx
+        ON email_delivery(status, updated_at DESC);
+    `,
+  },
+  {
+    id: '0024_auth_rate_limit_bucket',
+    sql: `
+      CREATE TABLE auth_rate_limit_bucket (
+        scope TEXT NOT NULL CHECK (scope IN ('ip', 'address')),
+        subject_hash TEXT NOT NULL CHECK (
+          length(subject_hash) = 64
+          AND subject_hash NOT GLOB '*[^a-f0-9]*'
+        ),
+        action TEXT NOT NULL CHECK (length(action) BETWEEN 1 AND 64),
+        window_started_at INTEGER NOT NULL CHECK (window_started_at >= 0),
+        request_count INTEGER NOT NULL DEFAULT 0 CHECK (request_count >= 0),
+        updated_at INTEGER NOT NULL CHECK (updated_at >= window_started_at),
+        PRIMARY KEY (scope, subject_hash, action)
+      ) WITHOUT ROWID;
+
+      CREATE INDEX auth_rate_limit_bucket_updated_idx
+        ON auth_rate_limit_bucket(updated_at);
+    `,
+  },
 ] as const
 
 export type WorkspaceState = 'pending' | 'provisioning' | 'ready' | 'stopped' | 'failed'
 export type ProvisioningJobStatus = 'queued' | 'running' | 'succeeded' | 'failed'
 export type WorkerHostState = 'unknown' | 'healthy' | 'draining' | 'unavailable'
+export type PlatformControlName = 'provisioning' | 'workspace_start' | 'publication'
+export type EmailDeliveryKind =
+  | 'email-verification'
+  | 'password-reset'
+  | 'organization-invitation'
+  | 'contact-notification'
+export type EmailDeliveryStatus =
+  | 'sending'
+  | 'sent'
+  | 'delivered'
+  | 'delayed'
+  | 'bounced'
+  | 'complained'
+  | 'suppressed'
+  | 'failed'
+
+export interface EmailDeliveryDiagnostic {
+  id: string
+  provider: string
+  providerMessageId: string | null
+  kind: EmailDeliveryKind
+  recipientHash: string
+  status: EmailDeliveryStatus
+  errorCode: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface PlatformControl {
+  name: PlatformControlName
+  paused: boolean
+  reason: string
+  updatedBy: string
+  updatedAt: number
+}
+
+export class PlatformControlPausedError extends Error {
+  readonly code: string
+  readonly control: PlatformControlName
+
+  constructor(control: PlatformControlName) {
+    super(`Platform ${control.replace('_', ' ')} is paused`)
+    this.name = 'PlatformControlPausedError'
+    this.control = control
+    this.code = `platform_${control}_paused`
+  }
+}
 
 export interface PersonalWorkspace {
   id: string
@@ -1232,12 +1405,211 @@ export interface WorkspaceOwnerIdentity {
   organizationId: string
 }
 
+export type OrganizationInvitationAcceptanceState =
+  | 'pending'
+  | 'expired'
+  | 'already_used'
+  | 'wrong_account'
+  | 'not_found'
+
+export interface OrganizationInvitationStatus {
+  state: OrganizationInvitationAcceptanceState
+  organizationName?: string
+  role?: string
+  expiresAt?: number
+}
+
+interface OrganizationInvitationStatusRow {
+  email: string
+  role: string | null
+  status: string
+  expires_at: number
+  organization_name: string
+}
+
+interface EmailDeliveryRow {
+  id: string
+  provider: string
+  provider_message_id: string | null
+  kind: EmailDeliveryKind
+  recipient_hash: string
+  status: EmailDeliveryStatus
+  error_code: string | null
+  created_at: number
+  updated_at: number
+}
+
+function toEmailDeliveryDiagnostic(row: EmailDeliveryRow): EmailDeliveryDiagnostic {
+  return {
+    id: row.id,
+    provider: row.provider,
+    providerMessageId: row.provider_message_id,
+    kind: row.kind,
+    recipientHash: row.recipient_hash,
+    status: row.status,
+    errorCode: row.error_code,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function emailDiagnosticText(value: string, field: string, maximum: number): string {
+  const normalized = value.trim()
+  if (!normalized || normalized.length > maximum) throw new Error(`${field} is invalid`)
+  return normalized
+}
+
+export function beginEmailDelivery(
+  database: Database,
+  input: {
+    id: string
+    provider: string
+    kind: EmailDeliveryKind
+    recipientHash: string
+    now?: () => number
+  },
+): EmailDeliveryDiagnostic {
+  const id = emailDiagnosticText(input.id, 'Email delivery id', 128)
+  const provider = emailDiagnosticText(input.provider, 'Email provider', 32)
+  if (!/^[a-f0-9]{64}$/.test(input.recipientHash)) {
+    throw new Error('Email recipient hash is invalid')
+  }
+  const timestamp = (input.now ?? Date.now)()
+  database.query(`
+    INSERT INTO email_delivery (
+      id, provider, provider_message_id, kind, recipient_hash,
+      status, error_code, created_at, updated_at
+    ) VALUES (?, ?, NULL, ?, ?, 'sending', NULL, ?, ?)
+  `).run(id, provider, input.kind, input.recipientHash, timestamp, timestamp)
+  return getEmailDelivery(database, id)!
+}
+
+export function markEmailDeliverySent(
+  database: Database,
+  input: { id: string; providerMessageId: string; now?: () => number },
+): EmailDeliveryDiagnostic | null {
+  const providerMessageId = emailDiagnosticText(
+    input.providerMessageId,
+    'Email provider message id',
+    256,
+  )
+  database.query(`
+    UPDATE email_delivery
+    SET provider_message_id = ?, status = 'sent', error_code = NULL, updated_at = ?
+    WHERE id = ? AND status = 'sending'
+  `).run(providerMessageId, (input.now ?? Date.now)(), input.id)
+  return getEmailDelivery(database, input.id)
+}
+
+export function markEmailDeliveryFailed(
+  database: Database,
+  input: { id: string; errorCode: string; now?: () => number },
+): EmailDeliveryDiagnostic | null {
+  const errorCode = emailDiagnosticText(input.errorCode, 'Email error code', 128)
+  database.query(`
+    UPDATE email_delivery
+    SET status = 'failed', error_code = ?, updated_at = ?
+    WHERE id = ? AND status = 'sending'
+  `).run(errorCode, (input.now ?? Date.now)(), input.id)
+  return getEmailDelivery(database, input.id)
+}
+
+export function projectEmailDeliveryStatus(
+  database: Database,
+  input: {
+    providerMessageId: string
+    status: Extract<EmailDeliveryStatus, 'delivered' | 'delayed' | 'bounced' | 'complained' | 'suppressed'>
+    now?: () => number
+  },
+): EmailDeliveryDiagnostic | null {
+  const providerMessageId = emailDiagnosticText(
+    input.providerMessageId,
+    'Email provider message id',
+    256,
+  )
+  return database.transaction(() => {
+    const current = database.query<EmailDeliveryRow, [string]>(`
+      SELECT * FROM email_delivery WHERE provider_message_id = ? LIMIT 1
+    `).get(providerMessageId)
+    if (!current) return null
+    const terminal = new Set<EmailDeliveryStatus>(['bounced', 'complained', 'suppressed'])
+    if (terminal.has(current.status)) return toEmailDeliveryDiagnostic(current)
+    if (current.status === 'delivered' && input.status === 'delayed') {
+      return toEmailDeliveryDiagnostic(current)
+    }
+    database.query(`
+      UPDATE email_delivery SET status = ?, error_code = NULL, updated_at = ?
+      WHERE id = ?
+    `).run(input.status, (input.now ?? Date.now)(), current.id)
+    return getEmailDelivery(database, current.id)
+  })()
+}
+
+export function getEmailDelivery(database: Database, id: string): EmailDeliveryDiagnostic | null {
+  const row = database.query<EmailDeliveryRow, [string]>(`
+    SELECT * FROM email_delivery WHERE id = ? LIMIT 1
+  `).get(id)
+  return row ? toEmailDeliveryDiagnostic(row) : null
+}
+
+export function isEmailRecipientSuppressed(database: Database, recipientHash: string): boolean {
+  if (!/^[a-f0-9]{64}$/.test(recipientHash)) return true
+  return Boolean(database.query<{ suppressed: number }, [string]>(`
+    SELECT 1 AS suppressed FROM email_delivery
+    WHERE recipient_hash = ? AND status IN ('bounced', 'complained', 'suppressed')
+    LIMIT 1
+  `).get(recipientHash))
+}
+
+export function getOrganizationInvitationStatus(
+  database: Database,
+  input: { invitationId: string; userEmail: string; now?: () => number },
+): OrganizationInvitationStatus {
+  const invitationId = input.invitationId.trim()
+  const userEmail = input.userEmail.trim().toLowerCase()
+  if (!invitationId || invitationId.length > 256 || !userEmail) return { state: 'not_found' }
+  const row = database.query<OrganizationInvitationStatusRow, [string]>(`
+    SELECT
+      invitation.email,
+      invitation.role,
+      invitation.status,
+      invitation.expiresAt AS expires_at,
+      organization.name AS organization_name
+    FROM invitation
+    INNER JOIN organization ON organization.id = invitation.organizationId
+    WHERE invitation.id = ?
+    LIMIT 1
+  `).get(invitationId)
+  if (!row) return { state: 'not_found' }
+  if (row.email.trim().toLowerCase() !== userEmail) return { state: 'wrong_account' }
+  if (row.status !== 'pending') return { state: 'already_used' }
+  const expiresAt = Number(row.expires_at)
+  if (!Number.isSafeInteger(expiresAt) || expiresAt <= (input.now ?? Date.now)()) {
+    return { state: 'expired' }
+  }
+  return {
+    state: 'pending',
+    organizationName: row.organization_name,
+    role: row.role ?? 'member',
+    expiresAt,
+  }
+}
+
 export class PublishedServiceLimitError extends Error {
   readonly code = 'published_service_limit_reached'
 
   constructor() {
     super('Published service limit reached')
     this.name = 'PublishedServiceLimitError'
+  }
+}
+
+export class OrganizationPublishedServiceLimitError extends Error {
+  readonly code = 'organization_published_service_limit_reached'
+
+  constructor() {
+    super('Organization published service limit reached')
+    this.name = 'OrganizationPublishedServiceLimitError'
   }
 }
 
@@ -1413,6 +1785,14 @@ interface WorkerHostRow {
   updated_at: number
 }
 
+interface PlatformControlRow {
+  name: PlatformControlName
+  paused: number
+  reason: string
+  updated_by: string
+  updated_at: number
+}
+
 interface ProvisioningJobRow {
   id: string
   workspace_id: string
@@ -1502,6 +1882,16 @@ function toWorkerHost(row: WorkerHostRow): WorkerHost {
     lastHeartbeatAt: row.last_heartbeat_at,
     lastErrorCode: row.last_error_code,
     createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function toPlatformControl(row: PlatformControlRow): PlatformControl {
+  return {
+    name: row.name,
+    paused: row.paused === 1,
+    reason: row.reason,
+    updatedBy: row.updated_by,
     updatedAt: row.updated_at,
   }
 }
@@ -1605,6 +1995,139 @@ export function migrateCloudSchema(database: Database): void {
       insert.run(migration.id, Date.now())
     })()
   }
+}
+
+const platformControlNames: readonly PlatformControlName[] = [
+  'provisioning',
+  'workspace_start',
+  'publication',
+]
+
+function requirePlatformControlName(value: string): PlatformControlName {
+  if (!platformControlNames.includes(value as PlatformControlName)) {
+    throw new TypeError('Platform control name is invalid')
+  }
+  return value as PlatformControlName
+}
+
+export function listPlatformControls(database: Database): PlatformControl[] {
+  return database.query<PlatformControlRow, []>(`
+    SELECT * FROM platform_control ORDER BY name
+  `).all().map(toPlatformControl)
+}
+
+export function getPlatformControl(
+  database: Database,
+  name: PlatformControlName,
+): PlatformControl {
+  const control = database.query<PlatformControlRow, [PlatformControlName]>(`
+    SELECT * FROM platform_control WHERE name = ?
+  `).get(requirePlatformControlName(name))
+  if (!control) throw new Error(`Platform control ${name} is missing`)
+  return toPlatformControl(control)
+}
+
+export function isPlatformControlPaused(
+  database: Database,
+  name: PlatformControlName,
+): boolean {
+  return getPlatformControl(database, name).paused
+}
+
+export function setPlatformControl(
+  database: Database,
+  input: {
+    name: PlatformControlName
+    paused: boolean
+    reason: string
+    actor: string
+    eventId?: string
+    now?: () => number
+  },
+): PlatformControl {
+  const name = requirePlatformControlName(input.name)
+  const reason = input.reason.trim()
+  const actor = input.actor.trim()
+  if (!reason || reason.length > 256) {
+    throw new TypeError('Platform control reason must contain 1 to 256 characters')
+  }
+  if (!actor || actor.length > 128 || /[\u0000-\u001f\u007f]/.test(actor)) {
+    throw new TypeError('Platform control actor must contain 1 to 128 printable characters')
+  }
+  const timestamp = (input.now ?? Date.now)()
+  if (!Number.isSafeInteger(timestamp) || timestamp < 0) {
+    throw new TypeError('Platform control timestamp is invalid')
+  }
+
+  return database.transaction(() => {
+    const previous = getPlatformControl(database, name)
+    database.prepare(`
+      UPDATE platform_control
+      SET paused = ?, reason = ?, updated_by = ?, updated_at = ?
+      WHERE name = ?
+    `).run(input.paused ? 1 : 0, reason, actor, timestamp, name)
+    database.prepare(`
+      INSERT INTO platform_control_audit_event (
+        event_id, actor, control_name, previous_paused, paused,
+        result, reason, occurred_at
+      ) VALUES (?, ?, ?, ?, ?, 'success', ?, ?)
+    `).run(
+      input.eventId ?? randomUUID(),
+      actor,
+      name,
+      previous.paused ? 1 : 0,
+      input.paused ? 1 : 0,
+      reason,
+      timestamp,
+    )
+    return getPlatformControl(database, name)
+  }).immediate()
+}
+
+export function recordPlatformOperationAuditEvent(
+  database: Database,
+  input: {
+    actor: string
+    action: string
+    targetType: string
+    targetId: string
+    result?: AuditEventResult
+    metadata?: Record<string, AuditMetadataValue>
+    eventId?: string
+    now?: () => number
+  },
+): void {
+  const actor = input.actor.trim()
+  if (!actor || actor.length > 128 || /[\u0000-\u001f\u007f]/.test(actor)) {
+    throw new TypeError('Platform audit actor must contain 1 to 128 printable characters')
+  }
+  const action = requireAuditIdentifier(input.action, 'action')
+  const targetType = requireAuditIdentifier(input.targetType, 'targetType')
+  const targetId = requireAuditIdentifier(input.targetId, 'targetId')
+  const result = input.result ?? 'success'
+  if (result !== 'success' && result !== 'failure') {
+    throw new TypeError('Platform audit result is invalid')
+  }
+  const metadataJson = serializeAuditMetadata(input.metadata)
+  const occurredAt = (input.now ?? Date.now)()
+  if (!Number.isSafeInteger(occurredAt) || occurredAt < 0) {
+    throw new TypeError('Platform audit timestamp is invalid')
+  }
+  database.prepare(`
+    INSERT INTO platform_operation_audit_event (
+      event_id, actor, action, target_type, target_id,
+      result, metadata_json, occurred_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    input.eventId ?? randomUUID(),
+    actor,
+    action,
+    targetType,
+    targetId,
+    result,
+    metadataJson,
+    occurredAt,
+  )
 }
 
 function publishedServiceName(value: string): string {
@@ -1767,6 +2290,7 @@ export function upsertPublishedService(
     tcpIngressPortMinimum?: number
     tcpIngressPortMaximum?: number
     maximumActive?: number
+    maximumOrganizationActive?: number
     now?: () => number
   },
 ): PublishedService {
@@ -1780,8 +2304,16 @@ export function upsertPublishedService(
   const authPolicy = input.authPolicy
   const accessTokenHash = input.accessTokenHash?.trim() || null
   const maximumActive = input.maximumActive ?? 5
+  const maximumOrganizationActive = input.maximumOrganizationActive ?? 20
   if (!Number.isSafeInteger(maximumActive) || maximumActive < 1 || maximumActive > 100) {
     throw new Error('Published service limit is invalid')
+  }
+  if (
+    !Number.isSafeInteger(maximumOrganizationActive)
+    || maximumOrganizationActive < 1
+    || maximumOrganizationActive > 10_000
+  ) {
+    throw new Error('Organization published service limit is invalid')
   }
   if (protocol !== 'http' && protocol !== 'tcp') {
     throw new Error('Published service protocol is invalid')
@@ -1835,6 +2367,17 @@ export function upsertPublishedService(
           AND (expires_at IS NULL OR expires_at > ?)
       `).get(workspaceId, timestamp)?.count ?? 0
       if (active >= maximumActive) throw new PublishedServiceLimitError()
+      const organizationActive = database.query<{ count: number }, [string, number]>(`
+        SELECT COUNT(*) AS count
+        FROM published_service
+        INNER JOIN workspace ON workspace.id = published_service.workspace_id
+        WHERE workspace.organization_id = ?
+          AND published_service.state = 'active'
+          AND (published_service.expires_at IS NULL OR published_service.expires_at > ?)
+      `).get(workspace.organizationId, timestamp)?.count ?? 0
+      if (organizationActive >= maximumOrganizationActive) {
+        throw new OrganizationPublishedServiceLimitError()
+      }
     }
 
     let ingressPort: number | null = null
@@ -1931,6 +2474,42 @@ export function revokePublishedService(
     LIMIT 1
   `).get(workspaceId, name)
   return service ? toPublishedService(service) : null
+}
+
+export function revokeOrganizationPublishedServices(
+  database: Database,
+  input: { organizationId: string; now?: () => number },
+): PublishedService[] {
+  const organizationId = publishedServiceText(input.organizationId, 'Organization id')
+  const timestamp = (input.now ?? Date.now)()
+  if (!Number.isSafeInteger(timestamp) || timestamp < 0) {
+    throw new TypeError('Published service revocation timestamp is invalid')
+  }
+  return database.transaction(() => {
+    const rows = database.query<PublishedServiceRow, [string]>(`
+      SELECT published_service.*
+      FROM published_service
+      INNER JOIN workspace ON workspace.id = published_service.workspace_id
+      WHERE workspace.organization_id = ?
+        AND published_service.state = 'active'
+      ORDER BY published_service.created_at, published_service.id
+    `).all(organizationId)
+    if (rows.length === 0) return []
+    database.prepare(`
+      UPDATE published_service
+      SET state = 'revoked', updated_at = ?, revoked_at = ?
+      WHERE state = 'active'
+        AND workspace_id IN (
+          SELECT id FROM workspace WHERE organization_id = ?
+        )
+    `).run(timestamp, timestamp, organizationId)
+    return rows.map(row => toPublishedService({
+      ...row,
+      state: 'revoked',
+      updated_at: timestamp,
+      revoked_at: timestamp,
+    }))
+  }).immediate()
 }
 
 function boundedContactText(
@@ -2199,6 +2778,23 @@ export function ensurePersonalWorkspace(
     if (!workspace) throw new Error('Personal workspace could not be resolved')
     return toPersonalWorkspace(workspace)
   }).immediate()
+}
+
+export function getPersonalWorkspace(
+  database: Database,
+  { userId, organizationId }: OrganizationAccessOptions,
+): PersonalWorkspace | null {
+  if (!userId.trim() || !organizationId.trim()) return null
+  const row = database.query<WorkspaceRow, [string, string]>(`
+    SELECT workspace.*
+    FROM workspace
+    INNER JOIN member ON member.id = workspace.member_id
+    WHERE member.userId = ?
+      AND member.organizationId = ?
+      AND workspace.organization_id = member.organizationId
+    LIMIT 1
+  `).get(userId, organizationId)
+  return row ? toPersonalWorkspace(row) : null
 }
 
 // Resolves a workspace only when the signed-in user still has a live

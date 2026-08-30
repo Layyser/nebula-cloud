@@ -1,0 +1,28 @@
+[Unit]
+Description=Nubols workspace worker
+After=network-online.target docker.service
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=/etc/nubols/worker.env
+WorkingDirectory=/opt/nubols/current/nebula-worker
+ExecStart=/opt/nubols/current/nebula-worker/bin/nebula-worker
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=30s
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+ReadWritePaths=/var/lib/nebula-worker /var/lib/nebula-workspaces /run /var/run
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

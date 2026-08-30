@@ -7,9 +7,11 @@ import {
   BillingSubscriptionRequiredError,
   OperatorEntitlementRequiredError,
   OperatorSeatCapacityError,
+  PlatformControlPausedError,
   WorkspaceMembershipNotFoundError,
 } from '@nebula-cloud/database'
 import { StripeWebhookVerificationError } from '../src/stripeWebhook'
+import { ResendWebhookVerificationError } from '../src/resendWebhook'
 
 test('allows lifecycle requests to outlive the worker timeout', () => {
   expect(CONTROL_PLANE_IDLE_TIMEOUT_SECONDS).toBeGreaterThan(120)
@@ -67,6 +69,29 @@ test('accepts only bounded raw Stripe webhook bodies through the configured veri
   expect(calls).toHaveLength(3)
 })
 
+test('accepts only verified bounded Resend webhook bodies', async () => {
+  const handler = createControlPlaneHandler({
+    handleResendWebhook: (rawBody, headers) => {
+      if (headers.get('svix-signature') !== 'valid') {
+        throw new ResendWebhookVerificationError()
+      }
+      return { received: true, projected: rawBody.byteLength > 0 }
+    },
+  })
+  const endpoint = 'http://control-plane.test/api/webhooks/resend'
+  const denied = await handler(new Request(endpoint, {
+    method: 'POST', body: '{}', headers: { 'svix-signature': 'invalid' },
+  }))
+  expect(denied.status).toBe(400)
+  expect((await denied.json()).code).toBe('resend_webhook_verification_failed')
+
+  const accepted = await handler(new Request(endpoint, {
+    method: 'POST', body: '{}', headers: { 'svix-signature': 'valid' },
+  }))
+  expect(accepted.status).toBe(200)
+  expect(await accepted.json()).toEqual({ received: true, projected: true })
+})
+
 test('reports liveness and version without product capabilities', async () => {
   const handler = createControlPlaneHandler({ version: 'test' })
   const response = await handler(new Request('http://control-plane.test/health/live'))
@@ -77,6 +102,28 @@ test('reports liveness and version without product capabilities', async () => {
     status: 'live',
     version: 'test',
   })
+})
+
+test('returns deterministic invitation states only to an authenticated email', async () => {
+  const calls: unknown[] = []
+  const handler = createControlPlaneHandler({
+    resolveSession: async request => request.headers.has('cookie')
+      ? { userId: 'user-1', email: 'invitee@example.com' }
+      : null,
+    getInvitationStatus: input => {
+      calls.push(input)
+      return { state: 'expired' }
+    },
+  })
+  const endpoint = 'http://control-plane.test/api/invitations/invitation-1/status'
+  expect((await handler(new Request(endpoint))).status).toBe(401)
+  const response = await handler(new Request(endpoint, { headers: { cookie: 'session=1' } }))
+  expect(response.status).toBe(200)
+  expect(await response.json()).toEqual({ state: 'expired' })
+  expect(calls).toEqual([{
+    invitationId: 'invitation-1',
+    userEmail: 'invitee@example.com',
+  }])
 })
 
 test('reports not ready while dependencies are unavailable', async () => {
@@ -178,15 +225,127 @@ test('registers and drains workers through the internal administration API', asy
     'http://control-plane.test/internal/v1/workers/worker-a',
     {
       method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ action: 'drain' }),
+      headers: {
+        'content-type': 'application/json',
+        'x-nebula-admin-actor': 'jorge@nubols.com',
+      },
+      body: JSON.stringify({ action: 'drain', reason: 'Preparing host maintenance' }),
     },
   ))
   expect(drained.status).toBe(200)
   expect(updates).toEqual([{
     workerHostId: 'worker-a',
-    update: { action: 'drain' },
+    update: { action: 'drain', reason: 'Preparing host maintenance' },
+    actor: 'jorge@nubols.com',
   }])
+})
+
+test('authenticates and audits durable platform control mutations', async () => {
+  const updates: unknown[] = []
+  const controls = [{
+    name: 'provisioning' as const,
+    paused: false,
+    reason: '',
+    updatedBy: 'schema-migration',
+    updatedAt: 0,
+  }]
+  const handler = createControlPlaneHandler({
+    authorizePlatformAdministration: request => (
+      request.headers.get('authorization') === 'Bearer platform-secret'
+    ),
+    listPlatformControls: () => ({ controls }),
+    updatePlatformControl: input => {
+      updates.push(input)
+      return {
+        name: input.name,
+        paused: input.update.paused,
+        reason: input.update.reason,
+        updatedBy: input.actor,
+        updatedAt: 10,
+      }
+    },
+  })
+  const endpoint = 'http://control-plane.test/internal/v1/platform-controls'
+
+  expect((await handler(new Request(endpoint))).status).toBe(401)
+  const listed = await handler(new Request(endpoint, {
+    headers: { authorization: 'Bearer platform-secret' },
+  }))
+  expect(listed.status).toBe(200)
+  expect(await listed.json()).toEqual({ controls })
+
+  const missingActor = await handler(new Request(`${endpoint}/provisioning`, {
+    method: 'PATCH',
+    headers: {
+      authorization: 'Bearer platform-secret',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ paused: true, reason: 'Emergency maintenance' }),
+  }))
+  expect(missingActor.status).toBe(400)
+
+  const updated = await handler(new Request(`${endpoint}/provisioning`, {
+    method: 'PATCH',
+    headers: {
+      authorization: 'Bearer platform-secret',
+      'content-type': 'application/json',
+      'x-nebula-admin-actor': 'jorge@nubols.com',
+    },
+    body: JSON.stringify({ paused: true, reason: 'Emergency maintenance' }),
+  }))
+  expect(updated.status).toBe(200)
+  expect(updates).toEqual([{
+    name: 'provisioning',
+    update: { paused: true, reason: 'Emergency maintenance' },
+    actor: 'jorge@nubols.com',
+  }])
+})
+
+test('revokes every organization publication through the private platform API', async () => {
+  const calls: unknown[] = []
+  const handler = createControlPlaneHandler({
+    authorizePlatformAdministration: request => (
+      request.headers.get('authorization') === 'Bearer platform-secret'
+    ),
+    revokeOrganizationPublications: input => {
+      calls.push(input)
+      return { organizationId: input.organizationId, revokedServices: 3 }
+    },
+  })
+  const endpoint = 'http://control-plane.test/internal/v1/organizations/org-1/publications/revoke'
+  const response = await handler(new Request(endpoint, {
+    method: 'POST',
+    headers: {
+      authorization: 'Bearer platform-secret',
+      'content-type': 'application/json',
+      'x-nebula-admin-actor': 'jorge@nubols.com',
+    },
+    body: JSON.stringify({ reason: 'Organization credential compromise' }),
+  }))
+
+  expect(response.status).toBe(200)
+  expect(await response.json()).toEqual({ organizationId: 'org-1', revokedServices: 3 })
+  expect(calls).toEqual([{
+    organizationId: 'org-1',
+    actor: 'jorge@nubols.com',
+    reason: 'Organization credential compromise',
+  }])
+})
+
+test('blocks published traffic immediately while preserving the publication record', async () => {
+  let proxyCalls = 0
+  const handler = createControlPlaneHandler({
+    platformControlPaused: name => name === 'publication',
+    proxyPublishedService: async () => {
+      proxyCalls += 1
+      return new Response('must not be reached')
+    },
+  })
+  const response = await handler(new Request('http://control-plane.test/p/service-slug'))
+
+  expect(response.status).toBe(503)
+  expect((await response.json()).code).toBe('platform_publication_paused')
+  expect(proxyCalls).toBe(0)
 })
 
 test('protects expiring manual Operator entitlement grants with platform authentication', async () => {
@@ -450,6 +609,31 @@ test('authenticates workspace publication commands before listing, exposing, or 
     }],
     ['revoke', { workspaceId: 'workspace-1', name: 'api' }],
   ])
+})
+
+test('returns a stable conflict when an organization reaches its publication quota', async () => {
+  const handler = createControlPlaneHandler({
+    authenticateWorkspacePublication: async () => true,
+    upsertWorkspacePublication: () => {
+      throw Object.assign(new Error('limit reached'), {
+        code: 'organization_published_service_limit_reached',
+      })
+    },
+  })
+  const response = await handler(new Request(
+    'http://control-plane.test/api/workspaces/workspace-1/publications/api',
+    {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ port: 3000 }),
+    },
+  ))
+
+  expect(response.status).toBe(409)
+  expect(await response.json()).toEqual({
+    error: 'organization published service limit reached',
+    code: 'organization_published_service_limit_reached',
+  })
 })
 
 test('rejects publication inputs that could target runtime or inject routing state', async () => {
@@ -815,6 +999,40 @@ test('does not allow organization usage through a different active organization'
   expect(calls).toBe(0)
 })
 
+test('exports organization usage as admin-authorized injection-safe CSV', async () => {
+  const handler = createControlPlaneHandler({
+    resolveSession: async () => ({
+      userId: 'owner-1',
+      activeOrganizationId: 'org-1',
+    }),
+    getOrganizationUsage: () => ({
+      organizationId: 'org-1',
+      rangeDays: 30,
+      totals: {
+        modelTurns: 1, inputTokens: 10, outputTokens: 5, cachedTokens: 2,
+        reasoningTokens: 1, totalTokens: 18, estimatedCostMicrousd: 50,
+        cacheSavingsMicrousd: 3,
+      },
+      members: [{
+        membershipId: 'member-1', userId: 'user-1', name: '=cmd',
+        modelTurns: 1, inputTokens: 10, outputTokens: 5, cachedTokens: 2,
+        reasoningTokens: 1, totalTokens: 18, estimatedCostMicrousd: 50,
+        cacheSavingsMicrousd: 3,
+      }],
+    }),
+  })
+  const response = await handler(new Request(
+    'http://control.test/api/organizations/org-1/usage/export.csv?range=30',
+  ))
+  expect(response.status).toBe(200)
+  expect(response.headers.get('content-type')).toContain('text/csv')
+  expect(response.headers.get('content-disposition')).toContain('nubols-usage-30d.csv')
+  const body = await response.text()
+  expect(body).toContain('"organization_id"')
+  expect(body).toContain("\"'=cmd\"")
+  expect(body).toContain('"18"')
+})
+
 test('serves the persisted dashboard overview only for the active organization', async () => {
   const calls: Array<{ userId: string; organizationId: string; since: number }> = []
   const handler = createControlPlaneHandler({
@@ -1031,6 +1249,30 @@ test('schedules an authenticated ensure-running provisioning job', async () => {
   expect(await response.json()).toMatchObject({
     workspace: { id: 'workspace-1', state: 'provisioning' },
     job: { id: 'job-1', status: 'queued' },
+  })
+})
+
+test('returns a stable retryable response while workspace starts are paused', async () => {
+  const handler = createControlPlaneHandler({
+    resolveSession: async () => ({ userId: 'user-1' }),
+    ensureWorkspaceRunning: () => {
+      throw new PlatformControlPausedError('workspace_start')
+    },
+  })
+  const response = await handler(new Request(
+    'http://control-plane.test/api/workspaces/personal/ensure-running',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ organizationId: 'org-1' }),
+    },
+  ))
+
+  expect(response.status).toBe(503)
+  expect(await response.json()).toEqual({
+    error: 'Platform workspace start is paused',
+    code: 'platform_workspace_start_paused',
+    retryable: true,
   })
 })
 

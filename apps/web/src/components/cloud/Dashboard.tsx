@@ -9,6 +9,8 @@ import {
   Button,
   ContentContainer,
   IconButton,
+  ModelCompanyIcon,
+  ModelSourceIcon,
   PageHeader,
   ScrollArea,
   Surface,
@@ -324,11 +326,18 @@ function ModelShares({ models, totals, metric }: {
           return (
             <div key={`${model.provider}:${model.model}`}>
               <div className="flex items-center justify-between gap-4 text-sm">
-                <ProviderModelLabel provider={model.provider} model={model.model} />
-                <span className="shrink-0 tabular-nums text-[var(--color-text-primary)]">
-                  {metric === 'cost'
-                    ? formatCurrencyMicrousd(value)
-                    : formatCompactNumber(value)}
+                <ModelCompanyLabel provider={model.provider} model={model.model} />
+                <span className="flex shrink-0 items-center gap-2">
+                  <span className="tabular-nums text-[var(--color-text-primary)]">
+                    {metric === 'cost'
+                      ? formatCurrencyMicrousd(value)
+                      : formatCompactNumber(value)}
+                  </span>
+                  <ModelSourceIcon
+                    provider={model.provider}
+                    model={model.model}
+                    className="text-[var(--color-text-muted)]"
+                  />
                 </span>
               </div>
               <div className="mt-2.5 h-1 overflow-hidden rounded-full bg-[var(--color-surface-selected)]">
@@ -379,27 +388,10 @@ function providerPresentation(provider: string, model: string): {
   return { icon: BsOpenai, color: 'var(--color-text-primary)', label: 'OpenAI' }
 }
 
-function ProviderModelLabel({ provider, model }: { provider: string; model: string }) {
-  const presentation = providerPresentation(provider, model)
-  const ProviderIcon = presentation.icon
-
+function ModelCompanyLabel({ provider, model }: { provider: string; model: string }) {
   return (
     <span className="flex min-w-0 items-center gap-2.5 leading-none text-[var(--color-text-secondary)]">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span
-            className="inline-flex size-4 shrink-0 items-center justify-center leading-none"
-            aria-label={`${presentation.label} provider`}
-          >
-            <ProviderIcon
-              aria-hidden="true"
-              className="block size-[15px] shrink-0"
-              style={presentation.color ? { color: presentation.color } : undefined}
-            />
-          </span>
-        </TooltipTrigger>
-        <TooltipContent side="top">{presentation.label}</TooltipContent>
-      </Tooltip>
+      <ModelCompanyIcon provider={provider} model={model} />
       <span className="inline-flex min-h-4 items-center truncate leading-4">{displayModelName(model)}</span>
     </span>
   )
@@ -798,14 +790,21 @@ function BreakdownTable({ personal, mode, metric }: {
         <div key={row.id} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-5 border-t border-[var(--color-border-subtle)] py-3.5 text-sm">
           <div className="min-w-0">
             {mode === 'model' ? (
-              <ProviderModelLabel provider={row.detail} model={row.label} />
+              <ModelCompanyLabel provider={row.detail} model={row.label} />
             ) : (
               <p className="truncate font-medium text-[var(--color-text-secondary)]">{row.label}</p>
             )}
           </div>
           <span className="tabular-nums text-[var(--color-text-muted)]">{formatNumber(row.modelTurns)}</span>
-          <span className="min-w-24 text-right tabular-nums text-[var(--color-text-secondary)]">
-            {metric === 'cost' ? formatCurrencyMicrousd(row.estimatedCostMicrousd) : formatNumber(row.totalTokens)}
+          <span className="flex min-w-24 items-center justify-end gap-2 text-right tabular-nums text-[var(--color-text-secondary)]">
+            <span>{metric === 'cost' ? formatCurrencyMicrousd(row.estimatedCostMicrousd) : formatNumber(row.totalTokens)}</span>
+            {mode === 'model' && (
+              <ModelSourceIcon
+                provider={row.detail}
+                model={row.label}
+                className="text-[var(--color-text-muted)]"
+              />
+            )}
           </span>
         </div>
       ))}

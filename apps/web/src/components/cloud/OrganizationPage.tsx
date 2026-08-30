@@ -71,7 +71,7 @@ export function OrganizationPage({ organization }: { organization: CloudOrganiza
       setError(result.error.message || 'Could not create the invitation')
     } else {
       setEmail('')
-      setNotice('Invitation created. Email delivery will be connected before launch.')
+      setNotice('Invitation sent.')
       await load()
     }
     setSubmitting(false)

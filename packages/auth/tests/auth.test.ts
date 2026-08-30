@@ -80,6 +80,47 @@ test('requires a sender when verification is enforced', () => {
   }
 })
 
+test('restricts account creation to the configured email allowlist', async () => {
+  const database = new Database(':memory:', { strict: true })
+  try {
+    const auth = createCloudAuth({
+      database,
+      secret: 'test-secret-that-is-at-least-32-characters',
+      baseURL: 'http://localhost:7790/api/auth',
+      trustedOrigins: ['http://localhost:5173'],
+      allowedSignUpEmails: ['beta@nubols.com'],
+    })
+    await migrateCloudAuthSchema(auth)
+
+    const request = (email: string) => new Request(
+      'http://localhost:7790/api/auth/sign-up/email',
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          origin: 'http://localhost:5173',
+        },
+        body: JSON.stringify({
+          name: 'Beta owner',
+          email,
+          password: 'secure-password',
+        }),
+      },
+    )
+
+    const denied = await auth.handler(request('someone@example.com'))
+    expect(denied.status).toBe(403)
+    expect(await denied.json()).toMatchObject({
+      code: 'SIGN_UP_RESTRICTED',
+    })
+
+    const allowed = await auth.handler(request('BETA@NUBOLS.COM'))
+    expect(allowed.status).toBe(200)
+  } finally {
+    database.close()
+  }
+})
+
 test('sends verification and non-enumerating reset messages through the transport', async () => {
   const database = new Database(':memory:', { strict: true })
   const emailSender = new MemoryEmailSender()

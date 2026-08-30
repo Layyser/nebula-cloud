@@ -74,6 +74,35 @@ export interface UpdateWorkerHostRequest {
   credentialKeyId?: string
   capacity?: Partial<WorkerHostSummary['capacity']>
   action?: WorkerHostLifecycleAction
+  reason?: string
+}
+
+export type PlatformControlName = 'provisioning' | 'workspace_start' | 'publication'
+
+export interface PlatformControlSummary {
+  name: PlatformControlName
+  paused: boolean
+  reason: string
+  updatedBy: string
+  updatedAt: number
+}
+
+export interface PlatformControlsResponse {
+  controls: PlatformControlSummary[]
+}
+
+export interface UpdatePlatformControlRequest {
+  paused: boolean
+  reason: string
+}
+
+export interface RevokeOrganizationPublicationsRequest {
+  reason: string
+}
+
+export interface RevokeOrganizationPublicationsResponse {
+  organizationId: string
+  revokedServices: number
 }
 
 export type OperatorEntitlementState = 'pending' | 'active' | 'grace' | 'suspended' | 'revoked'
@@ -236,6 +265,20 @@ export interface UpsertPublishedServiceRequest {
   protocol?: 'http' | 'tcp'
   visibility: 'public' | 'private'
   ttlSeconds?: number | null
+}
+
+export type OrganizationInvitationAcceptanceState =
+  | 'pending'
+  | 'expired'
+  | 'already_used'
+  | 'wrong_account'
+  | 'not_found'
+
+export interface OrganizationInvitationStatusResponse {
+  state: OrganizationInvitationAcceptanceState
+  organizationName?: string
+  role?: string
+  expiresAt?: number
 }
 
 export interface UsageTotals {

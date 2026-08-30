@@ -1,13 +1,21 @@
 import { createConnection, createServer, type Server, type Socket } from 'node:net'
 import { connect as connectTLS } from 'node:tls'
 import { workerAuthorizationHeader } from './workerAuth'
+import {
+  PublicationConnectionLimiter,
+  type PublicationConnectionLease,
+} from './publicationConnectionLimiter'
+import { PublicationBandwidthLimiter } from './publicationBandwidthLimiter'
 
 const tunnelHandshakeTimeoutMs = 10_000
 const maximumTunnelHeaderBytes = 8 * 1024
 
 export interface TCPIngressRoute {
+  routeId: string
   ingressPort: number
   workspaceId: string
+  organizationId: string
+  workerId: string
   targetPort: number
 }
 
@@ -21,8 +29,8 @@ export interface TCPIngressOptions {
   bindHost: string
   resolveRoute: (ingressPort: number) => TCPIngressRoute | null
   resolveWorker: (workspaceId: string) => TCPIngressWorkerConnection
-  maxConnectionsPerRoute?: number
-  maxConnections?: number
+  connectionLimiter: PublicationConnectionLimiter
+  bandwidthLimiter: PublicationBandwidthLimiter
   idleTimeoutMs?: number
 }
 
@@ -30,36 +38,29 @@ export class TCPIngress {
   readonly #bindHost: string
   readonly #resolveRoute: TCPIngressOptions['resolveRoute']
   readonly #resolveWorker: TCPIngressOptions['resolveWorker']
-  readonly #maxConnectionsPerRoute: number
-  readonly #maxConnections: number
+  readonly #connectionLimiter: PublicationConnectionLimiter
+  readonly #bandwidthLimiter: PublicationBandwidthLimiter
   readonly #idleTimeoutMs: number
   readonly #listeners = new Map<number, Server>()
-  readonly #connectionsByPort = new Map<number, number>()
-  #connections = 0
+  readonly #connectionClosersByPort = new Map<number, Set<() => void>>()
 
   constructor({
     bindHost,
     resolveRoute,
     resolveWorker,
-    maxConnectionsPerRoute = 32,
-    maxConnections = 256,
+    connectionLimiter,
+    bandwidthLimiter,
     idleTimeoutMs = 5 * 60 * 1000,
   }: TCPIngressOptions) {
     if (!bindHost.trim()) throw new Error('TCP ingress bind host is required')
-    if (!Number.isSafeInteger(maxConnectionsPerRoute) || maxConnectionsPerRoute < 1) {
-      throw new Error('TCP ingress per-route connection limit is invalid')
-    }
-    if (!Number.isSafeInteger(maxConnections) || maxConnections < maxConnectionsPerRoute) {
-      throw new Error('TCP ingress connection limit is invalid')
-    }
     if (!Number.isSafeInteger(idleTimeoutMs) || idleTimeoutMs < 1_000) {
       throw new Error('TCP ingress idle timeout is invalid')
     }
     this.#bindHost = bindHost.trim()
     this.#resolveRoute = resolveRoute
     this.#resolveWorker = resolveWorker
-    this.#maxConnectionsPerRoute = maxConnectionsPerRoute
-    this.#maxConnections = maxConnections
+    this.#connectionLimiter = connectionLimiter
+    this.#bandwidthLimiter = bandwidthLimiter
     this.#idleTimeoutMs = idleTimeoutMs
   }
 
@@ -89,6 +90,8 @@ export class TCPIngress {
 
   async deactivate(ingressPort: number): Promise<void> {
     const listener = this.#listeners.get(ingressPort)
+    const connectionClosers = [...(this.#connectionClosersByPort.get(ingressPort) ?? [])]
+    for (const close of connectionClosers) close()
     if (!listener) return
     this.#listeners.delete(ingressPort)
     await new Promise<void>(resolve => listener.close(() => resolve()))
@@ -109,29 +112,38 @@ export class TCPIngress {
       return
     }
     const route = this.#resolveRoute(ingressPort)
-    const routeConnections = this.#connectionsByPort.get(ingressPort) ?? 0
-    if (
-      !route
-      || this.#connections >= this.#maxConnections
-      || routeConnections >= this.#maxConnectionsPerRoute
-    ) {
+    if (!route) {
       client.destroy()
       return
     }
-    this.#connections += 1
-    this.#connectionsByPort.set(ingressPort, routeConnections + 1)
+    const lease: PublicationConnectionLease | null = this.#connectionLimiter.tryAcquire({
+      workerId: route.workerId,
+      organizationId: route.organizationId,
+      routeId: route.routeId,
+    })
+    if (!lease) {
+      client.destroy()
+      return
+    }
+    const bandwidthScope = {
+      workerId: route.workerId,
+      organizationId: route.organizationId,
+      routeId: route.routeId,
+    }
     let worker: Socket | null = null
     let finished = false
+    const routeClosers = this.#connectionClosersByPort.get(ingressPort) ?? new Set<() => void>()
+    this.#connectionClosersByPort.set(ingressPort, routeClosers)
     const finish = () => {
       if (finished) return
       finished = true
-      this.#connections -= 1
-      const remaining = (this.#connectionsByPort.get(ingressPort) ?? 1) - 1
-      if (remaining > 0) this.#connectionsByPort.set(ingressPort, remaining)
-      else this.#connectionsByPort.delete(ingressPort)
+      routeClosers.delete(finish)
+      if (routeClosers.size === 0) this.#connectionClosersByPort.delete(ingressPort)
+      lease.release()
       client.destroy()
       worker?.destroy()
     }
+    routeClosers.add(finish)
     client.setTimeout(this.#idleTimeoutMs, finish)
     try {
       worker = await openWorkerTCPTunnel({
@@ -145,6 +157,12 @@ export class TCPIngress {
       worker.on('error', finish)
       client.on('close', finish)
       worker.on('close', finish)
+      client.on('data', chunk => {
+        if (!this.#bandwidthLimiter.tryConsume(bandwidthScope, chunk.byteLength)) finish()
+      })
+      worker.on('data', chunk => {
+        if (!this.#bandwidthLimiter.tryConsume(bandwidthScope, chunk.byteLength)) finish()
+      })
       client.pipe(worker)
       worker.pipe(client)
       client.resume()

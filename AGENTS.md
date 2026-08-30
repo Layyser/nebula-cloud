@@ -227,6 +227,13 @@ This refreshes processes but does not implicitly repack the frontend tarball or
 replace existing workspace containers; use the dedicated procedures above for
 those artifacts.
 
+## Agent-assisted remote deployment
+
+Before an agent operates a remote host, read the canonical deployment notes in
+`/home/jorge/nebula-cloud/agent-deployment.md`. They document the temporary,
+user-owned SSH ControlMaster workflow and its security requirements. Agents
+must never request or copy a private key or passphrase.
+
 ## Git and release discipline
 
 - These are four independent Git histories. Commit and tag each repository
