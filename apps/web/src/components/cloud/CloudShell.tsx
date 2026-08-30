@@ -41,7 +41,7 @@ export function CloudShell({
       <aside className="flex w-60 shrink-0 flex-col border-r border-white/[0.07] bg-[#111111] px-2">
         <button type="button" onClick={() => onNavigate('/app')} className="flex h-16 items-center gap-2 px-2 text-left">
           <NebulaMark size={24} />
-          <span className="nebula-wordmark text-[14px] font-semibold">Nebula</span>
+          <span className="nebula-wordmark text-[14px] font-semibold">Nubols</span>
         </button>
 
         <nav className="space-y-0.5">
@@ -64,7 +64,7 @@ export function CloudShell({
 
         <div className="relative mt-auto border-t border-white/[0.06] px-1 py-3">
           {accountOpen && (
-            <div className="absolute bottom-[calc(100%-3px)] left-1 right-1 overflow-hidden rounded-xl bg-[#151616] p-1 shadow-[0_18px_50px_rgba(0,0,0,0.45)]">
+            <div className="ui-border-floating absolute bottom-[calc(100%-3px)] left-1 right-1 overflow-hidden rounded-xl bg-[#151616] p-1 shadow-[0_18px_50px_rgba(0,0,0,0.45)]">
               <p className="px-2.5 pb-1 pt-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-white/22">Organizations</p>
               {organizations.map(organization => (
                 <button
@@ -109,7 +109,7 @@ export function CloudShell({
         </div>
       </aside>
 
-      <main className="cloud-grid min-w-0 flex-1 overflow-y-auto [scrollbar-gutter:stable] bg-[#090a0a]">
+      <main className="cloud-grid min-w-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable] bg-[#090a0a]">
         {children}
       </main>
     </div>

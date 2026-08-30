@@ -14,6 +14,15 @@ interface AuthPageProps {
 
 type AuthMode = 'sign-in' | 'sign-up' | 'forgot-password' | 'reset-password'
 
+const FULL_NAME_PLACEHOLDERS = [
+  'Jane Doe',
+  'Alex Rivera',
+  'Maya Chen',
+  'Daniel Okafor',
+  'Sofia Martin',
+  'Liam Carter',
+]
+
 export function AuthPage({
   onAuthenticated,
   onBack,
@@ -23,6 +32,9 @@ export function AuthPage({
 }: AuthPageProps) {
   const [mode, setMode] = useState<AuthMode>(initialMode)
   const [name, setName] = useState('')
+  const [namePlaceholder] = useState(
+    () => FULL_NAME_PLACEHOLDERS[Math.floor(Math.random() * FULL_NAME_PLACEHOLDERS.length)],
+  )
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -98,7 +110,7 @@ export function AuthPage({
       }
       onAuthenticated()
     } catch {
-      setError('Could not reach the Nebula control plane')
+      setError('Could not reach the Nubols control plane')
     } finally {
       setSubmitting(false)
     }
@@ -120,16 +132,23 @@ export function AuthPage({
       setSuccess('A fresh verification link is on its way.')
       setVerificationRequired(false)
     } catch {
-      setError('Could not reach the Nebula control plane')
+      setError('Could not reach the Nubols control plane')
     } finally {
       setSubmitting(false)
     }
   }
 
+  // Keep the shared top anchor at the midpoint of the independently centered
+  // Sign In and Create account states. Create account adds Full Name, while
+  // Sign In adds the forgot-password row instead.
+  const authAnchorClassName = notice
+    ? 'h-[629px] sm:h-[645px]'
+    : 'h-[573px] sm:h-[589px]'
+
   return (
     <div className="relative z-[2] flex min-h-screen items-center justify-center px-5 py-8 text-[var(--color-text-primary)]">
-      <div className="h-[531px] w-full max-w-[420px]">
-        <div className="w-full rounded-2xl bg-[var(--color-surface-auth)] p-6 shadow-[0_32px_100px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:p-8">
+      <div className={`${authAnchorClassName} w-full max-w-[420px]`}>
+        <div className="ui-border-surface w-full rounded-2xl bg-[var(--color-surface-auth)] p-6 shadow-[0_32px_100px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:p-8">
           <CloudBrand onSelect={onBack} />
         <h1 className="mt-3 text-3xl font-medium tracking-[-0.04em]">
           {mode === 'sign-in'
@@ -205,12 +224,12 @@ export function AuthPage({
           )}
           {mode === 'sign-up' && (
             <Field
-              label="Name"
+              label="Full Name"
               type="text"
               value={name}
               onChange={setName}
               autoComplete="name"
-              placeholder="George"
+              placeholder={namePlaceholder}
               required
             />
           )}
@@ -339,7 +358,7 @@ function Field({
         placeholder={placeholder}
         required={required}
         minLength={minLength}
-        className="h-11 w-full rounded-xl bg-[var(--color-surface-field)] px-3.5 text-sm text-[var(--color-text-primary)] outline-none transition placeholder:text-[var(--color-text-subtle)] focus:bg-[var(--color-surface-field-focus)]"
+        className="ui-border-control h-11 w-full rounded-xl bg-[var(--color-surface-field)] px-3.5 text-sm text-[var(--color-text-primary)] outline-none transition placeholder:text-[var(--color-text-subtle)] focus:bg-[var(--color-surface-field-focus)]"
       />
     </label>
   )

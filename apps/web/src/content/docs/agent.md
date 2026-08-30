@@ -16,7 +16,7 @@ The binary builds from source today:
 
 - Requirements: a C++17 compiler, `make`, and development headers for libcurl and OpenSSL.
 - Build with `make` in the repository checkout.
-- Prebuilt copies ship inside Nebula Desktop and every Cloud workspace image.
+- Prebuilt copies ship inside Nubols Desktop and every Cloud workspace image.
 
 ## Configuration
 

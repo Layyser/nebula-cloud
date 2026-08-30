@@ -11,7 +11,7 @@ const stages: Array<{
 }> = [
   { id: 'resolving', label: 'Resolving workspace' },
   { id: 'provisioning', label: 'Provisioning container' },
-  { id: 'starting', label: 'Starting Nebula' },
+  { id: 'starting', label: 'Starting Nebula runtime' },
 ]
 
 function stageIndex(stage: WorkspaceStartupStage): number {

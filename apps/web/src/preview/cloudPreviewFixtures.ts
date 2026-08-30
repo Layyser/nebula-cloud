@@ -23,13 +23,13 @@ export type CloudPreviewMode = typeof cloudPreviewModes[number]
 
 export const cloudPreviewUser = {
   name: 'Jorge',
-  email: 'jorge@nebula.example',
+  email: 'jorge@nubols.example',
 }
 
 export const cloudPreviewOrganization = {
   id: 'org-preview',
-  name: 'Nebula Labs',
-  slug: 'nebula-labs',
+  name: 'Nubols Labs',
+  slug: 'nubols-labs',
   accountType: 'organization' as const,
   plan: 'team' as const,
 }
@@ -64,7 +64,7 @@ export const cloudPreviewMembers: OrganizationMembersResponse = {
       membershipId: 'member-owner',
       userId: 'user-owner',
       name: 'Jorge',
-      email: 'jorge@nebula.example',
+      email: 'jorge@nubols.example',
       role: 'owner',
       disabled: false,
       joinedAt: Date.UTC(2026, 1, 14),
@@ -78,7 +78,7 @@ export const cloudPreviewMembers: OrganizationMembersResponse = {
       membershipId: 'member-admin',
       userId: 'user-admin',
       name: 'Amara Chen',
-      email: 'amara@nebula.example',
+      email: 'amara@nubols.example',
       role: 'admin',
       disabled: false,
       joinedAt: Date.UTC(2026, 2, 3),
@@ -92,7 +92,7 @@ export const cloudPreviewMembers: OrganizationMembersResponse = {
       membershipId: 'member-user',
       userId: 'user-member',
       name: 'Noah Williams',
-      email: 'noah@nebula.example',
+      email: 'noah@nubols.example',
       role: 'member',
       disabled: false,
       joinedAt: Date.UTC(2026, 3, 22),
@@ -106,7 +106,7 @@ export const cloudPreviewMembers: OrganizationMembersResponse = {
       membershipId: 'member-unassigned',
       userId: 'user-unassigned',
       name: 'Mina Patel',
-      email: 'mina@nebula.example',
+      email: 'mina@nubols.example',
       role: 'member',
       disabled: false,
       joinedAt: Date.UTC(2026, 5, 9),

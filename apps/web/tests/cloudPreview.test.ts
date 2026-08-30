@@ -21,7 +21,7 @@ test('Cloud preview manifest covers every required baseline state', () => {
   expect(isCloudPreviewMode('dashboard')).toBe(true)
   expect(isCloudPreviewMode('unknown')).toBe(false)
   expect(cloudPreviewUser).toMatchObject({ name: 'Jorge' })
-  expect(cloudPreviewOrganization).toMatchObject({ name: 'Nebula Labs' })
+  expect(cloudPreviewOrganization).toMatchObject({ name: 'Nubols Labs' })
   expect(cloudPreviewDashboard).toMatchObject({
     scope: 'organization',
     operators: { ready: 3, total: 4 },

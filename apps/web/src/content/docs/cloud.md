@@ -1,6 +1,6 @@
 ## Overview
 
-Cloud turns the standalone runtime into managed Operators: provisioning, supervision, persistent storage, console access, and usage accounting are handled for you. You interact through chat and console; the platform keeps the machine alive, isolated, and measurable.
+Nubols Cloud turns the standalone runtime into managed Operators: provisioning, supervision, persistent storage, console access, and usage accounting are handled for you. You interact through chat and console; the platform keeps the machine alive, isolated, and measurable.
 
 ## Lifecycle
 

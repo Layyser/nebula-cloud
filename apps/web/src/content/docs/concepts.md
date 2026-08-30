@@ -1,6 +1,6 @@
 ## Overview
 
-Nebula separates *where* work happens from *how* the model behaves. The persistent environment is a workspace; the behavior is a configuration. Keeping them apart means you can replace compute without losing data, and change behavior without touching files.
+Nubols separates *where* work happens from *how* the model behaves. The persistent environment is a workspace; the behavior is a configuration. Keeping them apart means you can replace compute without losing data, and change behavior without touching files.
 
 | Concept | In one line |
 | --- | --- |

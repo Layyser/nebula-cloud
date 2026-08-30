@@ -1,6 +1,6 @@
 ## Overview
 
-Nebula's security posture rests on strict boundaries between browser, control plane, worker, and runtime. Each layer only ever holds the minimum credential it needs, for as long as it needs it.
+Nubols' security posture rests on strict boundaries between browser, control plane, worker, and Nebula runtime. Each layer only ever holds the minimum credential it needs, for as long as it needs it.
 
 ## Trust boundaries
 

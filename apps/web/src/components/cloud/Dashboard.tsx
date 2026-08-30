@@ -160,9 +160,9 @@ export function Dashboard({ userKey, organizationId, organizationName, accountTy
       <main>
         <PageHeader
           title="Usage"
-          description="Track model activity across your Nebula sessions."
+          description="Track model activity across your operator sessions."
           action={(
-            <div className="flex items-center gap-4">
+            <div className="flex max-w-full flex-wrap items-center gap-3">
               <Tabs value={String(rangeDays)} onValueChange={value => setRangeDays(Number(value) as UsageRange)}>
                 <TabsList aria-label="Usage period" variant="panel" size="compact">
                   {[7, 30, 90].map(days => (
@@ -745,7 +745,7 @@ function MetricStrip({
     ['Cache savings', formatCurrencyMicrousd(cacheSavingsMicrousd), `${savingsRatio.toFixed(1)}x the recorded model cost`],
   ]
   return (
-    <Surface density="none" radius="surface" variant="panel" className="grid overflow-hidden sm:grid-cols-2 lg:grid-cols-5">
+    <Surface bordered density="none" radius="surface" variant="panel" className="grid overflow-hidden sm:grid-cols-2 lg:grid-cols-5">
       {metrics.map(([label, value, detail], index) => (
         <div key={label} className={`min-w-0 px-5 py-4 ${index > 0 ? 'border-t border-[var(--color-border-subtle)] sm:border-l lg:border-t-0' : ''}`}>
           <p className="text-[13px] text-[var(--color-text-muted)]">{label}</p>
@@ -856,10 +856,11 @@ function DashboardLoading() {
   return (
     <div className="space-y-10 pt-5" aria-label="Loading usage">
       <div className="grid gap-10 lg:grid-cols-[minmax(260px,0.72fr)_minmax(0,1.28fr)]">
-        <Surface radius="surface" variant="recessed" className="h-[360px] animate-pulse" />
-        <Surface radius="surface" variant="recessed" className="h-[360px] animate-pulse" />
+        <Surface bordered radius="surface" variant="recessed" className="h-[360px] animate-pulse" />
+        <Surface bordered radius="surface" variant="recessed" className="h-[360px] animate-pulse" />
       </div>
       <Surface
+        bordered
         density="none"
         radius="surface"
         variant="panel"
@@ -882,7 +883,7 @@ function DashboardLoading() {
 
 function DashboardError({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
-    <Surface density="comfortable" radius="surface" variant="recessed" className="flex min-h-56 items-center justify-center text-center">
+    <Surface bordered density="comfortable" radius="surface" variant="recessed" className="flex min-h-56 items-center justify-center text-center">
       <div className="max-w-md">
         <CircleAlert size={20} className="mx-auto text-[var(--color-status-danger)]" />
         <h2 className="mt-4 text-base font-medium text-[var(--color-text-primary)]">Usage could not be loaded.</h2>

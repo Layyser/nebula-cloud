@@ -15,7 +15,7 @@ export function VerificationResultPage({
   const failed = Boolean(errorCode)
   return (
     <div className="relative z-[2] flex min-h-screen items-center justify-center px-5 text-[var(--color-text-primary)]">
-      <div className="w-full max-w-[420px] rounded-2xl bg-[var(--color-surface-auth)] p-6 shadow-[0_32px_100px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:p-8">
+      <div className="ui-border-surface w-full max-w-[420px] rounded-2xl bg-[var(--color-surface-auth)] p-6 shadow-[0_32px_100px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:p-8">
         <CloudBrand onSelect={onBack} />
         <div className="mt-8 flex h-11 w-11 items-center justify-center rounded-2xl bg-white/[0.06] text-white/55">
           {failed ? <TriangleAlert size={19} /> : <CheckCircle2 size={19} />}

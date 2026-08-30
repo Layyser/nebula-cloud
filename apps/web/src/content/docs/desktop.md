@@ -9,7 +9,7 @@ Point the web UI at any running `nebula --serve`:
 - In development, the dev server proxies `/api` to your local runtime.
 - Includes chat with streamed responses, a session switcher, an agent profile editor, managers for all capability kinds (skills, MCPs, rules, commands, hooks), runtime settings (provider, model, keys, base URL, security mode), and appearance controls.
 
-## Nebula Desktop for Windows
+## Nubols Desktop for Windows
 
 A portable Windows application:
 
@@ -22,6 +22,6 @@ A portable Windows application:
 | Mode | Authentication | Transport |
 | --- | --- | --- |
 | Local | Bearer token minted by the runtime | Direct HTTP + server-sent events to localhost |
-| Cloud | Your Nebula session cookie | Streams through the control-plane gateway |
+| Cloud | Your Nubols session cookie | Streams through the control-plane gateway |
 
 The shared transport layer handles streaming responses, automatic reconnection after interruptions, idle detection, and cancellation. In Cloud mode the browser never receives runtime tokens or internal addresses — see [Security](/docs?topic=security).

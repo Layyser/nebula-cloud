@@ -79,7 +79,7 @@ export function OrganizationGate({ children, onBack, onSignedOut }: Organization
     if (planError) {
       return (
         <div className="relative z-[2] flex min-h-screen items-center justify-center px-5 text-white">
-          <div className="w-full max-w-sm rounded-2xl bg-[var(--color-surface-auth)] p-6 text-center">
+          <div className="ui-border-surface w-full max-w-sm rounded-2xl bg-[var(--color-surface-auth)] p-6 text-center">
             <p className="text-sm text-white/70">{planError}</p>
             <div className="mt-4 flex items-center justify-center gap-2">
               <button type="button" onClick={() => void loadPlanAccounts()} className="rounded-full bg-white px-4 py-2 text-xs font-semibold text-black">Try again</button>
@@ -232,7 +232,7 @@ export function OrganizationSetup({
 
   return (
     <div className="relative z-[2] flex min-h-screen items-center justify-center px-5 py-12 text-white">
-      <div className="w-full max-w-[520px] rounded-2xl bg-[var(--color-surface-auth)] p-6 shadow-[0_32px_100px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:p-8">
+      <div className="ui-border-surface w-full max-w-[520px] rounded-2xl bg-[var(--color-surface-auth)] p-6 shadow-[0_32px_100px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:p-8">
         <CloudBrand onSelect={onBack} />
         <h1 className="mt-7 text-3xl font-medium tracking-[-0.04em]">Choose how you use Nubols</h1>
         <p className="mt-2 text-sm leading-6 text-white/45">
@@ -259,7 +259,7 @@ export function OrganizationSetup({
           </div>
           {accountType === 'organization' && (
             <>
-              <div className="flex h-11 items-center gap-2.5 rounded-xl bg-[var(--color-surface-field)] px-3.5 text-sm transition focus-within:bg-[var(--color-surface-field-focus)]">
+              <div className="ui-border-control flex h-11 items-center gap-2.5 rounded-xl bg-[var(--color-surface-field)] px-3.5 text-sm transition focus-within:bg-[var(--color-surface-field-focus)]">
                 <Building2 size={15} className="shrink-0 text-white/35" />
                 <input
                   value={organizationName}
@@ -327,7 +327,7 @@ export function OrganizationSetup({
         </div>
 
         <form onSubmit={joinOrganization} className="space-y-3">
-          <div className="flex h-11 items-center gap-2.5 rounded-xl bg-[var(--color-surface-field)] px-3.5 text-sm transition focus-within:bg-[var(--color-surface-field-focus)]">
+          <div className="ui-border-control flex h-11 items-center gap-2.5 rounded-xl bg-[var(--color-surface-field)] px-3.5 text-sm transition focus-within:bg-[var(--color-surface-field-focus)]">
             <KeyRound size={15} className="shrink-0 text-white/35" />
             <input
               value={code}

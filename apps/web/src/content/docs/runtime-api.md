@@ -1,6 +1,6 @@
 ## Overview
 
-The Runtime API is the local HTTP interface exposed by `nebula --serve`. The terminal UI, web app, Desktop, and Cloud all speak it, so anything you can do in the interface you can script here. JSON bodies throughout; streaming turns use server-sent events (SSE).
+The Runtime API is the local HTTP interface exposed by `nebula --serve`. The terminal UI, web app, Desktop, and Nubols Cloud all speak it, so anything you can do in the interface you can script here. JSON bodies throughout; streaming turns use server-sent events (SSE).
 
 ## Authentication
 
@@ -83,6 +83,6 @@ POST /changes/{id}/revert
 POST /changes/{id}/unrevert
 ```
 
-## Going through Nebula Cloud
+## Going through Nubols Cloud
 
 In Cloud you never call the runtime directly. Browsers call `/api/workspaces/{workspaceId}/runtime/*` with only their session cookie; the control plane verifies membership, injects a short-lived bearer token upstream, and strips credentials from the response. Runtime addresses and tokens never reach the client — see [Security](/docs?topic=security).

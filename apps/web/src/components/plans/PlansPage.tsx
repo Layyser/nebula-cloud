@@ -67,7 +67,7 @@ export function PlansPage({ onLaunch }: { onLaunch: () => void }) {
         <section className="mx-auto max-w-4xl text-center">
           <SectionEyebrow>/plans</SectionEyebrow>
           <h1 className="mt-5 text-5xl font-medium tracking-[-0.055em] sm:text-7xl">Choose how you deploy.</h1>
-          <p className="mx-auto mt-6 max-w-2xl text-base leading-7 text-[var(--color-text-secondary)]">Placeholder plan details for Nebula Agent, managed operators, and organization controls. Final commercial terms will replace this copy.</p>
+          <p className="mx-auto mt-6 max-w-2xl text-base leading-7 text-[var(--color-text-secondary)]">Placeholder plan details for Nubols operators, Nebula Agent, and organization controls. Final commercial terms will replace this copy.</p>
           <SegmentedControl
             ariaLabel="Billing cadence"
             value={cadence}
@@ -83,7 +83,7 @@ export function PlansPage({ onLaunch }: { onLaunch: () => void }) {
 
         <section aria-label="Plans" className="mt-16 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {PLANS.map(plan => (
-            <article key={plan.name} className={`flex min-h-[530px] flex-col rounded-[var(--radius-surface)] border p-6 ${plan.featured ? 'border-[var(--color-diagram-active-border)] bg-[var(--color-diagram-active-surface)]' : 'border-[var(--color-border-subtle)] bg-[var(--color-surface-panel)]'}`}>
+            <article key={plan.name} className={`ui-border-surface flex min-h-[530px] flex-col rounded-[var(--radius-surface)] p-6 ${plan.featured ? 'bg-[var(--color-diagram-active-surface)]' : 'bg-[var(--color-surface-panel)]'}`}>
               <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-subtle)]">{plan.audience}</p>
               <h2 className="mt-3 text-2xl font-medium tracking-[-0.035em]">{plan.name}</h2>
               <div className="mt-8 flex items-end gap-2">

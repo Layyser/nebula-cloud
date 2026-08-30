@@ -327,7 +327,23 @@ mailbox, create one workspace, and then run the production-host isolation,
 HTTPS publication, raw TCP publication, restart-persistence, and backup drills
 before sharing the demo externally.
 
-## 9. Provisioning failure: “Provisioning paused”
+## 9. Updating the Cloud Web bundle
+
+For frontend-only changes, update the Cloud checkout and restart only the
+Cloud service. The worker and existing workspace containers do not need to be
+restarted because this does not change the worker API or workspace image:
+
+```bash
+cd /opt/nubols/current/nebula-cloud
+./scripts/update-cloud-web.sh
+```
+
+The script refuses to pull over local edits, uses `git pull --ff-only`, installs
+the locked dependencies, builds `apps/web`, restarts `nubols-cloud.service`,
+and checks `http://127.0.0.1:7790/health/ready`. It never restarts
+`nebula-worker.service`.
+
+## 10. Provisioning failure: “Provisioning paused”
 
 If the app shows:
 

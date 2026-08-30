@@ -1,6 +1,6 @@
 ## Overview
 
-Nebula gives every member of your organization an **Operator**: your own AI teammate — a private Linux computer with one or more agents working inside it. You delegate work in Chat, take over directly in Console when you want hands-on control, and manage people and usage from one dashboard.
+Nubols gives every member of your organization an **Operator**: your own AI teammate — a private Linux computer with one or more Nebula agents working inside it. You delegate work in Chat, take over directly in Console when you want hands-on control, and manage people and usage from one dashboard.
 
 This page is the shortest path from a new account to a first completed task.
 
@@ -42,4 +42,4 @@ Open Terminal to attach to the same machine your Operator works on:
 - [Core concepts](/docs?topic=concepts) — operators, workspaces, agents, and sessions in depth.
 - [Capabilities](/docs?topic=capabilities) — teach your Operator with skills, MCPs, rules, and hooks.
 - [Cloud workspaces](/docs?topic=cloud) — lifecycle, storage, and resource guarantees.
-- [Runtime API](/docs?topic=runtime-api) — integrate Nebula with your own tooling.
+- [Runtime API](/docs?topic=runtime-api) — integrate Nubols with your own tooling.

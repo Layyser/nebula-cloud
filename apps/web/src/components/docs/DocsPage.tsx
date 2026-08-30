@@ -61,7 +61,7 @@ const DOC_TOPICS: DocTopic[] = [
     group: 'Runtime',
     icon: MonitorSmartphone,
     summary: 'Browser and Windows frontends for local runtimes.',
-    sections: ['Overview', 'Standalone web app', 'Nebula Desktop for Windows', 'How connections work'],
+    sections: ['Overview', 'Standalone web app', 'Nubols Desktop for Windows', 'How connections work'],
     markdown: desktopMd,
   },
   {
@@ -97,7 +97,7 @@ const DOC_TOPICS: DocTopic[] = [
     group: 'Reference',
     icon: KeyRound,
     summary: 'The organization-neutral HTTP surface.',
-    sections: ['Overview', 'Authentication', 'Health and metadata', 'Sending turns', 'Session management', 'Per-session controls', 'Agents and capabilities', 'Change ledger', 'Going through Nebula Cloud'],
+    sections: ['Overview', 'Authentication', 'Health and metadata', 'Sending turns', 'Session management', 'Per-session controls', 'Agents and capabilities', 'Change ledger', 'Going through Nubols Cloud'],
     markdown: runtimeApiMd,
   },
   {
@@ -195,7 +195,7 @@ export function DocsPage({ onLaunch }: { onLaunch: () => void }) {
                 <ChevronDown size={16} className={`text-[var(--color-text-muted)] transition-transform ${mobileNavOpen ? 'rotate-180' : ''}`} />
               </button>
               {mobileNavOpen && (
-                <div className="absolute inset-x-0 top-full z-40 mt-2 rounded-2xl border border-[var(--color-border-default)] bg-[var(--color-surface-diagram-node)] p-2 shadow-[var(--shadow-surface)]">
+                <div className="ui-border-floating absolute inset-x-0 top-full z-40 mt-2 rounded-2xl bg-[var(--color-surface-diagram-node)] p-2 shadow-[var(--shadow-surface)]">
                   {groups.map(group => (
                     <div key={group} className="py-1.5">
                       <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-subtle)]">{group}</p>

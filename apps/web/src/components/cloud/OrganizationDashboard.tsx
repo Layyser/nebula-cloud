@@ -246,14 +246,14 @@ function DashboardOverview({
     return (
       <section aria-label="Loading dashboard overview" className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {Array.from({ length: 8 }, (_, index) => (
-          <Surface key={index} variant="panel" density="none" radius="surface" className="h-28 animate-pulse shadow-[var(--shadow-surface)]" />
+          <Surface key={index} bordered variant="panel" density="none" radius="surface" className="h-28 animate-pulse shadow-[var(--shadow-surface)]" />
         ))}
       </section>
     )
   }
   if (state.status === 'error') {
     return (
-      <Surface variant="panel" density="comfortable" radius="surface" className="flex items-center justify-between gap-5">
+      <Surface bordered variant="panel" density="comfortable" radius="surface" className="flex items-center justify-between gap-5">
         <div>
           <p className="text-sm font-medium text-[var(--color-text-primary)]">Overview unavailable</p>
           <p className="mt-1 text-xs text-[var(--color-text-muted)]">{state.message}</p>
@@ -320,7 +320,7 @@ function DashboardOverview({
   return (
     <section aria-label="Dashboard overview" className="grid grid-cols-2 gap-3 md:grid-cols-4">
       {metrics.map(metric => (
-        <Surface key={metric.label} variant="panel" density="default" radius="surface" className="min-w-0 shadow-[var(--shadow-surface)]">
+        <Surface key={metric.label} bordered variant="panel" density="default" radius="surface" className="min-w-0 shadow-[var(--shadow-surface)]">
           <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-subtle)]">
             {metric.icon}
             <span className="truncate">{metric.label}</span>
@@ -463,7 +463,7 @@ function UsersView({
   ) : (
     <div className="space-y-3">
       {data.operatorSeats && (
-        <Surface variant="panel" density="default" radius="surface" className="flex flex-wrap items-center gap-4">
+        <Surface bordered variant="panel" density="default" radius="surface" className="flex flex-wrap items-center gap-4">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-control)] bg-[var(--color-surface-raised)] text-[var(--color-text-muted)]">
             <CircleDollarSign size={17} />
           </span>
@@ -482,7 +482,7 @@ function UsersView({
         </Surface>
       )}
       {data.members.map(member => (
-        <Surface key={member.membershipId} variant="panel" density="default" radius="surface" className="flex flex-wrap items-center gap-4">
+        <Surface key={member.membershipId} bordered variant="panel" density="default" radius="surface" className="flex flex-wrap items-center gap-4">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--color-surface-raised)] text-sm font-semibold text-[var(--color-text-primary)]">
             {member.name.slice(0, 1).toUpperCase()}
           </span>
@@ -623,7 +623,7 @@ function OrganizationView({ organizationId, fallbackName }: { organizationId: st
 
   return <LoadBoundary state={state} onRetry={load}>{data => (
     <div className="grid gap-4 xl:grid-cols-2">
-      <Surface variant="panel" density="comfortable" radius="surface">
+      <Surface bordered variant="panel" density="comfortable" radius="surface">
         <div className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]"><Building2 size={16} /> Company information</div>
         <div className="mt-6 flex items-end gap-2">
           <Field label="Organization name" className="min-w-0 flex-1">
@@ -634,7 +634,7 @@ function OrganizationView({ organizationId, fallbackName }: { organizationId: st
         <MetadataChip className="mt-3">Slug: {data.organization.slug}</MetadataChip>
       </Surface>
 
-      <Surface variant="panel" density="comfortable" radius="surface">
+      <Surface bordered variant="panel" density="comfortable" radius="surface">
         <div className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]"><KeyRound size={16} /> Organization access code</div>
         {data.joinCode ? (
           <div className="mt-6 flex items-end gap-2">
@@ -652,7 +652,7 @@ function OrganizationView({ organizationId, fallbackName }: { organizationId: st
         </Button>
       </Surface>
 
-      <Surface variant="panel" density="comfortable" radius="surface" className="xl:col-span-2">
+      <Surface bordered variant="panel" density="comfortable" radius="surface" className="xl:col-span-2">
         <div className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]"><ShieldCheck size={16} /> Administrators</div>
         <div className="mt-5 divide-y divide-[var(--color-border-subtle)]">
           {data.admins.map(admin => (
@@ -672,7 +672,7 @@ type LoadState<T> = { status: 'loading' } | { status: 'error'; message: string }
 function LoadBoundary<T>({ state, onRetry, children }: { state: LoadState<T>; onRetry: () => void | Promise<void>; children: (data: T) => ReactNode }) {
   if (state.status === 'loading') return (
     <div className="grid gap-3 sm:grid-cols-2">
-      {[0, 1, 2, 3].map(item => <Surface key={item} variant="panel" density="none" radius="surface" className="h-28 animate-pulse" />)}
+      {[0, 1, 2, 3].map(item => <Surface key={item} bordered variant="panel" density="none" radius="surface" className="h-28 animate-pulse" />)}
     </div>
   )
   if (state.status === 'error') return (

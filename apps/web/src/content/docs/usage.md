@@ -1,6 +1,6 @@
 ## Overview
 
-Usage metering is built into every Nebula operator: each model turn produces a usage event, and those events roll up into personal and organization dashboards automatically. During the beta this is measurement only — no billing integration is enabled yet.
+Usage metering is built into every Nubols operator: each model turn produces a usage event, and those events roll up into personal and organization dashboards automatically. During the beta this is measurement only — no billing integration is enabled yet.
 
 ## What gets recorded
 

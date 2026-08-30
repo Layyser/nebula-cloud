@@ -143,7 +143,7 @@ export function LandingPage({ onLaunch }: LandingPageProps) {
         </div>
       </section>
 
-      <main className="relative z-10 -mt-px bg-transparent">
+      <main className="relative z-10 -mt-px bg-[var(--color-surface-page)]">
         <PlatformSection />
         <VideoShowcase />
         <RuntimeSection onLaunch={handleLaunch} />
@@ -208,7 +208,7 @@ export function Header({
       <nav className="relative z-10 mx-auto flex h-16 max-w-[1480px] items-center justify-between px-6 lg:px-10" aria-label="Main navigation">
         <a href="/" className="flex items-center gap-3 text-lg font-semibold tracking-[-0.02em] text-[var(--color-text-primary)]">
           <NebulaMark size={32} />
-          <span className="nebula-wordmark">Nebula</span>
+          <span className="nebula-wordmark">Nubols</span>
         </a>
         <div className="flex items-center gap-3">
           <NavigationMenu.Root className="relative hidden md:block">
@@ -229,7 +229,7 @@ export function Header({
               )) : (
                 <>
                   <HeaderMenu label="Product" active={pathname === '/'}>
-                    <HeaderMenuLink href="/#platform" title="Nebula Cloud" description="Persistent operators coordinated through one control plane." />
+                    <HeaderMenuLink href="/#platform" title="Nubols Cloud" description="Persistent operators coordinated through one control plane." />
                     <HeaderMenuLink href="/#runtime" title="Nebula Runtime" description="Choose the standalone runtime or managed Cloud deployment." />
                   </HeaderMenu>
                   <NavigationMenu.Item>
@@ -244,7 +244,7 @@ export function Header({
                   </NavigationMenu.Item>
                   <HeaderMenu label="Privacy" active={pathname.startsWith('/legal')}>
                     <HeaderMenuLink href="/legal?document=privacy" title="Privacy policy" description="How data is collected, processed, and protected." />
-                    <HeaderMenuLink href="/legal?document=terms" title="Terms of service" description="The agreement governing access to Nebula products." />
+                    <HeaderMenuLink href="/legal?document=terms" title="Terms of service" description="The agreement governing access to Nubols products." />
                     <HeaderMenuLink href="/legal?document=acceptable-use" title="Acceptable use" description="Rules for responsible use of operators and workspaces." />
                     <HeaderMenuLink href="/legal?document=cookies" title="Cookies" description="Browser storage and public-site preferences." />
                     <HeaderMenuLink href="/legal?document=security" title="Security" description="Security practices and responsible disclosure." />
@@ -252,7 +252,7 @@ export function Header({
                 </>
               )}
             </NavigationMenu.List>
-            <NavigationMenu.Viewport className="absolute left-1/2 top-[calc(100%+0.75rem)] z-50 w-[360px] -translate-x-1/2 overflow-hidden rounded-2xl bg-[var(--color-surface-diagram-node)] p-2 shadow-[var(--shadow-surface)]" />
+            <NavigationMenu.Viewport className="ui-border-floating absolute left-1/2 top-[calc(100%+0.75rem)] z-50 w-[360px] -translate-x-1/2 overflow-hidden rounded-2xl bg-[var(--color-surface-diagram-node)] p-2 shadow-[var(--shadow-surface)]" />
           </NavigationMenu.Root>
           <a href="/app" onClick={onLaunch} className="hidden h-10 items-center rounded-full bg-[var(--color-control-primary)] px-4 text-sm font-semibold text-[var(--color-control-on-primary)] transition hover:bg-[var(--color-control-primary-hover)] md:inline-flex">
             Launch app
@@ -279,7 +279,7 @@ export function Header({
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -4, scale: 0.98 }}
                   transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
-                  className="absolute right-0 top-[calc(100%+0.5rem)] w-52 overflow-hidden rounded-[var(--radius-surface)] bg-[var(--color-surface-diagram-node)] p-1.5 shadow-[var(--shadow-surface)]"
+                  className="ui-border-floating absolute right-0 top-[calc(100%+0.5rem)] w-52 overflow-hidden rounded-[var(--radius-surface)] bg-[var(--color-surface-diagram-node)] p-1.5 shadow-[var(--shadow-surface)]"
                 >
                   <MobileHeaderLink href="/" label="Product" active={pathname === '/'} onSelect={() => setMobileMenuOpen(false)} />
                   <MobileHeaderLink href="/docs" label="Docs" active={pathname.startsWith('/docs')} onSelect={() => setMobileMenuOpen(false)} />
@@ -588,7 +588,7 @@ function TuiPreview() {
           ))}
         </div>
         <pre
-          aria-label="Nebula ASCII wordmark"
+          aria-label="Nubols ASCII wordmark"
           className="relative z-10 m-0 text-[var(--color-tui-accent)]"
           style={{ fontFamily: "'Lucida Console', monospace", fontKerning: 'none', fontVariantLigatures: 'none' }}
         >{NEBULA_ASCII}</pre>
@@ -632,7 +632,7 @@ function WebControlPlanePreview({ onReady, theme }: { onReady: () => void; theme
     <div className="h-full w-full overflow-hidden">
       <iframe
         ref={iframeRef}
-        title="Interactive Nebula Cloud application preview"
+        title="Interactive Nubols Cloud application preview"
         src="/?landing-preview=runtime"
         onLoad={() => {
           syncTheme()
@@ -660,7 +660,7 @@ function LegacyWebControlPlanePreview() {
     <div className="flex h-full bg-[#080909] text-white/70">
       <aside className="hidden w-36 shrink-0 flex-col border-r border-white/[0.07] bg-[#111111] shadow-[4px_0_28px_rgba(0,0,0,0.55)] sm:flex">
         <div className="flex h-10 shrink-0 items-center justify-between pl-3 pr-2.5">
-          <div className="flex items-center gap-2 text-[11px] font-semibold text-white/90"><NebulaMark size={16} /> <span className="nebula-wordmark">Nebula</span></div>
+          <div className="flex items-center gap-2 text-[11px] font-semibold text-white/90"><NebulaMark size={16} /> <span className="nebula-wordmark">Nubols</span></div>
           <PanelLeftClose size={11} className="text-white/25" />
         </div>
         <div className="flex flex-col gap-0.5 px-2 pb-2 text-[9px]">
@@ -845,7 +845,7 @@ function PlatformSection() {
         <ScrollReveal className="max-w-4xl">
           <SectionEyebrow>/cloud</SectionEyebrow>
           <h2 className="mt-5 text-4xl font-medium tracking-[-0.045em] text-[var(--color-text-primary)] sm:text-6xl">Give every operator its own computer.</h2>
-          <p className="mt-6 max-w-3xl text-base leading-7 text-[var(--color-text-secondary)]">Connect each operator to the tools it needs, then route work through Nebula Cloud so people can delegate, inspect, and stay in control.</p>
+      <p className="mt-6 max-w-3xl text-base leading-7 text-[var(--color-text-secondary)]">Connect each operator to the tools it needs, then route work through Nubols Cloud so people can delegate, inspect, and stay in control.</p>
         </ScrollReveal>
 
         {/*
@@ -890,7 +890,7 @@ function PlatformSection() {
             </LabeledDiagramNode>
             <VerticalAgentBranches />
             <div className="relative grid w-[18rem] grid-cols-3 gap-6">
-              <span className="pointer-events-none absolute left-full top-1/2 ml-3 -translate-y-1/2 whitespace-nowrap text-[11px] leading-none text-white/65">Operators</span>
+              <span className="pointer-events-none absolute bottom-full left-1/2 mb-3 -translate-x-1/2 whitespace-nowrap text-[11px] leading-none text-white/65">Operators</span>
               {['Operator 1', 'Operator 2', 'Operator 3'].map(label => (
                 <DiagramNode key={label} label={label} className={DIAGRAM_NODE_BASE}>
                   <Bot size={26} />
@@ -899,7 +899,7 @@ function PlatformSection() {
             </div>
             <VerticalThreeColumnConnectors />
             <div className="relative grid w-[18rem] grid-cols-3 gap-6">
-              <span className="pointer-events-none absolute left-full top-1/2 ml-3 -translate-y-1/2 whitespace-nowrap text-[11px] leading-none text-white/65">Linux workspaces</span>
+              <span className="pointer-events-none absolute bottom-full left-1/2 mb-3 -translate-x-1/2 whitespace-nowrap text-[11px] leading-none text-white/65">Linux workspaces</span>
               {['Linux workspace 1', 'Linux workspace 2', 'Linux workspace 3'].map(label => (
                 <DiagramNode key={label} label={label} className={DIAGRAM_NODE_BASE}>
                   <Monitor size={26} />
@@ -1044,21 +1044,21 @@ function VerticalDiagramConnector() {
 function VerticalAgentBranches() {
   return (
     <svg aria-hidden="true" className="h-40 w-[18rem]" viewBox="0 0 288 160" preserveAspectRatio="none">
-      <path d="M144 24 V80 M144 80 H40 V136 M144 80 V136 M144 80 H248 V136" fill="none" stroke="#7dd3fc" strokeDasharray="3 6" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" />
+      <path d="M144 24 V72 M144 72 H40 V136 M144 72 V120 M144 72 H248 V136" fill="none" stroke="#7dd3fc" strokeDasharray="3 6" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" />
       <circle cx="144" cy="24" r="3" fill="#7dd3fc" />
       <circle cx="40" cy="136" r="3" fill="#7dd3fc" />
-      <circle cx="144" cy="136" r="3" fill="#7dd3fc" />
+      <circle cx="144" cy="120" r="3" fill="#7dd3fc" />
       <circle cx="248" cy="136" r="3" fill="#7dd3fc" />
     </svg>
   )
 }
 
-function VerticalInlineConnector() {
+function VerticalInlineConnector({ endY = 72 }: { endY?: number }) {
   return (
     <svg aria-hidden="true" className="h-28 w-2" viewBox="0 0 8 112" preserveAspectRatio="none">
-      <line x1="4" y1="24" x2="4" y2="88" fill="none" stroke="#7dd3fc" strokeDasharray="3 6" strokeLinecap="round" strokeWidth="1" />
+      <line x1="4" y1="24" x2="4" y2={endY} fill="none" stroke="#7dd3fc" strokeDasharray="3 6" strokeLinecap="round" strokeWidth="1" />
       <circle cx="4" cy="24" r="3" fill="#7dd3fc" />
-      <circle cx="4" cy="88" r="3" fill="#7dd3fc" />
+      <circle cx="4" cy={endY} r="3" fill="#7dd3fc" />
     </svg>
   )
 }
@@ -1066,7 +1066,7 @@ function VerticalInlineConnector() {
 function VerticalThreeColumnConnectors() {
   return (
     <div className="grid h-28 w-[18rem] grid-cols-3 justify-items-center gap-6">
-      {[0, 1, 2].map(index => <VerticalInlineConnector key={index} />)}
+      {[88, 72, 88].map((endY, index) => <VerticalInlineConnector key={index} endY={endY} />)}
     </div>
   )
 }
@@ -1190,14 +1190,14 @@ function RuntimeSection({ onLaunch }: { onLaunch: (event: MouseEvent<HTMLAnchorE
       <div className="mx-auto max-w-[1480px] px-6 py-28 lg:px-10 lg:py-36">
           <ScrollReveal className="max-w-4xl">
             <SectionEyebrow>/runtime</SectionEyebrow>
-            <h2 className="mt-5 text-4xl font-medium tracking-[-0.05em] text-[var(--color-text-primary)] sm:text-6xl">Choose how Nebula runs.</h2>
-            <p className="mt-6 max-w-3xl text-base leading-7 text-[var(--color-text-secondary)]">Use the standalone runtime on your machine, or add Nebula Cloud when your team needs shared workspaces and organization-wide control.</p>
+        <h2 className="mt-5 text-4xl font-medium tracking-[-0.05em] text-[var(--color-text-primary)] sm:text-6xl">Choose how Nubols runs.</h2>
+        <p className="mt-6 max-w-3xl text-base leading-7 text-[var(--color-text-secondary)]">Use the standalone runtime on your machine, or add Nubols Cloud when your team needs shared workspaces and organization-wide control.</p>
           </ScrollReveal>
           <ScrollReveal variant="visual" delay={0.04} className="mx-auto mt-8 w-fit">
             <SegmentedControl
-              ariaLabel="Nebula deployment model"
+            ariaLabel="Nubols deployment model"
               value={mode}
-              options={[{ value: 'standalone', label: 'Standalone' }, { value: 'cloud', label: 'Nebula Cloud' }]}
+            options={[{ value: 'standalone', label: 'Standalone' }, { value: 'cloud', label: 'Nubols Cloud' }]}
               onValueChange={setMode}
               tone="dark"
               className="w-72"
@@ -1229,11 +1229,11 @@ function RuntimeProductDisplay({ isCloud }: { isCloud: boolean }) {
     { id: 'agent', label: 'Nebula Agent', eyebrow: 'Standalone runtime', title: 'One small runtime owns the work.', description: 'Nebula Agent keeps sessions, tools, context, and local policy together in one portable Linux process.', icon: <NebulaMark size={28} />, previewTitle: 'Nebula Agent', previewLines: ['C++ · Linux', '<30 MB RAM', 'Local and organization-neutral'] },
     { id: 'terminal', label: 'Terminal', eyebrow: 'Built-in interface', title: 'Work directly in the terminal.', description: 'Launch the built-in TUI for sessions, approvals, tools, and agent work without running another client.', icon: <Terminal size={28} />, previewTitle: '$ ./nebula', previewLines: ['Start or resume a session', 'Inspect tool calls', 'Approve work locally'] },
     { id: 'api', label: 'HTTP API', eyebrow: 'Local Runtime API', title: 'Connect any local interface.', description: 'Run nebula --serve to expose the same sessions, tools, and events through the organization-neutral Runtime API.', icon: <Braces size={28} />, previewTitle: '$ ./nebula --serve', previewLines: ['Local HTTP transport', 'Sessions and streamed events', 'Same runtime, no duplicated state'] },
-    { id: 'tauri', label: 'Nebula Desktop', eyebrow: 'Desktop app', title: 'Use Nebula as a native desktop app.', description: 'Nebula Desktop starts the same local runtime and connects through its HTTP API, keeping your sessions, tools, and workspace on your machine.', icon: <Monitor size={28} />, previewTitle: 'Nebula Desktop', previewLines: ['Native Windows app', 'Local runtime connection', 'Same sessions and capabilities'] },
+    { id: 'tauri', label: 'Nubols Desktop', eyebrow: 'Desktop app', title: 'Use Nubols as a native desktop app.', description: 'Nubols Desktop starts the same local runtime and connects through its HTTP API, keeping your sessions, tools, and workspace on your machine.', icon: <Monitor size={28} />, previewTitle: 'Nubols Desktop', previewLines: ['Native Windows app', 'Local runtime connection', 'Same sessions and capabilities'] },
   ]
 
   const cloudDetails: RuntimeDetail[] = [
-    { id: 'cloud', label: 'Nebula Cloud', eyebrow: 'Organization control plane', title: 'Coordinate every managed workspace.', description: 'Nebula Cloud owns authentication, organizations, access, shared capabilities, usage, and governance.', icon: <NebulaMark size={28} />, previewTitle: 'Organization layer', previewLines: ['Members and access', 'Shared MCPs, skills, and rules', 'Usage and governance'] },
+    { id: 'cloud', label: 'Nubols Cloud', eyebrow: 'Organization control plane', title: 'Coordinate every managed workspace.', description: 'Nubols Cloud owns authentication, organizations, access, shared capabilities, usage, and governance.', icon: <NebulaMark size={28} />, previewTitle: 'Organization layer', previewLines: ['Members and access', 'Shared MCPs, skills, and rules', 'Usage and governance'] },
     { id: 'chat', label: 'Chat', eyebrow: 'Delegation surface', title: 'Delegate work without managing infrastructure.', description: 'People assign work in Chat while the operator continues inside its persistent private workspace.', icon: <MessageSquare size={28} />, previewTitle: 'Chat', previewLines: ['Delegate a task', 'Follow progress', 'Inspect results'] },
     { id: 'console', label: 'Console', eyebrow: 'Direct control', title: 'Take over the exact same workspace.', description: 'Open Console when a human needs direct terminal access to the operator’s persistent environment.', icon: <Terminal size={28} />, previewTitle: 'Console', previewLines: ['Live PTY access', 'Same files and processes', 'Human takeover without handoff'] },
     { id: 'dashboard', label: 'Dashboard', eyebrow: 'Beta roadmap', title: 'Make organization activity visible.', description: 'The managed beta roadmap adds measured organization and personal usage views as the underlying usage events become available.', icon: <LayoutDashboard size={28} />, previewTitle: 'Planned dashboard', previewLines: ['Measured usage events', 'Organization views for admins', 'Personal usage for each member'] },
@@ -1392,9 +1392,9 @@ function FinalCta({ onLaunch }: { onLaunch: (event: MouseEvent<HTMLAnchorElement
     {
       title: 'Products',
       links: [
-        { label: 'Nebula Cloud', href: '#platform' },
+        { label: 'Nubols Cloud', href: '#platform' },
         { label: 'Nebula Agent', href: '#runtime' },
-        { label: 'Nebula Desktop', href: '#runtime' },
+        { label: 'Nubols Desktop', href: '#runtime' },
         { label: 'Pricing', href: '/plans' },
       ],
     },
@@ -1444,7 +1444,7 @@ function FinalCta({ onLaunch }: { onLaunch: (event: MouseEvent<HTMLAnchorElement
           </div>
           <div aria-hidden="true" className="final-cta-copy-blob pointer-events-none absolute left-1/2 top-1/2 h-[19rem] w-[42rem] max-w-[94%] -translate-x-1/2 -translate-y-1/2 rounded-full blur-2xl" />
           <div className="relative z-10 flex flex-col items-center justify-center gap-8">
-            <h2 id="workspace" className="text-4xl font-medium tracking-[-0.05em] text-[var(--color-text-primary)] sm:text-6xl">Try Nebula now.</h2>
+            <h2 id="workspace" className="text-4xl font-medium tracking-[-0.05em] text-[var(--color-text-primary)] sm:text-6xl">Try Nubols now.</h2>
             <a href="/app" onClick={onLaunch} className="group inline-flex h-12 shrink-0 items-center gap-2 rounded-full bg-[var(--color-control-primary)] px-6 text-sm font-semibold text-[var(--color-control-on-primary)] transition hover:bg-[var(--color-control-primary-hover)]">
               Deploy an operator <ArrowRight size={15} className="transition-transform group-hover:translate-x-0.5" />
             </a>
@@ -1468,9 +1468,9 @@ export function Footer({ footerColumns: columns }: { footerColumns?: FooterColum
     {
       title: 'Products',
       links: [
-        { label: 'Nebula Cloud', href: '/#platform' },
+        { label: 'Nubols Cloud', href: '/#platform' },
         { label: 'Nebula Agent', href: '/#runtime' },
-        { label: 'Nebula Desktop', href: '/#runtime' },
+        { label: 'Nubols Desktop', href: '/#runtime' },
         { label: 'Pricing', href: '/plans' },
       ],
     },
@@ -1513,7 +1513,7 @@ export function Footer({ footerColumns: columns }: { footerColumns?: FooterColum
         <div className="mx-auto max-w-[1480px] px-8 pb-12 pt-8 lg:px-[50px] lg:pb-16 lg:pt-[50px]">
           <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-[1.35fr_repeat(4,minmax(0,1fr))] lg:gap-8">
             <div className="sm:col-span-2 lg:col-span-1">
-              <a href="/" aria-label="Nebula home" className="inline-flex text-[var(--color-text-primary)]">
+              <a href="/" aria-label="Nubols home" className="inline-flex text-[var(--color-text-primary)]">
                 <NebulaMark size={48} />
               </a>
             </div>
@@ -1534,7 +1534,7 @@ export function Footer({ footerColumns: columns }: { footerColumns?: FooterColum
 
           <div className="mt-12">
             <div className="flex items-center justify-between gap-6">
-              <p className="text-xs text-[var(--color-text-muted)]">© 2026 Nebula. All rights reserved.</p>
+              <p className="text-xs text-[var(--color-text-muted)]">© 2026 Nubols. All rights reserved.</p>
               <TooltipProvider delayDuration={250}>
                 <Tooltip>
                   <TooltipTrigger asChild>

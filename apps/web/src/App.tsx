@@ -151,6 +151,7 @@ export default function App() {
 export function PageBackground({ children, scrollReactive, visible = true }: { children: ReactNode; scrollReactive: boolean; visible?: boolean }) {
   return (
     <>
+      <div aria-hidden="true" className="page-shader-base pointer-events-none fixed inset-0 z-0" />
       {visible && <NebulaBackground fade={0} variant="classic" palette="graphite" resolutionScale={0.5} scrollReactive={scrollReactive} />}
       {visible && <div aria-hidden="true" className="page-shader-vignette pointer-events-none fixed inset-0 z-[1]" />}
       {visible && !scrollReactive && <div aria-hidden="true" className="shader-bottom-fade pointer-events-none fixed inset-x-0 bottom-0 z-[1]" />}
@@ -384,7 +385,7 @@ function AuthenticatedCloudApp({
       background: dashboardOverShader ? 'shader' : 'plain',
       onSelect: () => {},
       content: () => (
-        <div className="min-w-0 flex-1 overflow-y-auto [scrollbar-gutter:stable] bg-transparent">
+        <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable] bg-transparent">
           <OrganizationDashboard
             userName={user.name}
             userKey={user.email}
@@ -426,7 +427,7 @@ function AuthenticatedCloudApp({
       <RuntimeWorkspace
         transport={runtimeTransport}
         catalogRevision={runtimeCatalogRevision}
-        brandLabel="Nebula"
+        brandLabel="Nubols"
         identityLabel={`${user.name} · ${activeOrganization.accountType === 'individual' ? 'Personal' : activeOrganization.name}`}
         identityInitial={user.name.slice(0, 1).toUpperCase() || 'N'}
         identityMenuItems={[
@@ -624,7 +625,7 @@ export function SettingsWindow({
           )}
 
           {settingsSection === 'providers' && (
-            <SettingsContent title="Model providers" description="Connect the models Nebula can use. Credentials stay inside the runtime and are never shown to Cloud.">
+            <SettingsContent title="Model providers" description="Connect the models your operator can use. Credentials stay inside the runtime and are never shown to Nubols Cloud.">
               <ProviderSettings
                 transport={transport}
                 onProviderConnected={onProviderConnected}
@@ -634,7 +635,7 @@ export function SettingsWindow({
 
           {settingsSection === 'operator' && (
             <SettingsContent title="Operator" description="Manage the current workspace runtime without deleting its persistent files.">
-              <Surface variant="panel" density="compact" radius="surface" className="space-y-4">
+              <Surface bordered variant="panel" density="compact" radius="surface" className="space-y-4">
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <p className="text-[13px] font-medium text-[var(--color-text-primary)]">Restart operator</p>

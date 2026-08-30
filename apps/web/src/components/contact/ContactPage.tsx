@@ -114,7 +114,7 @@ export function ContactPage({ onLaunch }: { onLaunch: () => void }) {
             </div>
           </div>
 
-          <section id="contact-form" className="scroll-mt-28 rounded-[var(--radius-surface)] bg-[var(--color-surface-panel)] p-6 sm:p-8 lg:p-10">
+          <section id="contact-form" className="ui-border-surface scroll-mt-28 rounded-[var(--radius-surface)] bg-[var(--color-surface-panel)] p-6 sm:p-8 lg:p-10">
             <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-subtle)]">Send a message</p>
             <h2 className="mt-3 text-3xl font-medium tracking-[-0.04em]">Tell us what you need.</h2>
             <p className="mt-3 text-sm leading-6 text-[var(--color-text-muted)]">We’ll reply from a Nubols address. Please do not include passwords, API keys, or other secrets.</p>

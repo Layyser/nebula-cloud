@@ -8,7 +8,7 @@ export function CloudBrand({
   const brand = (
     <>
       <NebulaMark size={24} />
-      <span className="nebula-wordmark leading-none">Nebula</span>
+      <span className="nebula-wordmark leading-none">Nubols</span>
     </>
   )
 
@@ -19,7 +19,7 @@ export function CloudBrand({
             <button
               type="button"
               onClick={onSelect}
-              aria-label="Return to the Nebula landing page"
+              aria-label="Return to the Nubols landing page"
               className="flex h-6 cursor-pointer items-center gap-2.5 text-sm font-semibold leading-none text-white/80 transition hover:text-white"
             >
               {brand}

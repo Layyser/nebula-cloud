@@ -1,10 +1,11 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import '@nebula/runtime-ui/styles.css'
-import { initializeTheme } from '@nebula/runtime-ui'
+import { initializeBorders, initializeTheme } from '@nebula/runtime-ui'
 import './cloud.css'
 
 initializeTheme()
+initializeBorders()
 
 async function start() {
   const search = new URLSearchParams(window.location.search)

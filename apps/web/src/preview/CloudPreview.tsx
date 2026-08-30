@@ -22,7 +22,7 @@ import {
 
 const previewWorkspaceId = 'workspace-preview'
 const terminalOutput = [
-  'Nebula Cloud console',
+  'Nubols Cloud console',
   '',
   'operator@nebula:~/workspace$ git status --short',
   ' M apps/web/src/App.tsx',
@@ -65,7 +65,7 @@ function WorkspacePreview({
       background: dashboardOverShader ? 'shader' : 'plain',
       onSelect: () => {},
       content: () => (
-        <div className="min-w-0 flex-1 overflow-y-auto [scrollbar-gutter:stable] bg-transparent">
+        <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable] bg-transparent">
           <OrganizationDashboard
             userName={cloudPreviewUser.name}
             userKey={cloudPreviewUser.email}
@@ -102,7 +102,7 @@ function WorkspacePreview({
     <div ref={rootRef} className="contents">
       <RuntimeWorkspace
         transport={transport}
-        brandLabel="Nebula"
+        brandLabel="Nubols"
         identityLabel={`${cloudPreviewUser.name} · ${cloudPreviewOrganization.name}`}
         identityInitial="J"
         externalNavigation={navigation}
@@ -122,7 +122,7 @@ function RuntimePreview() {
   return (
     <RuntimeWorkspace
       transport={transport}
-      brandLabel="Nebula"
+      brandLabel="Nubols"
       identityLabel={`${cloudPreviewUser.name} · ${cloudPreviewOrganization.name}`}
       identityInitial={cloudPreviewUser.name.slice(0, 1).toUpperCase() || 'N'}
     />
@@ -135,7 +135,7 @@ function SettingsPreview() {
     <>
       <RuntimeWorkspace
         transport={transport}
-        brandLabel="Nebula"
+        brandLabel="Nubols"
         identityLabel={`${cloudPreviewUser.name} · ${cloudPreviewOrganization.name}`}
         identityInitial="J"
       />

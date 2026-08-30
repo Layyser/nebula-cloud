@@ -15,7 +15,7 @@ export function Operators({ onOpenWorkspace }: { onOpenWorkspace: () => void }) 
       </div>
 
       <div className="mt-9 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <button type="button" onClick={onOpenWorkspace} className="group rounded-2xl border border-white/[0.075] bg-white/[0.018] p-5 text-left transition hover:border-white/[0.13] hover:bg-white/[0.03]">
+        <button type="button" onClick={onOpenWorkspace} className="group ui-border-surface rounded-2xl bg-white/[0.018] p-5 text-left transition hover:bg-white/[0.03]">
           <div className="flex items-start justify-between">
             <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-sky-300/10 bg-sky-300/[0.06] text-sky-200/60"><Box size={18} /></span>
             <span className="text-[10px] text-[var(--color-status-success)]">● Online</span>
