@@ -128,6 +128,39 @@ and Worker remain siblings. The expected layout is:
 /opt/nubols/current -> /opt/nubols/releases/<release>
 ```
 
+### Private-repository Git pulls
+
+The four repositories are private. To make manual `git pull` updates work
+without putting a token in a remote URL, install the checked-in credential
+helper once and keep the token in a user-owned file on the server:
+
+```bash
+sudo install -m 0755 deploy/scripts/nubols-git-credential \
+  /usr/local/bin/nubols-git-credential
+sudo install -d -m 0700 -o ubuntu -g ubuntu \
+  /home/ubuntu/.config/nubols
+sudo install -m 0600 -o ubuntu -g ubuntu /dev/null \
+  /home/ubuntu/.config/nubols/github.env
+sudoedit /home/ubuntu/.config/nubols/github.env
+```
+
+Put only this line in that file:
+
+```text
+GITHUB_TOKEN=github_pat_REPLACE_WITH_A_FINE_GRAINED_TOKEN
+```
+
+Use a fine-grained GitHub token with read-only `Contents` access to the four
+Nubols repositories. Configure the helper for manual Git operations:
+
+```bash
+sudo git config --system credential.helper /usr/local/bin/nubols-git-credential
+git -C /opt/nubols/current/nebula-cloud ls-remote origin HEAD
+```
+
+Do not use a tokenized `https://user:token@github.com/...` URL. GitHub tokens
+are credentials, not deployment configuration, and must never be committed.
+
 After cloning the intended committed revisions:
 
 ```bash

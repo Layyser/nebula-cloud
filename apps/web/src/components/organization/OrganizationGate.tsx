@@ -56,8 +56,42 @@ export function OrganizationSetup({
   onBack: () => void
 }) {
   const [code, setCode] = useState('')
+  const [organizationName, setOrganizationName] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')
+
+  const createOrganization = async (event: FormEvent) => {
+    event.preventDefault()
+    const name = organizationName.trim()
+    if (!name) return
+
+    setError('')
+    setBusy('create')
+    try {
+      const slug = name
+        .toLowerCase()
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 64) || 'organization'
+      const result = await authClient.organization.create({ name, slug })
+      if (result.error || !result.data?.id) {
+        throw new Error(result.error?.message || 'Could not create the organization')
+      }
+      const activation = await authClient.organization.setActive({
+        organizationId: result.data.id,
+      })
+      if (activation.error) {
+        throw new Error(activation.error.message || 'Organization created, but could not be selected')
+      }
+      await onChanged()
+    } catch (createError) {
+      setError(createError instanceof Error ? createError.message : 'Could not create the organization')
+    } finally {
+      setBusy('')
+    }
+  }
 
   const selectOrganization = async (organizationId: string) => {
     setError('')
@@ -107,8 +141,31 @@ export function OrganizationSetup({
         <CloudBrand onSelect={onBack} />
         <h1 className="mt-7 text-3xl font-medium tracking-[-0.04em]">Join your organization</h1>
         <p className="mt-2 text-sm leading-6 text-white/45">
-          Select an existing membership or enter the access code provided by an administrator.
+          Create an organization for your workspace, select an existing membership, or enter an access code.
         </p>
+
+        <form onSubmit={createOrganization} className="mt-6 space-y-3">
+          <div className="flex h-11 items-center gap-2.5 rounded-xl bg-[var(--color-surface-field)] px-3.5 text-sm transition focus-within:bg-[var(--color-surface-field-focus)]">
+            <Building2 size={15} className="shrink-0 text-white/35" />
+            <input
+              value={organizationName}
+              onChange={event => setOrganizationName(event.target.value)}
+              required
+              maxLength={100}
+              autoComplete="organization"
+              placeholder="Organization name"
+              className="min-w-0 flex-1 bg-transparent text-white outline-none placeholder:text-white/25"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={Boolean(busy) || !organizationName.trim()}
+            className="flex h-11 w-full items-center justify-center gap-2 rounded-full bg-white text-sm font-semibold text-black transition hover:bg-white/88 disabled:cursor-not-allowed disabled:opacity-55"
+          >
+            {busy === 'create' ? <LoaderCircle size={15} className="animate-spin" /> : <ArrowRight size={15} />}
+            Create organization
+          </button>
+        </form>
 
         {organizations.length > 0 && (
           <div className="mt-6 space-y-2">
@@ -137,7 +194,7 @@ export function OrganizationSetup({
 
         <div className="my-6 flex items-center gap-3 text-[10px] uppercase tracking-[0.15em] text-white/20">
           <span className="h-px flex-1 bg-white/[0.07]" />
-          {organizations.length ? 'or join another' : 'organization access'}
+          {organizations.length ? 'or join another' : 'or join an existing organization'}
           <span className="h-px flex-1 bg-white/[0.07]" />
         </div>
 
