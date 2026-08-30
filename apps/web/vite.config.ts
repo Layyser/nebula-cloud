@@ -37,7 +37,19 @@ export default defineConfig({
         target: controlPlaneTarget,
         changeOrigin: false,
       },
+      '/api/plan-accounts': {
+        target: controlPlaneTarget,
+        changeOrigin: false,
+      },
       '/api/organizations': {
+        target: controlPlaneTarget,
+        changeOrigin: false,
+      },
+      '/api/invitations': {
+        target: controlPlaneTarget,
+        changeOrigin: false,
+      },
+      '/api/contact': {
         target: controlPlaneTarget,
         changeOrigin: false,
       },

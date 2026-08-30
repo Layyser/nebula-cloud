@@ -54,3 +54,13 @@ test('Vite only proxies published-service paths under /p/', () => {
   expect(proxyRoutes).toContain('/p/')
   expect(proxyRoutes).not.toContain('/p')
 })
+
+test('Vite proxies Cloud account bootstrap routes to the local control plane', () => {
+  const proxyRoutes = Object.keys(viteConfig.server?.proxy ?? {})
+
+  expect(proxyRoutes).toEqual(expect.arrayContaining([
+    '/api/plan-accounts',
+    '/api/invitations',
+    '/api/contact',
+  ]))
+})
