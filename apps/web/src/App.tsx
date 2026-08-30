@@ -271,11 +271,13 @@ function CloudSessionRoute({
 
   return (
     <OrganizationGate onBack={() => navigate('/')}>
-      {activeOrganization => (
+      {(activeOrganization, organizations, addOrganization) => (
         <AuthenticatedCloudApp
           navigate={navigate}
           user={session.user}
           activeOrganization={activeOrganization}
+          organizations={organizations}
+          addOrganization={addOrganization}
           onBackgroundVisibilityChange={onBackgroundVisibilityChange}
         />
       )}
@@ -287,11 +289,15 @@ function AuthenticatedCloudApp({
   navigate,
   user,
   activeOrganization,
+  organizations,
+  addOrganization,
   onBackgroundVisibilityChange,
 }: {
   navigate: (path: string) => void
   user: { name: string; email: string }
   activeOrganization: CloudOrganization
+  organizations: CloudOrganization[]
+  addOrganization: () => void
   onBackgroundVisibilityChange: (visible: boolean) => void
 }) {
   const [signingOut, setSigningOut] = useState(false)
@@ -384,12 +390,13 @@ function AuthenticatedCloudApp({
             userKey={user.email}
             organizationId={activeOrganization.id}
             organizationName={activeOrganization.name}
+            accountType={activeOrganization.accountType}
             onBackgroundChange={handleDashboardBackgroundChange}
           />
         </div>
       ),
     },
-  ], [activeOrganization.id, activeOrganization.name, dashboardOverShader, user.name, workspaceId])
+  ], [activeOrganization.accountType, activeOrganization.id, activeOrganization.name, dashboardOverShader, user.name, workspaceId])
 
   const signOut = useCallback(async () => {
     if (signingOut) return
@@ -420,9 +427,24 @@ function AuthenticatedCloudApp({
         transport={runtimeTransport}
         catalogRevision={runtimeCatalogRevision}
         brandLabel="Nebula"
-        identityLabel={`${user.name} · ${activeOrganization.name}`}
+        identityLabel={`${user.name} · ${activeOrganization.accountType === 'individual' ? 'Personal' : activeOrganization.name}`}
         identityInitial={user.name.slice(0, 1).toUpperCase() || 'N'}
         identityMenuItems={[
+          ...organizations
+            .filter(organization => organization.id !== activeOrganization.id)
+            .map(organization => ({
+              label: `Switch to ${organization.accountType === 'individual' ? 'Personal' : organization.name}`,
+              icon: organization.accountType === 'individual' ? <UserRound size={14} /> : <Building2 size={14} />,
+              onSelect: () => {
+                void authClient.organization.setActive({ organizationId: organization.id })
+                  .then(() => window.location.reload())
+              },
+            })),
+          {
+            label: 'Add organization',
+            icon: <Building2 size={14} />,
+            onSelect: addOrganization,
+          },
           {
             label: 'Settings',
             icon: <Settings size={14} />,
@@ -516,7 +538,9 @@ export function SettingsWindow({
 
   const settingsSections: SettingsSection[] = [
     { id: 'general', label: 'General', group: 'Account', icon: <UserRound size={15} /> },
-    { id: 'organization', label: 'Organization', group: 'Account', icon: <Building2 size={15} /> },
+    ...(organization.accountType === 'organization'
+      ? [{ id: 'organization', label: 'Organization', group: 'Account', icon: <Building2 size={15} /> }]
+      : []),
     { id: 'providers', label: 'Providers', group: 'Runtime', icon: <PlugZap size={15} /> },
     { id: 'operator', label: 'Operator', group: 'Runtime', icon: <Cpu size={15} /> },
     { id: 'appearance', label: 'Appearance', group: 'Personalize', icon: <Palette size={15} /> },
@@ -588,6 +612,7 @@ export function SettingsWindow({
               <div className="space-y-5">
                 <SettingsField label="Name" value={user.name} />
                 <SettingsField label="Email" value={user.email} />
+                <SettingsField label="Plan" value={organization.plan.charAt(0).toUpperCase() + organization.plan.slice(1)} />
               </div>
             </SettingsContent>
           )}

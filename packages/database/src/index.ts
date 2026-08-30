@@ -840,12 +840,46 @@ const migrations = [
         ON auth_rate_limit_bucket(updated_at);
     `,
   },
+  {
+    id: '0025_plan_account',
+    sql: `
+      CREATE TABLE plan_account (
+        id TEXT PRIMARY KEY,
+        account_type TEXT NOT NULL
+          CHECK (account_type IN ('individual', 'organization')),
+        plan TEXT NOT NULL
+          CHECK (plan IN ('individual', 'team', 'business', 'enterprise')),
+        owner_user_id TEXT REFERENCES user(id) ON DELETE CASCADE,
+        organization_id TEXT NOT NULL UNIQUE
+          REFERENCES organization(id) ON DELETE CASCADE,
+        created_by_user_id TEXT NOT NULL REFERENCES user(id) ON DELETE RESTRICT,
+        created_at INTEGER NOT NULL CHECK (created_at >= 0),
+        updated_at INTEGER NOT NULL CHECK (updated_at >= created_at),
+        CHECK (
+          (account_type = 'individual' AND plan = 'individual' AND owner_user_id IS NOT NULL)
+          OR (
+            account_type = 'organization'
+            AND plan IN ('team', 'business', 'enterprise')
+            AND owner_user_id IS NULL
+          )
+        )
+      );
+
+      CREATE UNIQUE INDEX plan_account_individual_owner_idx
+        ON plan_account(owner_user_id)
+        WHERE account_type = 'individual';
+      CREATE INDEX plan_account_type_plan_idx
+        ON plan_account(account_type, plan);
+    `,
+  },
 ] as const
 
 export type WorkspaceState = 'pending' | 'provisioning' | 'ready' | 'stopped' | 'failed'
 export type ProvisioningJobStatus = 'queued' | 'running' | 'succeeded' | 'failed'
 export type WorkerHostState = 'unknown' | 'healthy' | 'draining' | 'unavailable'
 export type PlatformControlName = 'provisioning' | 'workspace_start' | 'publication'
+export type PlanAccountType = 'individual' | 'organization'
+export type NubolsPlan = 'individual' | 'team' | 'business' | 'enterprise'
 export type EmailDeliveryKind =
   | 'email-verification'
   | 'password-reset'
@@ -906,6 +940,28 @@ export interface PersonalWorkspace {
   state: WorkspaceState
   createdAt: number
   updatedAt: number
+}
+
+export interface PlanAccount {
+  id: string
+  accountType: PlanAccountType
+  plan: NubolsPlan
+  ownerUserId: string | null
+  organizationId: string
+  organizationName: string
+  organizationSlug: string
+  createdByUserId: string
+  createdAt: number
+  updatedAt: number
+}
+
+export class PlanAccountConflictError extends Error {
+  readonly code = 'plan_account_conflict'
+
+  constructor(message = 'This user or organization already has a plan account') {
+    super(message)
+    this.name = 'PlanAccountConflictError'
+  }
 }
 
 export interface WorkerHost {
@@ -1709,6 +1765,19 @@ interface WorkspaceRow {
   updated_at: number
 }
 
+interface PlanAccountRow {
+  id: string
+  account_type: PlanAccountType
+  plan: NubolsPlan
+  owner_user_id: string | null
+  organization_id: string
+  organization_name: string
+  organization_slug: string
+  created_by_user_id: string
+  created_at: number
+  updated_at: number
+}
+
 interface OperatorEntitlementRow {
   membership_id: string
   organization_id: string
@@ -1855,6 +1924,21 @@ function toPersonalWorkspace(row: WorkspaceRow): PersonalWorkspace {
     reservedDiskBytes: row.reserved_disk_bytes,
     reservedWorkspaceSlots: row.reserved_workspace_slots,
     state: row.state,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function toPlanAccount(row: PlanAccountRow): PlanAccount {
+  return {
+    id: row.id,
+    accountType: row.account_type,
+    plan: row.plan,
+    ownerUserId: row.owner_user_id,
+    organizationId: row.organization_id,
+    organizationName: row.organization_name,
+    organizationSlug: row.organization_slug,
+    createdByUserId: row.created_by_user_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -3681,6 +3765,127 @@ export function isOrganizationMemberEnabled(
   return row?.enabled === 1
 }
 
+export function getPlanAccountByOrganizationId(
+  database: Database,
+  organizationId: string,
+): PlanAccount | null {
+  const row = database.query<PlanAccountRow, [string]>(`
+    SELECT plan_account.*,
+      organization.name AS organization_name,
+      organization.slug AS organization_slug
+    FROM plan_account
+    INNER JOIN organization ON organization.id = plan_account.organization_id
+    WHERE plan_account.organization_id = ?
+    LIMIT 1
+  `).get(organizationId.trim())
+  return row ? toPlanAccount(row) : null
+}
+
+export function listPlanAccountsForUser(
+  database: Database,
+  userId: string,
+): PlanAccount[] {
+  const normalizedUserId = userId.trim()
+  if (!normalizedUserId) throw new Error('userId is required')
+  return database.query<PlanAccountRow, [string, string]>(`
+    SELECT plan_account.*,
+      organization.name AS organization_name,
+      organization.slug AS organization_slug
+    FROM plan_account
+    INNER JOIN organization ON organization.id = plan_account.organization_id
+    LEFT JOIN member
+      ON member.organizationId = plan_account.organization_id
+      AND member.userId = ?
+    LEFT JOIN organization_member_state
+      ON organization_member_state.member_id = member.id
+    WHERE (
+      plan_account.account_type = 'individual'
+      AND plan_account.owner_user_id = ?
+    ) OR (
+      plan_account.account_type = 'organization'
+      AND member.id IS NOT NULL
+      AND COALESCE(organization_member_state.disabled, 0) = 0
+    )
+    ORDER BY
+      CASE plan_account.account_type WHEN 'individual' THEN 0 ELSE 1 END,
+      organization.name COLLATE NOCASE,
+      plan_account.id
+  `).all(normalizedUserId, normalizedUserId).map(toPlanAccount)
+}
+
+export function createPlanAccount(
+  database: Database,
+  options: {
+    userId: string
+    accountType: PlanAccountType
+    plan: NubolsPlan
+    organizationId: string
+    createId?: () => string
+    now?: () => number
+  },
+): PlanAccount {
+  const userId = options.userId.trim()
+  const organizationId = options.organizationId.trim()
+  if (!userId) throw new Error('userId is required')
+  if (!organizationId) throw new Error('organizationId is required')
+  const validPlan = options.accountType === 'individual'
+    ? options.plan === 'individual'
+    : options.plan === 'team' || options.plan === 'business' || options.plan === 'enterprise'
+  if (!validPlan) throw new Error('The selected plan does not match the account type')
+
+  return database.transaction(() => {
+    const membership = database.query<{ role: OrganizationRole; disabled: number }, [string, string]>(`
+      SELECT member.role,
+        COALESCE(organization_member_state.disabled, 0) AS disabled
+      FROM member
+      LEFT JOIN organization_member_state
+        ON organization_member_state.member_id = member.id
+      WHERE member.userId = ? AND member.organizationId = ?
+      LIMIT 1
+    `).get(userId, organizationId)
+    if (!membership || membership.disabled === 1 || membership.role !== 'owner') {
+      throw new OrganizationAccessDeniedError()
+    }
+
+    const existing = getPlanAccountByOrganizationId(database, organizationId)
+    if (existing) {
+      if (
+        existing.accountType === options.accountType
+        && existing.plan === options.plan
+        && (options.accountType !== 'individual' || existing.ownerUserId === userId)
+      ) return existing
+      throw new PlanAccountConflictError('This organization already has a different plan account')
+    }
+
+    const timestamp = (options.now ?? Date.now)()
+    try {
+      database.prepare(`
+        INSERT INTO plan_account (
+          id, account_type, plan, owner_user_id, organization_id,
+          created_by_user_id, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        (options.createId ?? randomUUID)(),
+        options.accountType,
+        options.plan,
+        options.accountType === 'individual' ? userId : null,
+        organizationId,
+        userId,
+        timestamp,
+        timestamp,
+      )
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('UNIQUE constraint failed')) {
+        throw new PlanAccountConflictError()
+      }
+      throw error
+    }
+    const created = getPlanAccountByOrganizationId(database, organizationId)
+    if (!created) throw new Error('Plan account could not be created')
+    return created
+  }).immediate()
+}
+
 function toOperatorEntitlement(row: OperatorEntitlementRow): OperatorEntitlement {
   return {
     membershipId: row.membership_id,
@@ -4695,7 +4900,11 @@ export function getOrganizationDashboardSummary(
     throw new Error('Dashboard worker heartbeat age is invalid')
   }
 
-  const organizationScope = actor.role === 'owner' || actor.role === 'admin'
+  const planAccount = database.query<{ account_type: PlanAccountType }, [string]>(`
+    SELECT account_type FROM plan_account WHERE organization_id = ? LIMIT 1
+  `).get(options.organizationId)
+  const organizationScope = planAccount?.account_type !== 'individual'
+    && (actor.role === 'owner' || actor.role === 'admin')
   const includeOrganization = organizationScope ? 1 : 0
   const enabledMembers = organizationScope
     ? database.query<{ count: number }, [string]>(`

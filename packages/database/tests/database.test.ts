@@ -8,6 +8,7 @@ import {
   claimProvisioningJob,
   ContactRateLimitError,
   createContactRequest,
+  createPlanAccount,
   deleteContactRequestsCreatedBefore,
   ensurePersonalWorkspace,
   ensureWorkspaceRunning,
@@ -25,16 +26,19 @@ import {
   getWorkerHost,
   getOrganizationMembers,
   getPersonalUsageSummary,
+  getPlanAccountByOrganizationId,
   getPlatformControl,
   hasActiveOperatorEntitlement,
   listOrganizationAuditEvents,
   listContactRequests,
   listPublishedServices,
   listPlatformControls,
+  listPlanAccountsForUser,
   markEmailDeliveryFailed,
   markEmailDeliverySent,
   migrateCloudSchema,
   openCloudDatabase,
+  PlanAccountConflictError,
   ProvisioningJobLeaseLostError,
   recordAuditEvent,
   recordPlatformOperationAuditEvent,
@@ -60,6 +64,82 @@ import {
   WorkspaceMembershipNotFoundError,
   WorkerPlacementUnavailableError,
 } from '../src'
+
+test('creates user-owned individual plans and organization-owned plans without double ownership', () => {
+  const database = openCloudDatabase({ path: ':memory:' })
+  try {
+    database.exec(`
+      CREATE TABLE user (id TEXT PRIMARY KEY);
+      CREATE TABLE organization (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        slug TEXT NOT NULL
+      );
+      CREATE TABLE member (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL REFERENCES user(id),
+        organizationId TEXT NOT NULL REFERENCES organization(id),
+        role TEXT NOT NULL,
+        createdAt INTEGER NOT NULL
+      );
+      INSERT INTO user (id) VALUES ('owner'), ('member');
+      INSERT INTO organization (id, name, slug) VALUES
+        ('personal-org', 'Personal workspace', 'personal-owner'),
+        ('team-org', 'Nubols Team', 'nubols-team');
+      INSERT INTO member (id, userId, organizationId, role, createdAt) VALUES
+        ('personal-owner', 'owner', 'personal-org', 'owner', 1),
+        ('team-owner', 'owner', 'team-org', 'owner', 1),
+        ('team-member', 'member', 'team-org', 'member', 2);
+    `)
+    migrateCloudSchema(database)
+
+    const personal = createPlanAccount(database, {
+      userId: 'owner',
+      accountType: 'individual',
+      plan: 'individual',
+      organizationId: 'personal-org',
+      createId: () => 'plan-personal',
+      now: () => 10,
+    })
+    expect(personal.ownerUserId).toBe('owner')
+    expect(createPlanAccount(database, {
+      userId: 'owner',
+      accountType: 'individual',
+      plan: 'individual',
+      organizationId: 'personal-org',
+    }).id).toBe('plan-personal')
+
+    const team = createPlanAccount(database, {
+      userId: 'owner',
+      accountType: 'organization',
+      plan: 'team',
+      organizationId: 'team-org',
+      createId: () => 'plan-team',
+      now: () => 11,
+    })
+    expect(team.ownerUserId).toBeNull()
+    expect(listPlanAccountsForUser(database, 'owner').map(account => account.id))
+      .toEqual(['plan-personal', 'plan-team'])
+    expect(listPlanAccountsForUser(database, 'member').map(account => account.id))
+      .toEqual(['plan-team'])
+    expect(getPlanAccountByOrganizationId(database, 'personal-org')?.plan).toBe('individual')
+
+    expect(() => createPlanAccount(database, {
+      userId: 'owner',
+      accountType: 'organization',
+      plan: 'team',
+      organizationId: 'personal-org',
+    })).toThrow(PlanAccountConflictError)
+    expect(() => createPlanAccount(database, {
+      userId: 'member',
+      accountType: 'organization',
+      plan: 'team',
+      organizationId: 'team-org',
+    })).toThrow()
+  } finally {
+    database.close()
+  }
+})
 
 test('classifies invitation acceptance without leaking it to the wrong account', () => {
   const database = openCloudDatabase({ path: ':memory:' })
@@ -135,7 +215,7 @@ test('applies the minimal application schema idempotently', () => {
     expect(tables).toContain('email_delivery')
     expect(database.query<{ count: number }, []>(
       'SELECT COUNT(*) AS count FROM nebula_migration',
-    ).get()?.count).toBe(24)
+    ).get()?.count).toBe(25)
   } finally {
     database.close()
   }

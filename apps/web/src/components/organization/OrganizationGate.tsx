@@ -1,6 +1,12 @@
-import { useState, type FormEvent, type ReactNode } from 'react'
-import { ArrowRight, Building2, KeyRound, LoaderCircle } from 'lucide-react'
-import type { JoinOrganizationResponse } from '@nebula-cloud/contracts'
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { ArrowRight, Building2, Check, KeyRound, LoaderCircle, UserRound } from 'lucide-react'
+import type {
+  JoinOrganizationResponse,
+  NubolsPlan,
+  PlanAccount,
+  PlanAccountsResponse,
+  PlanAccountType,
+} from '@nebula-cloud/contracts'
 import { authClient } from '../../auth/authClient'
 import { AuthLoading } from '../auth/AuthLoading'
 import { CloudBrand } from '../auth/CloudBrand'
@@ -10,6 +16,8 @@ export interface CloudOrganization {
   name: string
   slug: string
   logo?: string | null
+  accountType: PlanAccountType
+  plan: NubolsPlan
 }
 
 interface OrganizationGateProps {
@@ -17,30 +25,69 @@ interface OrganizationGateProps {
   children: (
     activeOrganization: CloudOrganization,
     organizations: CloudOrganization[],
+    addOrganization: () => void,
   ) => ReactNode
 }
 
 export function OrganizationGate({ children, onBack }: OrganizationGateProps) {
   const organizationsQuery = authClient.useListOrganizations()
   const activeQuery = authClient.useActiveOrganization()
-  const organizations = (organizationsQuery.data || []) as CloudOrganization[]
-  const activeOrganization = activeQuery.data as CloudOrganization | null | undefined
+  const [showSetup, setShowSetup] = useState(false)
+  const [planAccounts, setPlanAccounts] = useState<PlanAccount[] | null>(null)
+  const [planError, setPlanError] = useState('')
+  const loadPlanAccounts = useCallback(async () => {
+    setPlanError('')
+    try {
+      const response = await fetch('/api/plan-accounts', { credentials: 'include' })
+      const body = await response.json().catch(() => null) as (PlanAccountsResponse & { error?: string }) | null
+      if (!response.ok || !body) throw new Error(body?.error || 'Could not load account plans')
+      setPlanAccounts(body.accounts)
+    } catch (error) {
+      setPlanError(error instanceof Error ? error.message : 'Could not load account plans')
+    }
+  }, [])
 
-  if (organizationsQuery.isPending || activeQuery.isPending) {
-    return <AuthLoading label="Loading organization" />
+  useEffect(() => { void loadPlanAccounts() }, [loadPlanAccounts])
+
+  const authOrganizations = (organizationsQuery.data || []) as Array<Omit<CloudOrganization, 'accountType' | 'plan'>>
+  const activeAuthOrganization = activeQuery.data as Omit<CloudOrganization, 'accountType' | 'plan'> | null | undefined
+  const organizations = (planAccounts || []).flatMap(account => {
+    const organization = authOrganizations.find(candidate => candidate.id === account.organizationId)
+    return organization ? [{ ...organization, accountType: account.accountType, plan: account.plan }] : []
+  })
+  const activeOrganization = activeAuthOrganization
+    ? organizations.find(organization => organization.id === activeAuthOrganization.id)
+    : undefined
+
+  if (organizationsQuery.isPending || activeQuery.isPending || planAccounts === null) {
+    if (planError) {
+      return (
+        <div className="relative z-[2] flex min-h-screen items-center justify-center px-5 text-white">
+          <div className="w-full max-w-sm rounded-2xl bg-[var(--color-surface-auth)] p-6 text-center">
+            <p className="text-sm text-white/70">{planError}</p>
+            <button type="button" onClick={() => void loadPlanAccounts()} className="mt-4 rounded-full bg-white px-4 py-2 text-xs font-semibold text-black">Try again</button>
+          </div>
+        </div>
+      )
+    }
+    return <AuthLoading label="Loading account" />
   }
 
-  if (activeOrganization) {
-    return children(activeOrganization, organizations)
+  if (activeOrganization && !showSetup) {
+    return children(activeOrganization, organizations, () => setShowSetup(true))
   }
 
   return (
     <OrganizationSetup
       organizations={organizations}
-      onBack={onBack}
+      onBack={activeOrganization ? () => setShowSetup(false) : onBack}
       onChanged={async () => {
-        await organizationsQuery.refetch()
-        await activeQuery.refetch()
+        await Promise.all([
+          organizationsQuery.refetch(),
+          activeQuery.refetch(),
+          loadPlanAccounts(),
+        ])
+        setShowSetup(false)
       }}
     />
   )
@@ -57,27 +104,45 @@ export function OrganizationSetup({
 }) {
   const [code, setCode] = useState('')
   const [organizationName, setOrganizationName] = useState('')
+  const hasIndividualAccount = organizations.some(organization => organization.accountType === 'individual')
+  const [accountType, setAccountType] = useState<PlanAccountType>(hasIndividualAccount ? 'organization' : 'individual')
+  const [organizationPlan, setOrganizationPlan] = useState<Exclude<NubolsPlan, 'individual'>>('team')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')
 
-  const createOrganization = async (event: FormEvent) => {
+  const createAccount = async (event: FormEvent) => {
     event.preventDefault()
-    const name = organizationName.trim()
+    const name = accountType === 'individual' ? 'Personal workspace' : organizationName.trim()
     if (!name) return
 
     setError('')
     setBusy('create')
     try {
-      const slug = name
+      const slugBase = name
         .toLowerCase()
         .normalize('NFKD')
         .replace(/[\u0300-\u036f]/g, '')
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '')
-        .slice(0, 64) || 'organization'
+        .slice(0, 44) || 'organization'
+      const slug = `${accountType === 'individual' ? 'personal' : slugBase}-${crypto.randomUUID().replaceAll('-', '').slice(0, 12)}`
       const result = await authClient.organization.create({ name, slug })
       if (result.error || !result.data?.id) {
         throw new Error(result.error?.message || 'Could not create the organization')
+      }
+      const planResponse = await fetch('/api/plan-accounts', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          accountType,
+          plan: accountType === 'individual' ? 'individual' : organizationPlan,
+          organizationId: result.data.id,
+        }),
+      })
+      const planBody = await planResponse.json().catch(() => null) as { error?: string } | null
+      if (!planResponse.ok) {
+        throw new Error(planBody?.error || 'The account plan could not be created')
       }
       const activation = await authClient.organization.setActive({
         organizationId: result.data.id,
@@ -87,7 +152,7 @@ export function OrganizationSetup({
       }
       await onChanged()
     } catch (createError) {
-      setError(createError instanceof Error ? createError.message : 'Could not create the organization')
+      setError(createError instanceof Error ? createError.message : 'Could not create the account')
     } finally {
       setBusy('')
     }
@@ -139,31 +204,64 @@ export function OrganizationSetup({
     <div className="relative z-[2] flex min-h-screen items-center justify-center px-5 py-12 text-white">
       <div className="w-full max-w-[520px] rounded-2xl bg-[var(--color-surface-auth)] p-6 shadow-[0_32px_100px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:p-8">
         <CloudBrand onSelect={onBack} />
-        <h1 className="mt-7 text-3xl font-medium tracking-[-0.04em]">Join your organization</h1>
+        <h1 className="mt-7 text-3xl font-medium tracking-[-0.04em]">Choose how you use Nubols</h1>
         <p className="mt-2 text-sm leading-6 text-white/45">
-          Create an organization for your workspace, select an existing membership, or enter an access code.
+          Start with your own operator, create a shared organization, or join one with an access code.
         </p>
 
-        <form onSubmit={createOrganization} className="mt-6 space-y-3">
-          <div className="flex h-11 items-center gap-2.5 rounded-xl bg-[var(--color-surface-field)] px-3.5 text-sm transition focus-within:bg-[var(--color-surface-field-focus)]">
-            <Building2 size={15} className="shrink-0 text-white/35" />
-            <input
-              value={organizationName}
-              onChange={event => setOrganizationName(event.target.value)}
-              required
-              maxLength={100}
-              autoComplete="organization"
-              placeholder="Organization name"
-              className="min-w-0 flex-1 bg-transparent text-white outline-none placeholder:text-white/25"
-            />
+        <form onSubmit={createAccount} className="mt-6 space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            {([
+              { type: 'individual' as const, label: 'Individual', detail: '$9 / month', icon: <UserRound size={16} /> },
+              { type: 'organization' as const, label: 'Organization', detail: 'From $10 / month', icon: <Building2 size={16} /> },
+            ].filter(option => option.type !== 'individual' || !hasIndividualAccount)).map(option => (
+              <button
+                key={option.type}
+                type="button"
+                onClick={() => setAccountType(option.type)}
+                className={`relative rounded-xl p-3 text-left transition ${accountType === option.type ? 'bg-white/[0.11] ring-1 ring-white/20' : 'bg-white/[0.035] hover:bg-white/[0.06]'}`}
+              >
+                <span className="flex items-center gap-2 text-sm font-medium text-white/80">{option.icon}{option.label}</span>
+                <span className="mt-1 block text-xs text-white/35">{option.detail}</span>
+                {accountType === option.type && <Check size={13} className="absolute right-3 top-3 text-white/70" />}
+              </button>
+            ))}
           </div>
+          {accountType === 'organization' && (
+            <>
+              <div className="flex h-11 items-center gap-2.5 rounded-xl bg-[var(--color-surface-field)] px-3.5 text-sm transition focus-within:bg-[var(--color-surface-field-focus)]">
+                <Building2 size={15} className="shrink-0 text-white/35" />
+                <input
+                  value={organizationName}
+                  onChange={event => setOrganizationName(event.target.value)}
+                  required
+                  maxLength={100}
+                  autoComplete="organization"
+                  placeholder="Organization name"
+                  className="min-w-0 flex-1 bg-transparent text-white outline-none placeholder:text-white/25"
+                />
+              </div>
+              <div className="grid grid-cols-3 rounded-xl bg-white/[0.035] p-1 text-xs">
+                {(['team', 'business', 'enterprise'] as const).map(plan => (
+                  <button
+                    key={plan}
+                    type="button"
+                    onClick={() => setOrganizationPlan(plan)}
+                    className={`h-9 rounded-lg capitalize transition ${organizationPlan === plan ? 'bg-white/[0.11] text-white/80' : 'text-white/35 hover:text-white/60'}`}
+                  >
+                    {plan}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
           <button
             type="submit"
-            disabled={Boolean(busy) || !organizationName.trim()}
+            disabled={Boolean(busy) || (accountType === 'organization' && !organizationName.trim())}
             className="flex h-11 w-full items-center justify-center gap-2 rounded-full bg-white text-sm font-semibold text-black transition hover:bg-white/88 disabled:cursor-not-allowed disabled:opacity-55"
           >
             {busy === 'create' ? <LoaderCircle size={15} className="animate-spin" /> : <ArrowRight size={15} />}
-            Create organization
+            {accountType === 'individual' ? 'Continue as Individual' : `Create ${organizationPlan} organization`}
           </button>
         </form>
 

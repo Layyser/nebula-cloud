@@ -126,6 +126,60 @@ test('returns deterministic invitation states only to an authenticated email', a
   }])
 })
 
+test('lists and creates plan accounts only for the authenticated user', async () => {
+  const calls: unknown[] = []
+  const account = {
+    id: 'plan-1',
+    accountType: 'individual' as const,
+    plan: 'individual' as const,
+    organizationId: 'org-1',
+    organizationName: 'Personal workspace',
+    organizationSlug: 'personal-user-1',
+    createdAt: 1,
+    updatedAt: 1,
+  }
+  const handler = createControlPlaneHandler({
+    resolveSession: async request => request.headers.has('cookie')
+      ? { userId: 'user-1' }
+      : null,
+    listPlanAccounts: input => {
+      calls.push({ list: input })
+      return { accounts: [account] }
+    },
+    createPlanAccount: input => {
+      calls.push({ create: input })
+      return account
+    },
+  })
+  const endpoint = 'http://control-plane.test/api/plan-accounts'
+  expect((await handler(new Request(endpoint))).status).toBe(401)
+
+  const listed = await handler(new Request(endpoint, { headers: { cookie: 'session=1' } }))
+  expect(listed.status).toBe(200)
+  expect(await listed.json()).toEqual({ accounts: [account] })
+
+  const created = await handler(new Request(endpoint, {
+    method: 'POST',
+    headers: { cookie: 'session=1', 'content-type': 'application/json' },
+    body: JSON.stringify({
+      accountType: 'individual',
+      plan: 'individual',
+      organizationId: 'org-1',
+    }),
+  }))
+  expect(created.status).toBe(201)
+  expect(await created.json()).toEqual(account)
+  expect(calls).toEqual([
+    { list: { userId: 'user-1' } },
+    { create: {
+      userId: 'user-1',
+      accountType: 'individual',
+      plan: 'individual',
+      organizationId: 'org-1',
+    } },
+  ])
+})
+
 test('reports not ready while dependencies are unavailable', async () => {
   const handler = createControlPlaneHandler({ isReady: () => false })
   const response = await handler(new Request('http://control-plane.test/health/ready'))

@@ -30,6 +30,8 @@ export const cloudPreviewOrganization = {
   id: 'org-preview',
   name: 'Nebula Labs',
   slug: 'nebula-labs',
+  accountType: 'organization' as const,
+  plan: 'team' as const,
 }
 
 export const cloudPreviewDashboard: OrganizationDashboardResponse = {

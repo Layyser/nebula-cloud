@@ -134,6 +134,30 @@ export interface CloudErrorResponse {
   retryable?: boolean
 }
 
+export type PlanAccountType = 'individual' | 'organization'
+export type NubolsPlan = 'individual' | 'team' | 'business' | 'enterprise'
+
+export interface PlanAccount {
+  id: string
+  accountType: PlanAccountType
+  plan: NubolsPlan
+  organizationId: string
+  organizationName: string
+  organizationSlug: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface PlanAccountsResponse {
+  accounts: PlanAccount[]
+}
+
+export interface CreatePlanAccountRequest {
+  accountType: PlanAccountType
+  plan: NubolsPlan
+  organizationId: string
+}
+
 export type ContactTopic = 'sales' | 'support' | 'security' | 'partnerships' | 'other'
 
 export interface ContactRequest {

@@ -3,6 +3,7 @@ import { motion, useReducedMotion } from 'framer-motion'
 import type {
   OrganizationUsageResponse,
   PersonalUsageResponse,
+  PlanAccountType,
   UsageTotals,
 } from '@nebula-cloud/contracts'
 import {
@@ -33,6 +34,7 @@ interface DashboardProps {
   userKey: string
   organizationId: string
   organizationName: string
+  accountType: PlanAccountType
   onClose?: () => void
 }
 
@@ -76,7 +78,7 @@ function usageSnapshotKey(userKey: string, organizationId: string, rangeDays: Us
   return `${userKey}:${organizationId}:${rangeDays}`
 }
 
-export function Dashboard({ userKey, organizationId, organizationName, onClose }: DashboardProps) {
+export function Dashboard({ userKey, organizationId, organizationName, accountType, onClose }: DashboardProps) {
   const [rangeDays, setRangeDays] = useState<UsageRange>(30)
   const [metric, setMetric] = useState<UsageMetric>('tokens')
   const [breakdownMode, setBreakdownMode] = useState<BreakdownMode>('model')
@@ -105,18 +107,20 @@ export function Dashboard({ userKey, organizationId, organizationName, onClose }
       }
       const personal = await personalResponse.json() as PersonalUsageResponse
 
-      const organizationResponse = await fetch(
-        `/api/organizations/${encodeURIComponent(organizationId)}/usage?days=${rangeDays}`,
-        { credentials: 'include', signal },
-      )
       let organization: OrganizationUsageResponse | null = null
-      if (organizationResponse.ok) {
-        organization = await organizationResponse.json() as OrganizationUsageResponse
-      } else if (organizationResponse.status !== 403 && organizationResponse.status !== 404) {
-        throw new Error(await responseMessage(
-          organizationResponse,
-          'Could not load organization usage',
-        ))
+      if (accountType === 'organization') {
+        const organizationResponse = await fetch(
+          `/api/organizations/${encodeURIComponent(organizationId)}/usage?days=${rangeDays}`,
+          { credentials: 'include', signal },
+        )
+        if (organizationResponse.ok) {
+          organization = await organizationResponse.json() as OrganizationUsageResponse
+        } else if (organizationResponse.status !== 403 && organizationResponse.status !== 404) {
+          throw new Error(await responseMessage(
+            organizationResponse,
+            'Could not load organization usage',
+          ))
+        }
       }
 
       if (requestId === requestSequence.current) {
@@ -139,7 +143,7 @@ export function Dashboard({ userKey, organizationId, organizationName, onClose }
     } finally {
       if (requestId === requestSequence.current) setIsRefreshing(false)
     }
-  }, [organizationId, rangeDays, userKey])
+  }, [accountType, organizationId, rangeDays, userKey])
 
   useEffect(() => {
     const controller = new AbortController()

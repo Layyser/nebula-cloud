@@ -7,6 +7,7 @@ import {
   assignStripeOperatorSeat,
   assignWorkspaceWorker,
   createContactRequest,
+  createPlanAccount,
   deleteContactRequestsCreatedBefore,
   ensurePersonalWorkspace,
   ensureWorkspaceRunning,
@@ -18,6 +19,7 @@ import {
   getOrganizationUsageSummary,
   getPersonalUsageSummary,
   getPersonalWorkspace,
+  listPlanAccountsForUser,
   getPublishedServiceBySlug,
   getPublishedServiceByIngressPort,
   getPublishedServiceByName,
@@ -514,6 +516,19 @@ function publishedServiceSummary(service: ReturnType<typeof upsertPublishedServi
   }
 }
 
+function planAccountSummary(account: ReturnType<typeof createPlanAccount>) {
+  return {
+    id: account.id,
+    accountType: account.accountType,
+    plan: account.plan,
+    organizationId: account.organizationId,
+    organizationName: account.organizationName,
+    organizationSlug: account.organizationSlug,
+    createdAt: account.createdAt,
+    updatedAt: account.updatedAt,
+  }
+}
+
 const tcpIngress = tcpIngressEnabled
   ? new TCPIngress({
       bindHost: tcpIngressBind,
@@ -725,6 +740,10 @@ const controlPlaneHandler = createControlPlaneHandler({
   getInvitationStatus: ({ invitationId, userEmail }) => (
     getOrganizationInvitationStatus(database, { invitationId, userEmail })
   ),
+  listPlanAccounts: ({ userId }) => ({
+    accounts: listPlanAccountsForUser(database, userId).map(planAccountSummary),
+  }),
+  createPlanAccount: input => planAccountSummary(createPlanAccount(database, input)),
   ensurePersonalWorkspace: ({ userId, organizationId }) => {
     const existing = getPersonalWorkspace(database, { userId, organizationId })
     if (!existing && isPlatformControlPaused(database, 'provisioning')) {

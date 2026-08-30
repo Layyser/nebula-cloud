@@ -26,6 +26,7 @@ import type {
   OrganizationMember,
   OrganizationMembersResponse,
   OrganizationOperatorsResponse,
+  PlanAccountType,
   RotateOrganizationJoinCodeResponse,
 } from '@nebula-cloud/contracts'
 import {
@@ -52,6 +53,7 @@ interface OrganizationDashboardProps {
   userKey: string
   organizationId: string
   organizationName: string
+  accountType: PlanAccountType
   previewOverview?: OrganizationDashboardResponse
   previewMembers?: OrganizationMembersResponse
   onBackgroundChange?: (overShader: boolean) => void
@@ -180,6 +182,8 @@ export function OrganizationDashboard(props: OrganizationDashboardProps) {
       meta: 'New window',
     },
   ]
+  const visibleCards = cards.filter(card => props.accountType === 'organization'
+    || (card.id !== 'users' && card.id !== 'organization'))
 
   return (
     <div className="relative min-h-full overflow-hidden">
@@ -187,7 +191,9 @@ export function OrganizationDashboard(props: OrganizationDashboardProps) {
         <main>
           <PageHeader
             title="Dashboard"
-            description={`Manage usage, people, and operators across ${props.organizationName}.`}
+            description={props.accountType === 'individual'
+              ? 'Manage your usage, operator, and model providers.'
+              : `Manage usage, people, and operators across ${props.organizationName}.`}
             spacing="comfortable"
           />
           <DashboardOverview state={overview} onRetry={loadOverview} />
@@ -195,7 +201,7 @@ export function OrganizationDashboard(props: OrganizationDashboardProps) {
             Manage
           </h2>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {cards.map((card, index) => (
+            {visibleCards.map((card, index) => (
               <motion.div
                 key={card.id}
                 initial={reduceMotion ? false : { opacity: 0, y: 8, scale: 0.985, filter: 'blur(3px)' }}

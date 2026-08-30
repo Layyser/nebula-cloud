@@ -7,6 +7,7 @@ import {
   type ContactRequestStatus,
   type ContactResponse,
   type ControlPlaneStatus,
+  type CreatePlanAccountRequest,
   type EnsurePersonalWorkspaceRequest,
   type EnsureWorkspaceRunningResponse,
   type HealthResponse,
@@ -20,6 +21,8 @@ import {
   type JoinOrganizationRequest,
   type JoinOrganizationResponse,
   type PersonalWorkspaceResponse,
+  type PlanAccount,
+  type PlanAccountsResponse,
   type PlatformControlName,
   type PlatformControlsResponse,
   type PlatformControlSummary,
@@ -48,6 +51,7 @@ import {
   OperatorEntitlementRequiredError,
   OperatorSeatCapacityError,
   PlatformControlPausedError,
+  PlanAccountConflictError,
   publishedServiceMaximumTTLSeconds,
   publishedServiceMinimumTTLSeconds,
   UsageAccessDeniedError,
@@ -89,6 +93,7 @@ const organizationPublicationRevocationPath = /^\/internal\/v1\/organizations\/(
 const operatorEntitlementAdministrationPath = /^\/internal\/v1\/entitlements\/operator\/([^/]+)$/
 const stripeWebhookPath = '/api/webhooks/stripe'
 const resendWebhookPath = '/api/webhooks/resend'
+const planAccountsPath = '/api/plan-accounts'
 
 // Workspace replacement may legitimately run for up to two minutes. Bun's
 // ten-second default would close the request while the worker was converging
@@ -121,6 +126,8 @@ export interface ControlPlaneHandlerOptions {
     invitationId: string
     userEmail: string
   }) => OrganizationInvitationStatusResponse
+  listPlanAccounts?: (input: { userId: string }) => PlanAccountsResponse
+  createPlanAccount?: (input: CreatePlanAccountRequest & { userId: string }) => PlanAccount
   ensurePersonalWorkspace?: (input: {
     userId: string
     organizationId: string
@@ -625,6 +632,8 @@ export function createControlPlaneHandler({
   handleResendWebhook,
   resolveSession,
   getInvitationStatus,
+  listPlanAccounts,
+  createPlanAccount,
   ensurePersonalWorkspace,
   ensureWorkspaceRunning,
   restartWorkspace,
@@ -1406,6 +1415,58 @@ export function createControlPlaneHandler({
         return json({ error: 'invitation is invalid', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
       }
       return json(getInvitationStatus({ invitationId, userEmail: session.email }))
+    }
+
+    if (url.pathname === planAccountsPath) {
+      const session = resolveSession ? await resolveSession(request) : null
+      if (!session) {
+        return json({ error: 'authentication required', code: 'authentication_required' } satisfies CloudErrorResponse, 401)
+      }
+      if (request.method === 'GET') {
+        if (!listPlanAccounts) {
+          return json({ error: 'plan selection is unavailable', code: 'plan_accounts_unavailable', retryable: true } satisfies CloudErrorResponse, 503)
+        }
+        return json(listPlanAccounts({ userId: session.userId }))
+      }
+      if (request.method === 'POST') {
+        if (!createPlanAccount) {
+          return json({ error: 'plan selection is unavailable', code: 'plan_accounts_unavailable', retryable: true } satisfies CloudErrorResponse, 503)
+        }
+        let body: CreatePlanAccountRequest
+        try {
+          body = await request.json() as CreatePlanAccountRequest
+        } catch {
+          return json({ error: 'request body must be valid JSON', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+        }
+        if (
+          (body.accountType !== 'individual' && body.accountType !== 'organization')
+          || !['individual', 'team', 'business', 'enterprise'].includes(body.plan)
+          || typeof body.organizationId !== 'string'
+          || !body.organizationId.trim()
+        ) {
+          return json({ error: 'account type, plan, and organization are required', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+        }
+        try {
+          return json(createPlanAccount({
+            userId: session.userId,
+            accountType: body.accountType,
+            plan: body.plan,
+            organizationId: body.organizationId.trim(),
+          }), 201)
+        } catch (error) {
+          if (error instanceof PlanAccountConflictError) {
+            return json({ error: error.message, code: error.code } satisfies CloudErrorResponse, 409)
+          }
+          if (error instanceof OrganizationAccessDeniedError) {
+            return json({ error: error.message, code: 'organization_access_denied' } satisfies CloudErrorResponse, 403)
+          }
+          if (error instanceof Error) {
+            return json({ error: error.message, code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+          }
+          return json({ error: 'plan selection failed', code: 'plan_account_failed' } satisfies CloudErrorResponse, 500)
+        }
+      }
+      return json({ error: 'method not allowed', code: 'method_not_allowed' } satisfies CloudErrorResponse, 405)
     }
 
     if (request.method === 'POST' && url.pathname === '/api/organizations/join') {

@@ -71,6 +71,7 @@ function WorkspacePreview({
             userKey={cloudPreviewUser.email}
             organizationId={cloudPreviewOrganization.id}
             organizationName={cloudPreviewOrganization.name}
+            accountType={cloudPreviewOrganization.accountType}
             previewOverview={cloudPreviewDashboard}
             previewMembers={cloudPreviewMembers}
             onBackgroundChange={handleDashboardBackgroundChange}
