@@ -37,7 +37,7 @@ export function CloudShell({
   const initial = user.name.trim().slice(0, 1).toUpperCase() || 'N'
 
   return (
-    <div className="relative z-[2] flex h-screen min-h-0 bg-[#090a0a] text-white">
+    <div className="relative z-[2] flex h-[100dvh] min-h-0 bg-[#090a0a] text-white">
       <aside className="flex w-60 shrink-0 flex-col border-r border-white/[0.07] bg-[#111111] px-2">
         <button type="button" onClick={() => onNavigate('/app')} className="flex h-16 items-center gap-2 px-2 text-left">
           <NebulaMark size={24} />
