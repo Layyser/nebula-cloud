@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@nebula-cloud/contracts": "workspace:*",
-    "@nebula/runtime-ui": "file:../../vendor/nebula-runtime-ui-0.1.82.tgz",
+    "@nebula/runtime-ui": "file:../../vendor/nebula-runtime-ui-0.1.83.tgz",
     "@radix-ui/react-navigation-menu": "^1.2.22",
     "@radix-ui/react-tooltip": "^1.2.13",
     "@tailwindcss/vite": "^4.2.4",
