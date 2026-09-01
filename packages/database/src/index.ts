@@ -1455,6 +1455,15 @@ export interface PublishedService {
   revokedAt: number | null
 }
 
+export interface OrganizationPublishedService {
+  publication: PublishedService
+  operator: {
+    membershipId: string
+    name: string
+    email: string
+  }
+}
+
 export interface WorkspaceOwnerIdentity {
   workspaceId: string
   userId: string
@@ -2356,6 +2365,60 @@ export function listPublishedServices(
       AND (expires_at IS NULL OR expires_at > ?)
     ORDER BY created_at, name
   `).all(workspaceId.trim(), now).map(toPublishedService)
+}
+
+export function listOrganizationPublishedServices(
+  database: Database,
+  options: OrganizationAccessOptions,
+): OrganizationPublishedService[] {
+  const actor = database.query<{
+    membership_id: string
+    role: OrganizationRole
+    disabled: number
+  }, [string, string]>(`
+    SELECT member.id AS membership_id,
+      member.role,
+      COALESCE(organization_member_state.disabled, 0) AS disabled
+    FROM member
+    LEFT JOIN organization_member_state
+      ON organization_member_state.member_id = member.id
+    WHERE member.userId = ? AND member.organizationId = ?
+    LIMIT 1
+  `).get(options.userId, options.organizationId)
+  if (!actor || actor.disabled === 1) throw new OrganizationAccessDeniedError()
+
+  const planAccount = database.query<{ account_type: PlanAccountType }, [string]>(`
+    SELECT account_type FROM plan_account WHERE organization_id = ? LIMIT 1
+  `).get(options.organizationId)
+  const organizationScope = planAccount?.account_type !== 'individual'
+    && (actor.role === 'owner' || actor.role === 'admin')
+
+  const rows = database.query<PublishedServiceRow & {
+    membership_id: string
+    operator_name: string
+    operator_email: string
+  }, [string, number, string]>(`
+    SELECT published_service.*,
+      member.id AS membership_id,
+      user.name AS operator_name,
+      user.email AS operator_email
+    FROM published_service
+    INNER JOIN workspace ON workspace.id = published_service.workspace_id
+    INNER JOIN member ON member.id = workspace.member_id
+    INNER JOIN user ON user.id = member.userId
+    WHERE workspace.organization_id = ?
+      AND (? = 1 OR workspace.member_id = ?)
+    ORDER BY published_service.updated_at DESC, published_service.name
+  `).all(options.organizationId, organizationScope ? 1 : 0, actor.membership_id)
+
+  return rows.map(row => ({
+    publication: toPublishedService(row),
+    operator: {
+      membershipId: row.membership_id,
+      name: row.operator_name,
+      email: row.operator_email,
+    },
+  }))
 }
 
 export function upsertPublishedService(

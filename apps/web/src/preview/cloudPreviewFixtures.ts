@@ -7,6 +7,7 @@ import type {
 import type {
   OrganizationDashboardResponse,
   OrganizationMembersResponse,
+  OrganizationPublishedServicesResponse,
 } from '@nebula-cloud/contracts'
 
 export const cloudPreviewModes = [
@@ -49,6 +50,45 @@ export const cloudPreviewDashboard: OrganizationDashboardResponse = {
   },
   provisioningFailures: 1,
   workers: { healthy: 2, total: 2 },
+}
+
+export const cloudPreviewPublications: OrganizationPublishedServicesResponse = {
+  publications: [
+    {
+      id: 'publication-web',
+      workspaceId: 'workspace-preview',
+      operatorName: 'Jorge',
+      operatorEmail: 'jorge@nubols.example',
+      name: 'web-preview',
+      protocol: 'http',
+      targetPort: 3000,
+      ingressPort: null,
+      publicUrl: 'https://web-preview.apps.nubols.com',
+      visibility: 'public',
+      authPolicy: 'none',
+      state: 'active',
+      expiresAt: null,
+      createdAt: Date.UTC(2026, 7, 30),
+      updatedAt: Date.UTC(2026, 7, 30),
+    },
+    {
+      id: 'publication-minecraft',
+      workspaceId: 'workspace-preview',
+      operatorName: 'Jorge',
+      operatorEmail: 'jorge@nubols.example',
+      name: 'minecraft',
+      protocol: 'tcp',
+      targetPort: 25565,
+      ingressPort: 20000,
+      publicUrl: 'tcp://tcp.nubols.com:20000',
+      visibility: 'public',
+      authPolicy: 'none',
+      state: 'revoked',
+      expiresAt: null,
+      createdAt: Date.UTC(2026, 7, 31),
+      updatedAt: Date.UTC(2026, 8, 1),
+    },
+  ],
 }
 
 export const cloudPreviewMembers: OrganizationMembersResponse = {

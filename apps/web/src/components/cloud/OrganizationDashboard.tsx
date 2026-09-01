@@ -26,6 +26,8 @@ import type {
   OrganizationMember,
   OrganizationMembersResponse,
   OrganizationOperatorsResponse,
+  OrganizationPublishedServiceSummary,
+  OrganizationPublishedServicesResponse,
   PlanAccountType,
   RotateOrganizationJoinCodeResponse,
 } from '@nebula-cloud/contracts'
@@ -42,11 +44,12 @@ import {
   Spinner,
   StatusBadge,
   Surface,
+  Switch,
   WorkspaceCard,
 } from '@nebula/runtime-ui'
 import { Dashboard as UsageDashboard } from './Dashboard'
 
-type DashboardView = 'home' | 'usage' | 'users' | 'operators' | 'providers' | 'organization'
+type DashboardView = 'home' | 'usage' | 'users' | 'operators' | 'servers' | 'providers' | 'organization'
 
 interface OrganizationDashboardProps {
   userName: string
@@ -56,6 +59,7 @@ interface OrganizationDashboardProps {
   accountType: PlanAccountType
   previewOverview?: OrganizationDashboardResponse
   previewMembers?: OrganizationMembersResponse
+  previewPublications?: OrganizationPublishedServicesResponse
   onBackgroundChange?: (overShader: boolean) => void
 }
 
@@ -124,6 +128,12 @@ export function OrganizationDashboard(props: OrganizationDashboardProps) {
             />
           )}
           {view === 'operators' && <OperatorsView organizationId={props.organizationId} />}
+          {view === 'servers' && (
+            <ServersView
+              organizationId={props.organizationId}
+              preview={props.previewPublications}
+            />
+          )}
           {view === 'providers' && <ProvidersView />}
           {view === 'organization' && (
             <OrganizationView
@@ -160,6 +170,12 @@ export function OrganizationDashboard(props: OrganizationDashboardProps) {
       title: 'Operators',
       description: 'Inspect the state of every persistent operator workspace.',
       icon: <Cpu size={15} />,
+    },
+    {
+      id: 'servers',
+      title: 'Servers',
+      description: 'Inspect and control HTTP and TCP services exposed by your operators.',
+      icon: <Server size={15} />,
     },
     {
       id: 'providers',
@@ -588,6 +604,153 @@ function ProvidersView() {
   )
 }
 
+function ServersView({ organizationId, preview }: { organizationId: string; preview?: OrganizationPublishedServicesResponse }) {
+  const [state, setState] = useState<LoadState<OrganizationPublishedServicesResponse>>(
+    preview ? { status: 'ready', data: preview } : { status: 'loading' },
+  )
+  const [pending, setPending] = useState('')
+  const [mutationError, setMutationError] = useState('')
+
+  const load = useCallback(async () => {
+    if (preview) {
+      setState({ status: 'ready', data: preview })
+      return
+    }
+    setState({ status: 'loading' })
+    try {
+      setState({
+        status: 'ready',
+        data: await getJson<OrganizationPublishedServicesResponse>(
+          `/api/organizations/${encodeURIComponent(organizationId)}/publications`,
+        ),
+      })
+    } catch (error) {
+      setState({ status: 'error', message: errorMessage(error) })
+    }
+  }, [organizationId, preview])
+
+  useEffect(() => { void load() }, [load])
+
+  const setConnected = async (publication: OrganizationPublishedServiceSummary, connected: boolean) => {
+    const key = `${publication.workspaceId}:${publication.name}`
+    if (pending) return
+    setPending(key)
+    setMutationError('')
+    try {
+      const updated = preview
+        ? { ...publication, state: connected ? 'active' as const : 'revoked' as const }
+        : await getJson<OrganizationPublishedServiceSummary>(
+            `/api/organizations/${encodeURIComponent(organizationId)}/publications/${encodeURIComponent(publication.workspaceId)}/${encodeURIComponent(publication.name)}`,
+            { method: 'PATCH', body: JSON.stringify({ connected }) },
+          )
+      setState(current => current.status === 'ready'
+        ? {
+            status: 'ready',
+            data: {
+              publications: current.data.publications.map(candidate => (
+                candidate.workspaceId === updated.workspaceId && candidate.name === updated.name
+                  ? updated
+                  : candidate
+              )),
+            },
+          }
+        : current)
+    } catch (error) {
+      setMutationError(errorMessage(error))
+    } finally {
+      setPending('')
+    }
+  }
+
+  return <LoadBoundary state={state} onRetry={load}>{data => data.publications.length === 0 ? (
+    <EmptyState
+      appearance="panel"
+      size="page"
+      icon={<Server size={20} />}
+      title="No exposed servers"
+      description="Run nubols expose inside an operator to publish an HTTP or TCP service. It will appear here automatically."
+    />
+  ) : (
+    <div>
+      {mutationError && (
+        <Surface bordered variant="panel" density="compact" radius="surface" className="mb-3 text-sm text-[var(--color-status-danger)]">
+          {mutationError}
+        </Surface>
+      )}
+      <Surface bordered variant="panel" density="none" radius="surface" className="overflow-hidden">
+        <table className="w-full table-fixed border-collapse text-left text-sm">
+          <thead>
+            <tr>
+              <ServerTableHeading className="w-[46%] sm:w-[24%]">Server</ServerTableHeading>
+              <ServerTableHeading className="hidden w-[36%] sm:table-cell">Endpoint</ServerTableHeading>
+              <ServerTableHeading className="hidden w-[18%] lg:table-cell">Operator</ServerTableHeading>
+              <ServerTableHeading className="w-[30%] sm:w-[14%]">Status</ServerTableHeading>
+              <ServerTableHeading className="w-14 text-right"><span className="sr-only">Connection</span></ServerTableHeading>
+            </tr>
+          </thead>
+          <tbody>
+            {data.publications.map(publication => {
+              const key = `${publication.workspaceId}:${publication.name}`
+              const connected = publication.state === 'active'
+              const endpoint = publication.publicUrl.replace(/^tcp:\/\//, '')
+              return (
+                <tr key={publication.id} className="group">
+                  <ServerTableCell>
+                    <div className="min-w-0 sm:flex sm:items-center sm:gap-2">
+                      <Badge>{publication.protocol.toUpperCase()}</Badge>
+                      <span className="mt-1 block min-w-0 truncate font-medium text-[var(--color-text-primary)] sm:mt-0">{publication.name}</span>
+                    </div>
+                    <p className="mt-1 truncate font-mono text-[10px] text-[var(--color-text-muted)] sm:hidden">{endpoint}</p>
+                    <p className="mt-1 text-[10px] text-[var(--color-text-subtle)] sm:hidden">Port {publication.targetPort}</p>
+                  </ServerTableCell>
+                  <ServerTableCell className="hidden sm:table-cell">
+                    {publication.protocol === 'http' && connected && publication.visibility === 'public' ? (
+                      <a href={publication.publicUrl} target="_blank" rel="noreferrer" className="block truncate font-mono text-xs text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]">
+                        {endpoint}
+                      </a>
+                    ) : (
+                      <span className="block truncate font-mono text-xs text-[var(--color-text-secondary)]">{endpoint}</span>
+                    )}
+                    <span className="mt-1 block text-[10px] text-[var(--color-text-subtle)]">Local port {publication.targetPort} · {publication.visibility}</span>
+                  </ServerTableCell>
+                  <ServerTableCell className="hidden lg:table-cell">
+                    <p className="truncate text-xs text-[var(--color-text-secondary)]">{publication.operatorName}</p>
+                    <p className="mt-1 truncate text-[10px] text-[var(--color-text-subtle)]">{publication.operatorEmail}</p>
+                  </ServerTableCell>
+                  <ServerTableCell>
+                    <StatusBadge tone={connected ? 'success' : publication.state === 'expired' ? 'warning' : 'neutral'}>
+                      {connected ? 'Connected' : publication.state === 'expired' ? 'Expired' : 'Disconnected'}
+                    </StatusBadge>
+                  </ServerTableCell>
+                  <ServerTableCell className="text-right">
+                    <Switch
+                      aria-label={`${connected ? 'Disconnect' : 'Reconnect'} ${publication.name}`}
+                      checked={connected}
+                      disabled={pending === key}
+                      onCheckedChange={nextConnected => { void setConnected(publication, nextConnected) }}
+                    />
+                  </ServerTableCell>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </Surface>
+      <p className="mt-3 text-xs leading-5 text-[var(--color-text-subtle)]">
+        HTTP and raw TCP are currently supported. UDP publication is not available yet.
+      </p>
+    </div>
+  )}</LoadBoundary>
+}
+
+function ServerTableHeading({ className = '', children }: { className?: string; children: ReactNode }) {
+  return <th className={`border-b border-[var(--color-border-strong)] px-3 py-3 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--color-text-primary)] first:pl-4 last:pr-4 ${className}`}>{children}</th>
+}
+
+function ServerTableCell({ className = '', children }: { className?: string; children: ReactNode }) {
+  return <td className={`border-b border-[var(--color-border-subtle)] px-3 py-3.5 align-middle leading-5 text-[var(--color-text-secondary)] first:pl-4 last:pr-4 group-last:border-b-0 ${className}`}>{children}</td>
+}
+
 function OrganizationView({ organizationId, fallbackName }: { organizationId: string; fallbackName: string }) {
   const [state, setState] = useState<LoadState<OrganizationAdminResponse>>({ status: 'loading' })
   const [name, setName] = useState(fallbackName)
@@ -705,13 +868,14 @@ function errorMessage(error: unknown) {
 }
 
 function viewTitle(view: Exclude<DashboardView, 'home' | 'usage'>) {
-  return ({ users: 'Users', operators: 'Operators', providers: 'Providers', organization: 'Organization' })[view]
+  return ({ users: 'Users', operators: 'Operators', servers: 'Servers', providers: 'Providers', organization: 'Organization' })[view]
 }
 
 function viewDescription(view: Exclude<DashboardView, 'home' | 'usage'>) {
   return ({
     users: 'Manage the people who can access this organization.',
     operators: 'Inspect persistent workspaces without mixing infrastructure with membership.',
+    servers: 'Inspect and control services exposed from your operator workspaces.',
     providers: 'Control organization model access without exposing provider credentials.',
     organization: 'Manage company identity, administrators, and access codes.',
   })[view]

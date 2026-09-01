@@ -1136,6 +1136,71 @@ test('serves the persisted dashboard overview only for the active organization',
   expect(calls).toHaveLength(1)
 })
 
+test('lists and toggles retained publications only through the active organization', async () => {
+  const calls: unknown[] = []
+  const publication = {
+    id: 'publication-1',
+    workspaceId: 'workspace-1',
+    operatorName: 'Jorge',
+    operatorEmail: 'jorge@example.com',
+    name: 'minecraft',
+    protocol: 'tcp' as const,
+    targetPort: 25565,
+    ingressPort: 20000,
+    state: 'active' as const,
+    visibility: 'public' as const,
+    authPolicy: 'none' as const,
+    publicUrl: 'tcp://tcp.nubols.com:20000',
+    expiresAt: null,
+    createdAt: 10,
+    updatedAt: 20,
+  }
+  const handler = createControlPlaneHandler({
+    resolveSession: async () => ({
+      userId: 'user-1',
+      activeOrganizationId: 'org-1',
+    }),
+    getOrganizationPublications: input => {
+      calls.push({ operation: 'list', ...input })
+      return { publications: [publication] }
+    },
+    setOrganizationPublicationConnected: input => {
+      calls.push({ operation: 'toggle', ...input })
+      return { ...publication, state: input.connected ? 'active' : 'revoked' }
+    },
+  })
+
+  const list = await handler(new Request(
+    'http://control-plane.test/api/organizations/org-1/publications',
+  ))
+  expect(list.status).toBe(200)
+  expect(await list.json()).toEqual({ publications: [publication] })
+
+  const toggle = await handler(new Request(
+    'http://control-plane.test/api/organizations/org-1/publications/workspace-1/minecraft',
+    {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ connected: false }),
+    },
+  ))
+  expect(toggle.status).toBe(200)
+  expect(await toggle.json()).toMatchObject({ name: 'minecraft', state: 'revoked' })
+  expect(calls).toEqual([
+    { operation: 'list', userId: 'user-1', organizationId: 'org-1' },
+    {
+      operation: 'toggle', userId: 'user-1', organizationId: 'org-1',
+      workspaceId: 'workspace-1', name: 'minecraft', connected: false,
+    },
+  ])
+
+  const crossOrganization = await handler(new Request(
+    'http://control-plane.test/api/organizations/org-2/publications',
+  ))
+  expect(crossOrganization.status).toBe(403)
+  expect(calls).toHaveLength(2)
+})
+
 test('serves the bounded organization audit stream only through the active organization', async () => {
   const calls: unknown[] = []
   const handler = createControlPlaneHandler({

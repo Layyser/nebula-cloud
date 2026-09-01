@@ -30,6 +30,7 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
+  setBrowserChromeColor,
   useThemePreference,
 } from '@nebula/runtime-ui'
 import excelIcon from '../../assets/excel-svgrepo-com.svg'
@@ -1464,6 +1465,21 @@ type FooterColumn = {
 
 export function Footer({ footerColumns: columns }: { footerColumns?: FooterColumn[] } = {}) {
   const { resolvedTheme, setPreference } = useThemePreference()
+  const footerRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const footer = footerRef.current
+    if (!footer || typeof IntersectionObserver === 'undefined') return
+    const pageColor = resolvedTheme === 'dark' ? '#080808' : '#f5f5f5'
+    const footerColor = resolvedTheme === 'dark' ? '#292929' : '#e3e3e3'
+    const observer = new IntersectionObserver(([entry]) => {
+      setBrowserChromeColor(entry?.isIntersecting ? footerColor : pageColor)
+    }, { threshold: 0.01 })
+    observer.observe(footer)
+    return () => {
+      observer.disconnect()
+      setBrowserChromeColor(document.documentElement.dataset.theme === 'light' ? '#f5f5f5' : '#080808')
+    }
+  }, [resolvedTheme])
   const footerColumns = columns ?? [
     {
       title: 'Products',
@@ -1509,7 +1525,7 @@ export function Footer({ footerColumns: columns }: { footerColumns?: FooterColum
   ]
 
   return (
-      <footer className="bg-[var(--color-surface-footer)] text-[var(--color-text-primary)]">
+      <footer ref={footerRef} className="bg-[var(--color-surface-footer)] text-[var(--color-text-primary)]">
         <div className="mx-auto max-w-[1480px] px-8 pb-12 pt-8 lg:px-[50px] lg:pb-16 lg:pt-[50px]">
           <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-[1.35fr_repeat(4,minmax(0,1fr))] lg:gap-8">
             <div className="sm:col-span-2 lg:col-span-1">

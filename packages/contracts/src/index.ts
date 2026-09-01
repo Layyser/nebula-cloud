@@ -275,6 +275,21 @@ export interface PublishedServiceSummary {
   updatedAt: number
 }
 
+export interface OrganizationPublishedServiceSummary extends Omit<PublishedServiceSummary, 'state'> {
+  workspaceId: string
+  operatorName: string
+  operatorEmail: string
+  state: 'active' | 'revoked' | 'expired'
+}
+
+export interface OrganizationPublishedServicesResponse {
+  publications: OrganizationPublishedServiceSummary[]
+}
+
+export interface SetOrganizationPublishedServiceConnectionRequest {
+  connected: boolean
+}
+
 export interface PublishedServicesResponse {
   publications: PublishedServiceSummary[]
 }

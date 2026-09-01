@@ -280,7 +280,7 @@ export function TerminalPage({
                   : activeStatus === 'connecting' ? 'Connecting' : 'Disconnected'}
               </span>
               {(activeStatus === 'closed' || activeStatus === 'error') && (
-                <Button variant="primary" size="compact" radius="marketing-pill" onClick={reconnectActiveTerminal}>
+                <Button variant="primary" onClick={reconnectActiveTerminal}>
                   <RefreshCw size={13} />
                   Reconnect
                 </Button>

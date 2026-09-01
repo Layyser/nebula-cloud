@@ -31,6 +31,7 @@ import {
   joinOrganizationById,
   listContactRequests,
   listOrganizationAuditEvents,
+  listOrganizationPublishedServices,
   listPlatformControls,
   listPublishedServices,
   listTCPPublishedServices,
@@ -516,6 +517,137 @@ function publishedServiceSummary(service: ReturnType<typeof upsertPublishedServi
   }
 }
 
+function organizationPublishedServiceSummary(
+  entry: ReturnType<typeof listOrganizationPublishedServices>[number],
+  now: number = Date.now(),
+) {
+  const publication = entry.publication
+  const state = publication.state === 'revoked'
+    ? 'revoked' as const
+    : publication.expiresAt !== null && publication.expiresAt <= now
+      ? 'expired' as const
+      : 'active' as const
+  return {
+    ...publishedServiceSummary(publication),
+    workspaceId: publication.workspaceId,
+    operatorName: entry.operator.name,
+    operatorEmail: entry.operator.email,
+    state,
+  }
+}
+
+async function publishWorkspaceService(input: {
+  workspaceId: string
+  name: string
+  protocol: 'http' | 'tcp'
+  port: number
+  visibility: 'public' | 'private'
+  ttlSeconds: number | null
+  preserveAccessPolicy?: boolean
+}) {
+  if (isPlatformControlPaused(database, 'publication')) {
+    throw new PlatformControlPausedError('publication')
+  }
+  if (input.protocol === 'tcp' && !tcpIngress) {
+    throw new Error('TCP ingress is not enabled')
+  }
+  const owner = getWorkspaceOwnerIdentity(database, input.workspaceId)
+  if (!owner) throw new Error('Workspace owner was not found')
+  const previous = getPublishedServiceByName(database, input.workspaceId, input.name)
+  const accessToken = input.visibility === 'private' && !input.preserveAccessPolicy
+    ? randomBytes(32).toString('base64url')
+    : undefined
+  const accessTokenHash = input.visibility === 'private'
+    ? input.preserveAccessPolicy
+      ? previous?.accessTokenHash ?? null
+      : accessToken
+        ? hashPublishedServiceToken(accessToken)
+        : null
+    : null
+  const timestamp = Date.now()
+  const publication = upsertPublishedService(database, {
+    id: randomUUID(),
+    workspaceId: input.workspaceId,
+    name: input.name,
+    slug: randomBytes(18).toString('hex'),
+    protocol: input.protocol,
+    targetPort: input.port,
+    visibility: input.visibility,
+    authPolicy: input.visibility === 'private' ? 'token' : 'none',
+    accessTokenHash,
+    expiresAt: input.ttlSeconds === null ? null : timestamp + input.ttlSeconds * 1000,
+    now: () => timestamp,
+    tcpIngressPortMinimum,
+    tcpIngressPortMaximum,
+    maximumActive: workspacePublicationLimit,
+    maximumOrganizationActive: organizationPublicationLimit,
+  })
+  if (
+    previous?.protocol === 'tcp'
+    && previous.ingressPort !== null
+    && (publication.protocol !== 'tcp' || publication.ingressPort !== previous.ingressPort)
+  ) {
+    await tcpIngress?.deactivate(previous.ingressPort)
+  }
+  if (publication.protocol === 'tcp') {
+    if (publication.ingressPort === null || !tcpIngress) {
+      revokePublishedService(database, { workspaceId: input.workspaceId, name: input.name, now: () => timestamp })
+      throw new Error('TCP publication ingress could not be allocated')
+    }
+    try {
+      await tcpIngress.activate(publication.ingressPort)
+    } catch (error) {
+      revokePublishedService(database, { workspaceId: input.workspaceId, name: input.name, now: () => timestamp })
+      throw error
+    }
+  }
+  recordAuditEvent(database, {
+    userId: owner.userId,
+    organizationId: owner.organizationId,
+    action: 'workspace.service_published',
+    targetType: 'published_service',
+    targetId: publication.id,
+    metadata: {
+      name: publication.name,
+      protocol: publication.protocol,
+      targetPort: publication.targetPort,
+      visibility: publication.visibility,
+      authPolicy: publication.authPolicy,
+      expiresAt: publication.expiresAt,
+    },
+  })
+  return {
+    publication: publishedServiceSummary(publication),
+    ...(accessToken ? { accessToken } : {}),
+  }
+}
+
+async function disconnectWorkspaceService(workspaceId: string, name: string): Promise<boolean> {
+  const owner = getWorkspaceOwnerIdentity(database, workspaceId)
+  if (!owner) return false
+  const publication = revokePublishedService(database, { workspaceId, name })
+  if (!publication) return false
+  if (publication.protocol === 'tcp' && publication.ingressPort !== null) {
+    await tcpIngress?.deactivate(publication.ingressPort)
+  }
+  recordAuditEvent(database, {
+    userId: owner.userId,
+    organizationId: owner.organizationId,
+    action: 'workspace.service_revoked',
+    targetType: 'published_service',
+    targetId: publication.id,
+    metadata: {
+      name: publication.name,
+      protocol: publication.protocol,
+      targetPort: publication.targetPort,
+      visibility: publication.visibility,
+      authPolicy: publication.authPolicy,
+      expiresAt: publication.expiresAt,
+    },
+  })
+  return true
+}
+
 function planAccountSummary(account: ReturnType<typeof createPlanAccount>) {
   return {
     id: account.id,
@@ -882,103 +1014,8 @@ const controlPlaneHandler = createControlPlaneHandler({
   listWorkspacePublications: ({ workspaceId }) => ({
     publications: listPublishedServices(database, workspaceId).map(publishedServiceSummary),
   }),
-  upsertWorkspacePublication: async ({ workspaceId, name, protocol, port, visibility, ttlSeconds }) => {
-    if (isPlatformControlPaused(database, 'publication')) {
-      throw new PlatformControlPausedError('publication')
-    }
-    if (protocol === 'tcp' && !tcpIngress) {
-      throw new Error('TCP ingress is not enabled')
-    }
-    const owner = getWorkspaceOwnerIdentity(database, workspaceId)
-    if (!owner) throw new Error('Workspace owner was not found')
-    const accessToken = visibility === 'private'
-      ? randomBytes(32).toString('base64url')
-      : undefined
-    const timestamp = Date.now()
-    const previous = getPublishedServiceByName(database, workspaceId, name)
-    const publication = upsertPublishedService(database, {
-      id: randomUUID(),
-      workspaceId,
-      name,
-      slug: randomBytes(18).toString('hex'),
-      protocol,
-      targetPort: port,
-      visibility,
-      authPolicy: visibility === 'private' ? 'token' : 'none',
-      accessTokenHash: accessToken
-        ? hashPublishedServiceToken(accessToken)
-        : null,
-      expiresAt: ttlSeconds === null ? null : timestamp + ttlSeconds * 1000,
-      now: () => timestamp,
-      tcpIngressPortMinimum: tcpIngressPortMinimum,
-      tcpIngressPortMaximum: tcpIngressPortMaximum,
-      maximumActive: workspacePublicationLimit,
-      maximumOrganizationActive: organizationPublicationLimit,
-    })
-    if (
-      previous?.protocol === 'tcp'
-      && previous.ingressPort !== null
-      && (publication.protocol !== 'tcp' || publication.ingressPort !== previous.ingressPort)
-    ) {
-      await tcpIngress?.deactivate(previous.ingressPort)
-    }
-    if (publication.protocol === 'tcp') {
-      if (publication.ingressPort === null || !tcpIngress) {
-        revokePublishedService(database, { workspaceId, name, now: () => timestamp })
-        throw new Error('TCP publication ingress could not be allocated')
-      }
-      try {
-        await tcpIngress.activate(publication.ingressPort)
-      } catch (error) {
-        revokePublishedService(database, { workspaceId, name, now: () => timestamp })
-        throw error
-      }
-    }
-    recordAuditEvent(database, {
-      userId: owner.userId,
-      organizationId: owner.organizationId,
-      action: 'workspace.service_published',
-      targetType: 'published_service',
-      targetId: publication.id,
-      metadata: {
-        name: publication.name,
-        protocol: publication.protocol,
-        targetPort: publication.targetPort,
-        visibility: publication.visibility,
-        authPolicy: publication.authPolicy,
-        expiresAt: publication.expiresAt,
-      },
-    })
-    return {
-      publication: publishedServiceSummary(publication),
-      ...(accessToken ? { accessToken } : {}),
-    }
-  },
-  revokeWorkspacePublication: async ({ workspaceId, name }) => {
-    const owner = getWorkspaceOwnerIdentity(database, workspaceId)
-    if (!owner) return false
-    const publication = revokePublishedService(database, { workspaceId, name })
-    if (!publication) return false
-    if (publication.protocol === 'tcp' && publication.ingressPort !== null) {
-      await tcpIngress?.deactivate(publication.ingressPort)
-    }
-    recordAuditEvent(database, {
-      userId: owner.userId,
-      organizationId: owner.organizationId,
-      action: 'workspace.service_revoked',
-      targetType: 'published_service',
-      targetId: publication.id,
-      metadata: {
-        name: publication.name,
-        protocol: publication.protocol,
-        targetPort: publication.targetPort,
-        visibility: publication.visibility,
-        authPolicy: publication.authPolicy,
-        expiresAt: publication.expiresAt,
-      },
-    })
-    return true
-  },
+  upsertWorkspacePublication: input => publishWorkspaceService(input),
+  revokeWorkspacePublication: ({ workspaceId, name }) => disconnectWorkspaceService(workspaceId, name),
   proxyPublishedService: input => publishedServiceGateway.proxy(input),
   getPersonalUsage: input => getPersonalUsageSummary(database, input),
   getOrganizationUsage: input => getOrganizationUsageSummary(database, input),
@@ -1002,6 +1039,43 @@ const controlPlaneHandler = createControlPlaneHandler({
   getOrganizationOperators: input => ({
     operators: getOrganizationOperators(database, input),
   }),
+  getOrganizationPublications: input => ({
+    publications: listOrganizationPublishedServices(database, input)
+      .map(publication => organizationPublishedServiceSummary(publication)),
+  }),
+  setOrganizationPublicationConnected: async input => {
+    const workspace = resolveWorkspaceAccess(database, input)
+    if (!workspace) return null
+    const existing = getPublishedServiceByName(database, input.workspaceId, input.name)
+    if (!existing) return null
+
+    if (!input.connected) {
+      await disconnectWorkspaceService(input.workspaceId, input.name)
+    } else {
+      const originalTTLSeconds = existing.expiresAt === null
+        ? null
+        : Math.max(
+            300,
+            Math.min(7 * 24 * 60 * 60, Math.round((existing.expiresAt - existing.updatedAt) / 1000)),
+          )
+      await publishWorkspaceService({
+        workspaceId: input.workspaceId,
+        name: input.name,
+        protocol: existing.protocol,
+        port: existing.targetPort,
+        visibility: existing.visibility,
+        ttlSeconds: originalTTLSeconds,
+        preserveAccessPolicy: true,
+      })
+    }
+
+    const updated = listOrganizationPublishedServices(database, input)
+      .find(candidate => (
+        candidate.publication.workspaceId === input.workspaceId
+        && candidate.publication.name === input.name
+      ))
+    return updated ? organizationPublishedServiceSummary(updated) : null
+  },
   getOrganizationDashboard: input => getOrganizationDashboardSummary(database, {
     ...input,
     heartbeatMaxAgeMs: workerHeartbeatStaleMs,

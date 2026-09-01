@@ -15,6 +15,7 @@ import {
   cloudPreviewOrganization,
   cloudPreviewDashboard,
   cloudPreviewMembers,
+  cloudPreviewPublications,
   cloudPreviewUser,
   createCloudPreviewTransport,
   type CloudPreviewMode,
@@ -74,6 +75,7 @@ function WorkspacePreview({
             accountType={cloudPreviewOrganization.accountType}
             previewOverview={cloudPreviewDashboard}
             previewMembers={cloudPreviewMembers}
+            previewPublications={cloudPreviewPublications}
             onBackgroundChange={handleDashboardBackgroundChange}
           />
         </div>

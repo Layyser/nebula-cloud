@@ -18,6 +18,8 @@ import {
   type OrganizationDashboardResponse,
   type OrganizationMembersResponse,
   type OrganizationOperatorsResponse,
+  type OrganizationPublishedServiceSummary,
+  type OrganizationPublishedServicesResponse,
   type JoinOrganizationRequest,
   type JoinOrganizationResponse,
   type PersonalWorkspaceResponse,
@@ -76,6 +78,8 @@ const organizationMembersPath = /^\/api\/organizations\/([^/]+)\/members$/
 const organizationMemberPath = /^\/api\/organizations\/([^/]+)\/members\/([^/]+)$/
 const organizationOperatorSeatPath = /^\/api\/organizations\/([^/]+)\/entitlements\/operator\/([^/]+)$/
 const organizationOperatorsPath = /^\/api\/organizations\/([^/]+)\/operators$/
+const organizationPublicationsPath = /^\/api\/organizations\/([^/]+)\/publications$/
+const organizationPublicationPath = /^\/api\/organizations\/([^/]+)\/publications\/([^/]+)\/([^/]+)$/
 const organizationDashboardPath = /^\/api\/organizations\/([^/]+)\/dashboard$/
 const organizationAdminPath = /^\/api\/organizations\/([^/]+)\/admin$/
 const organizationAuditPath = /^\/api\/organizations\/([^/]+)\/audit$/
@@ -214,6 +218,17 @@ export interface ControlPlaneHandlerOptions {
     userId: string
     organizationId: string
   }) => OrganizationOperatorsResponse
+  getOrganizationPublications?: (input: {
+    userId: string
+    organizationId: string
+  }) => OrganizationPublishedServicesResponse
+  setOrganizationPublicationConnected?: (input: {
+    userId: string
+    organizationId: string
+    workspaceId: string
+    name: string
+    connected: boolean
+  }) => OrganizationPublishedServiceSummary | null | Promise<OrganizationPublishedServiceSummary | null>
   getOrganizationDashboard?: (input: {
     userId: string
     organizationId: string
@@ -651,6 +666,8 @@ export function createControlPlaneHandler({
   assignStripeOperatorSeat,
   revokeStripeOperatorSeat,
   getOrganizationOperators,
+  getOrganizationPublications,
+  setOrganizationPublicationConnected,
   getOrganizationDashboard,
   getOrganizationAdmin,
   getOrganizationAudit,
@@ -1500,13 +1517,16 @@ export function createControlPlaneHandler({
     const memberMatch = url.pathname.match(organizationMemberPath)
     const operatorSeatMatch = url.pathname.match(organizationOperatorSeatPath)
     const operatorsMatch = url.pathname.match(organizationOperatorsPath)
+    const publicationsMatch = url.pathname.match(organizationPublicationsPath)
+    const publicationMatch = url.pathname.match(organizationPublicationPath)
     const dashboardMatch = url.pathname.match(organizationDashboardPath)
     const adminMatch = url.pathname.match(organizationAdminPath)
     const auditMatch = url.pathname.match(organizationAuditPath)
     const joinCodeMatch = url.pathname.match(organizationJoinCodePath)
     const organizationMatch = url.pathname.match(organizationPath)
     if (
-      membersMatch || memberMatch || operatorSeatMatch || operatorsMatch || dashboardMatch || adminMatch || auditMatch
+      membersMatch || memberMatch || operatorSeatMatch || operatorsMatch || publicationsMatch || publicationMatch
+      || dashboardMatch || adminMatch || auditMatch
       || joinCodeMatch || (organizationMatch && request.method === 'PATCH')
     ) {
       const session = resolveSession ? await resolveSession(request) : null
@@ -1515,7 +1535,7 @@ export function createControlPlaneHandler({
       }
       const encodedOrganizationId = (
         membersMatch?.[1] ?? memberMatch?.[1] ?? operatorSeatMatch?.[1]
-        ?? operatorsMatch?.[1] ?? dashboardMatch?.[1]
+        ?? operatorsMatch?.[1] ?? publicationsMatch?.[1] ?? publicationMatch?.[1] ?? dashboardMatch?.[1]
         ?? adminMatch?.[1] ?? auditMatch?.[1] ?? joinCodeMatch?.[1] ?? organizationMatch?.[1]
       )!
       let organizationId: string
@@ -1587,6 +1607,41 @@ export function createControlPlaneHandler({
         if (request.method === 'GET' && operatorsMatch && getOrganizationOperators) {
           return json(getOrganizationOperators({ userId: session.userId, organizationId }))
         }
+        if (request.method === 'GET' && publicationsMatch && getOrganizationPublications) {
+          return json(getOrganizationPublications({ userId: session.userId, organizationId }))
+        }
+        if (request.method === 'PATCH' && publicationMatch && setOrganizationPublicationConnected) {
+          let workspaceId: string
+          let name: string
+          try {
+            workspaceId = decodeURIComponent(publicationMatch[2])
+            name = decodeURIComponent(publicationMatch[3]).toLowerCase()
+          } catch {
+            return json({ error: 'publication route is invalid', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+          }
+          if (!workspaceId.trim() || !isPublishedServiceName(name)) {
+            return json({ error: 'publication route is invalid', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+          }
+          let body: unknown
+          try {
+            body = await readBoundedJSON(request, publicationRequestMaximumBytes)
+          } catch {
+            return json({ error: 'request body must be valid JSON', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+          }
+          if (!isRecord(body) || !hasOnlyKeys(body, ['connected']) || typeof body.connected !== 'boolean') {
+            return json({ error: 'connected must be a boolean', code: 'invalid_request' } satisfies CloudErrorResponse, 400)
+          }
+          const publication = await setOrganizationPublicationConnected({
+            userId: session.userId,
+            organizationId,
+            workspaceId,
+            name,
+            connected: body.connected,
+          })
+          return publication
+            ? json(publication)
+            : json({ error: 'published service not found', code: 'not_found' } satisfies CloudErrorResponse, 404)
+        }
         if (request.method === 'GET' && dashboardMatch && getOrganizationDashboard) {
           return json(getOrganizationDashboard({
             userId: session.userId,
@@ -1627,6 +1682,22 @@ export function createControlPlaneHandler({
         }
         return json({ error: 'route not found', code: 'not_found' } satisfies CloudErrorResponse, 404)
       } catch (error) {
+        if (error instanceof PlatformControlPausedError && error.control === 'publication') {
+          return json({
+            error: 'publication changes are temporarily paused',
+            code: 'platform_publication_paused',
+            retryable: true,
+          } satisfies CloudErrorResponse, 503)
+        }
+        if (
+          error instanceof Error
+          && 'code' in error
+          && (error.code === 'published_service_limit_reached'
+            || error.code === 'organization_published_service_limit_reached'
+            || error.code === 'published_service_ingress_capacity_reached')
+        ) {
+          return json({ error: error.message, code: String(error.code) } satisfies CloudErrorResponse, 409)
+        }
         if (error instanceof OrganizationAccessDeniedError) {
           return json({ error: error.message, code: error.code } satisfies CloudErrorResponse, 403)
         }

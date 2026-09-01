@@ -30,6 +30,7 @@ import {
   getPlatformControl,
   hasActiveOperatorEntitlement,
   listOrganizationAuditEvents,
+  listOrganizationPublishedServices,
   listContactRequests,
   listPublishedServices,
   listPlatformControls,
@@ -665,6 +666,77 @@ test('enforces an organization publication ceiling across separate workspaces', 
       targetPort: 4000, visibility: 'public', authPolicy: 'none', expiresAt: null,
       maximumOrganizationActive: 1, now: () => 5,
     })).toMatchObject({ workspaceId: second.id, state: 'active' })
+  } finally {
+    database.close()
+  }
+})
+
+test('lists retained publications with organization-aware operator scope', () => {
+  const database = openCloudDatabase({ path: ':memory:' })
+  try {
+    database.exec(`
+      CREATE TABLE user (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL
+      );
+      CREATE TABLE organization (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        slug TEXT NOT NULL
+      );
+      CREATE TABLE member (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL REFERENCES user(id),
+        organizationId TEXT NOT NULL REFERENCES organization(id),
+        role TEXT NOT NULL
+      );
+      INSERT INTO user VALUES
+        ('owner', 'Owner', 'owner@example.com'),
+        ('member', 'Member', 'member@example.com');
+      INSERT INTO organization VALUES ('org-1', 'Nubols Team', 'nubols-team');
+      INSERT INTO member VALUES
+        ('member-owner', 'owner', 'org-1', 'owner'),
+        ('member-user', 'member', 'org-1', 'member');
+    `)
+    migrateCloudSchema(database)
+    createPlanAccount(database, {
+      userId: 'owner',
+      accountType: 'organization',
+      plan: 'team',
+      organizationId: 'org-1',
+      createId: () => 'plan-1',
+      now: () => 1,
+    })
+    const ownerWorkspace = ensurePersonalWorkspace(database, {
+      userId: 'owner', organizationId: 'org-1', createId: () => 'workspace-owner', now: () => 2,
+    })
+    const memberWorkspace = ensurePersonalWorkspace(database, {
+      userId: 'member', organizationId: 'org-1', createId: () => 'workspace-member', now: () => 2,
+    })
+    upsertPublishedService(database, {
+      id: 'publication-owner', workspaceId: ownerWorkspace.id, name: 'web', slug: 'owner-web',
+      targetPort: 3000, visibility: 'public', authPolicy: 'none', expiresAt: null, now: () => 3,
+    })
+    upsertPublishedService(database, {
+      id: 'publication-member', workspaceId: memberWorkspace.id, name: 'minecraft', slug: 'member-minecraft',
+      protocol: 'tcp', targetPort: 25565, visibility: 'public', authPolicy: 'none', expiresAt: null,
+      tcpIngressPortMinimum: 20000, tcpIngressPortMaximum: 20009, now: () => 3,
+    })
+    revokePublishedService(database, {
+      workspaceId: memberWorkspace.id, name: 'minecraft', now: () => 4,
+    })
+
+    expect(listOrganizationPublishedServices(database, {
+      userId: 'owner', organizationId: 'org-1',
+    }).map(entry => [entry.operator.name, entry.publication.name, entry.publication.state]))
+      .toEqual([
+        ['Member', 'minecraft', 'revoked'],
+        ['Owner', 'web', 'active'],
+      ])
+    expect(listOrganizationPublishedServices(database, {
+      userId: 'member', organizationId: 'org-1',
+    }).map(entry => entry.publication.name)).toEqual(['minecraft'])
   } finally {
     database.close()
   }
