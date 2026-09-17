@@ -5,7 +5,8 @@ release="/opt/nubols/releases/$1"
 rollout=$2
 workspaces=$3
 shift 3
-mkdir "$release" # refuse to reuse/overwrite a release
+sudo -n mkdir "$release" # refuse to reuse/overwrite a release
+sudo -n chown "$(id -u):$(id -g)" "$release"
 repos=(agent frontend worker cloud)
 for name in "${repos[@]}"; do
     [[ "$1" =~ ^[a-f0-9]{40}$ ]] || exit 2
