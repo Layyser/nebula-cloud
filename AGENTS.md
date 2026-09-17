@@ -93,8 +93,44 @@ a changed spec hash triggers automatic replacement through reconciliation.
 
 The script never pulls, commits, resets, deploys remotely, or applies Nginx
 configuration. After a deferred update, report “image published; existing
-operators pending restart”, not “all operators updated”. Production immutable
-image rollout, scheduling, and rollback remain separate future work.
+operators pending restart”, not “all operators updated”.
+
+## Production Make flow
+
+First read `agent-deployment.md` and have the user open the SSH ControlMaster.
+Commit and push all four repositories to `origin/main`. If frontend source
+changed, publish its immutable tarball with the local flow before committing;
+production consumes the committed Cloud vendor archive, not sibling source.
+
+```bash
+cd /home/jorge/nebula-cloud
+make release-check
+make prod-deploy                                  # deferred rollout
+make prod-deploy ROLLOUT=force WORKSPACES='<id>'   # explicit replacement
+make prod-deploy ROLLOUT=force WORKSPACES=--all    # explicit fleet replacement
+```
+
+`prod-deploy` verifies clean/pushed revisions, runs `release-check`, clones
+those exact revisions into a fresh `/opt/nubols/releases/release-*` directory,
+and invokes remote `make prod-release`. That target reruns all four repositories'
+tests/builds, builds a commit-tagged agent image and runs its isolated image
+smoke test. Activation backs up the SQLite database and configuration, switches
+`current` atomically, deploys Worker before Cloud, validates/reloads Nginx, and
+checks readiness, robots/llms files, and a real HTTP 404. The dirty old release
+is never edited. Failed activation restores previous processes/configuration;
+database restoration is deliberately manual because schema downgrades are not
+automatically safe. Backups containing secrets remain root-only in
+`/var/backups/nubols`. Deployment ends the temporary user-owned SSH master.
+
+Default deployment changes Cloud's desired immutable workspace image but does
+not change stored existing workspace specs. Running operators are verified
+unchanged; new operators use the new image, and user-requested Operator Restart
+passes that image to Worker, which replaces compute while preserving persistent
+data. Force rollout uses the same authenticated restart contract and verifies
+the resulting image. Docker restart/stop-start alone still keep the old image.
+The existing production browser-image pin is intentionally preserved; browser
+image upgrades are a separate maintenance operation. No firewall changes or
+automatic fleet replacement are part of this flow.
 
 ## Validate each repository
 

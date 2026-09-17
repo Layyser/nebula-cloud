@@ -191,7 +191,7 @@ test('restarts a workspace with a durable operation key', async () => {
     '/internal/v1/workspaces/workspace-1/restart',
   )
   expect(requests[0]?.headers.get('idempotency-key')).toBe('restart-1')
-  expect(await requests[0]?.json()).toEqual({ timeout_seconds: 30 })
+  expect(await requests[0]?.json()).toEqual({ timeout_seconds: 30, image: 'nebula-workspace:test' })
 })
 
 test('proxies a workspace service with worker auth while preserving app auth separately', async () => {

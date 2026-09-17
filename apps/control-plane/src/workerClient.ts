@@ -362,6 +362,7 @@ export class NebulaWorkerClient {
         signal,
         body: {
           timeout_seconds: 30,
+          image: this.#workspaceImage,
         },
       },
     ) as WorkerMutationResponse
