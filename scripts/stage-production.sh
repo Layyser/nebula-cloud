@@ -17,5 +17,6 @@ done
 cd "$release/nebula-frontend"
 /usr/local/bin/bun install --frozen-lockfile
 cd "$release/nebula-cloud"
+make prod-prepare
 /usr/local/bin/bun install --frozen-lockfile
 make prod-release BUN=/usr/local/bin/bun GO=/usr/local/bin/go ROLLOUT="$rollout" WORKSPACES="$workspaces"

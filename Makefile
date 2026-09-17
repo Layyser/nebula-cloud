@@ -13,7 +13,10 @@ local-plan:
 	$(BUN) scripts/update-local.ts --components "$(COMPONENTS)" --rollout "$(ROLLOUT)" --workspaces "$(WORKSPACES)" --dry-run
 
 # Production publishes exact committed revisions; never modifies the live checkout.
-.PHONY: release-check prod-deploy prod-release
+.PHONY: release-check prod-deploy prod-release prod-prepare
+prod-prepare:
+	test -d /etc/nubols
+	dpkg -s build-essential libcurl4-openssl-dev libssl-dev >/dev/null 2>&1 || (sudo -n apt-get update && sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l apt-get install -y --no-install-recommends build-essential libcurl4-openssl-dev libssl-dev)
 release-check:
 	$(MAKE) -C ../nebula-agent -j2 test nebula
 	cd ../nebula-frontend && $(BUN) test && $(BUN) run build
