@@ -5,6 +5,6 @@ test('production scripts parse and reject execution outside a staged release', (
   for (const name of ['deploy-release.sh', 'stage-production.sh']) {
     expect(Bun.spawnSync(['bash', '-n', resolve(import.meta.dir, '../scripts', name)]).exitCode).toBe(0)
   }
-  const result = Bun.spawnSync(['bash', 'scripts/deploy-release.sh'], { cwd: resolve(import.meta.dir, '..') })
+  const result = Bun.spawnSync(['bash', resolve(import.meta.dir, '../scripts/deploy-release.sh')], { cwd: '/tmp' })
   expect(result.exitCode).toBe(2)
 })
