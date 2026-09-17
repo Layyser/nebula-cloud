@@ -45,7 +45,7 @@ export function MarkdownContent({ source, legal = false }: { source: string; leg
               ? <code className={`${className ?? ''} font-mono text-[13px] leading-6 text-[var(--color-text-secondary)]`} {...props}>{children}</code>
               : <code className="rounded-[calc(var(--radius-control)*0.65)] bg-[var(--color-surface-raised)] px-1.5 py-0.5 font-mono text-[0.88em] text-[var(--color-text-primary)]" {...props}>{children}</code>
           },
-          pre: ({ children }) => <pre className="overflow-x-auto rounded-[var(--radius-control)] bg-[var(--color-surface-raised)] px-4 py-3">{children}</pre>,
+          pre: ({ children }) => <pre className="overflow-x-auto rounded-[var(--radius-control)] bg-[var(--color-surface-raised)] px-4 py-3 mb-2">{children}</pre>,
           hr: () => <hr className="border-0 border-t border-[var(--color-border-subtle)]" />,
           table: ({ children }) => <div className="markdown-table overflow-x-auto"><table className="w-full border-collapse text-left text-sm">{children}</table></div>,
           th: ({ children }) => <th className="border-b border-[var(--color-border-strong)] px-3 py-3 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--color-text-primary)] first:pl-0">{children}</th>,

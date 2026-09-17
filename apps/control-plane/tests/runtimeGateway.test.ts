@@ -23,6 +23,66 @@ function workspace(
   }
 }
 
+test('attachment deletion forwards the path with private runtime authentication', async () => {
+  const gateway = new RuntimeGateway({
+    resolveWorkspace: () => workspace(),
+    worker: { getRuntimeAccess: async () => ({ workspaceId: 'worker-workspace-1', network: 'private-network', address: '172.31.0.7:7777', accessToken: 'runtime-test-token' }) },
+    fetch: async (input, init) => {
+      const request = new Request(input, init)
+      expect(request.method).toBe('DELETE')
+      expect(new URL(request.url).searchParams.get('path')).toBe('/workspace/attachments/1-cv.pdf')
+      expect(request.headers.get('authorization')).toBe('Bearer runtime-test-token')
+      return new Response(null, { status: 204 })
+    },
+  })
+  expect((await gateway.proxy({
+    request: new Request('http://cloud.test/api/workspaces/workspace-1/runtime/files/attachment?path=%2Fworkspace%2Fattachments%2F1-cv.pdf', { method: 'DELETE' }),
+    workspaceId: 'workspace-1', runtimePath: '/files/attachment', userId: 'user-1', organizationId: 'org-1',
+  })).status).toBe(204)
+})
+
+test('uploads bytes through private runtime access and bounds chunked bodies', async () => {
+  let calls = 0
+  const gateway = new RuntimeGateway({
+    resolveWorkspace: () => workspace(),
+    worker: { getRuntimeAccess: async () => ({ workspaceId: 'worker-workspace-1', network: 'private-network', address: '172.31.0.7:7777', accessToken: 'runtime-test-token' }) },
+    fetch: async (input, init) => {
+      calls++
+      const request = new Request(input, init)
+      expect(request.headers.get('authorization')).toBe('Bearer runtime-test-token')
+      expect(await request.text()).toBe('pdf bytes')
+      return Response.json({ path: '/workspace/.nebula-attachments/cv.pdf' })
+    },
+  })
+  const proxy = (body: BodyInit) => gateway.proxy({
+    request: new Request('http://cloud.test/api/workspaces/workspace-1/runtime/files/upload?name=cv.pdf', { method: 'POST', body }),
+    workspaceId: 'workspace-1', runtimePath: '/files/upload', userId: 'user-1', organizationId: 'org-1',
+  })
+  expect((await proxy('pdf bytes')).status).toBe(200)
+  expect((await proxy(new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(10 * 1024 * 1024 + 1)); controller.close() } }))).status).toBe(413)
+  expect(calls).toBe(1)
+})
+
+test('forwards chat search queries within the authenticated workspace runtime', async () => {
+  let upstream: Request | null = null
+  const gateway = new RuntimeGateway({
+    resolveWorkspace: () => workspace(),
+    worker: { getRuntimeAccess: async () => ({ workspaceId: 'worker-workspace-1', network: 'private-network', address: '172.31.0.7:7777', accessToken: 'runtime-test-token' }) },
+    fetch: async (input, init) => {
+      upstream = new Request(input, init)
+      return Response.json({ chats: [], total: 0, total_chats: 13, limit: 5, offset: 10 })
+    },
+  })
+  const response = await gateway.proxy({
+    request: new Request('http://cloud.test/api/workspaces/workspace-1/runtime/chats/search?q=redis%20cache&limit=5&offset=10'),
+    workspaceId: 'workspace-1', runtimePath: '/chats/search', userId: 'user-1', organizationId: 'org-1',
+  })
+  expect(upstream!.url).toBe('http://172.31.0.7:7777/chats/search?q=redis%20cache&limit=5&offset=10')
+  expect(upstream!.headers.get('authorization')).toBe('Bearer runtime-test-token')
+  expect(response.headers.get('cache-control')).toBe('no-store')
+  expect((await response.json()).total_chats).toBe(13)
+})
+
 test('streams runtime responses while keeping private credentials server-side', async () => {
   const resolved: unknown[] = []
   let upstreamRequest: Request | null = null
@@ -290,6 +350,54 @@ test('forwards token, tool, and completion events in arrival order', async () =>
   )
   expect(response.headers.get('content-type')).toContain('text/event-stream')
   expect(response.headers.get('x-accel-buffering')).toBe('no')
+})
+
+test('forwards live hook and subagent events without buffering', async () => {
+  const encoder = new TextEncoder()
+  let streamController!: ReadableStreamDefaultController<Uint8Array>
+  const gateway = new RuntimeGateway({
+    resolveWorkspace: () => workspace(),
+    worker: {
+      getRuntimeAccess: async () => ({
+        workspaceId: 'worker-workspace-1',
+        network: 'private-network',
+        address: '172.31.0.7:7777',
+        accessToken: 'private-runtime-token',
+      }),
+    },
+    fetch: async () => new Response(new ReadableStream({
+      start(controller) { streamController = controller },
+    }), {
+      headers: {
+        'content-type': 'text/event-stream',
+        'x-accel-buffering': 'no',
+      },
+    }),
+  })
+
+  const response = await gateway.proxy({
+    request: new Request(
+      'http://cloud.test/api/workspaces/workspace-1/runtime/chat/child/events',
+    ),
+    workspaceId: 'workspace-1',
+    runtimePath: '/chat/child/events',
+    userId: 'user-1',
+    organizationId: 'org-1',
+  })
+  const reader = response.body!.getReader()
+
+  const first = reader.read()
+  streamController.enqueue(encoder.encode(
+    'data: {"type":"background_start","source":"subagent"}\n\n',
+  ))
+  expect(new TextDecoder().decode((await first).value)).toContain('background_start')
+
+  const second = reader.read()
+  streamController.enqueue(encoder.encode(
+    'data: {"type":"text","content":"Inspecting"}\n\n',
+  ))
+  expect(new TextDecoder().decode((await second).value)).toContain('Inspecting')
+  streamController.close()
 })
 
 test('syncs stable completed-turn usage without changing the chat stream', async () => {

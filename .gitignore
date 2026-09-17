@@ -14,3 +14,5 @@ vendor/*
 .codex-tmp/
 /docs/
 plan.md
+# Local draft export; the published trailer lives in apps/web/public/media.
+/nubols-product-demo.mp4

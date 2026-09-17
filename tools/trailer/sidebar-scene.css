@@ -1,0 +1,11 @@
+/* The colored stage belongs to the film, not to the product UI. */
+#sidebar-scene { z-index: 4; visibility: hidden; background: radial-gradient(ellipse at 18% 72%, #9aabc9 0%, transparent 58%), radial-gradient(ellipse at 85% 12%, #9d86be 0%, transparent 65%), #526b90; }
+#sidebar-window { position: absolute; left: 0; top: 0; width: 1100px; height: 740px; transform: translate(200px, -115px) scale(2.94); transform-origin: top left; display: flex; overflow: hidden; border-radius: 14px; border: 1px solid #ffffff24; box-shadow: 0 18px 65px #17203466; background: #080808; }
+#sidebar-ui { width: 240px; height: 100%; flex: none; }
+#sidebar-ui aside, #sidebar-ui section { opacity: 1 !important; transform: none !important; }
+#sidebar-ui *, #sidebar-ui *::before, #sidebar-ui *::after { transition: none !important; animation: none !important; }
+#sidebar-ui button[data-trailer-hover="true"] { background: var(--color-surface-hover) !important; color: var(--color-text-primary) !important; }
+#sidebar-ui button[data-trailer-row] { transform-origin: center; }
+#sidebar-pane { position: relative; flex: 1; height: 100%; overflow: hidden; background: #080808; }
+#sidebar-shader { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+#sidebar-pane[data-terminal="true"] #sidebar-shader { visibility: hidden; opacity: 0 !important; }

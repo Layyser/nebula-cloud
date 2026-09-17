@@ -1,0 +1,15 @@
+# Nubols
+
+> Nubols gives AI agents persistent Linux workspaces to run tools, install software, deploy services, and respond to hooks. Users can work by chat or take control through the terminal.
+
+Nubols is the cloud product. Nebula is the underlying agent runtime. An agent is a runtime configuration; a workspace is its persistent computing environment. Consult the documentation and current plans for supported features and limits.
+
+## Public resources
+
+- [Documentation](https://nubols.com/docs): Getting started and runtime concepts.
+- [Capabilities](https://nubols.com/docs?topic=capabilities): Skills, commands, rules, MCP connections, and hooks.
+- [Runtime API](https://nubols.com/docs?topic=runtime-api): Runtime interfaces.
+- [Security](https://nubols.com/docs?topic=security): Security modes and tool approvals.
+- [Plans](https://nubols.com/plans): Current plans and pricing.
+- [Legal](https://nubols.com/legal): Privacy, terms, acceptable use, cookies, and security.
+- [Contact](https://nubols.com/contact): Support, sales, and security enquiries.

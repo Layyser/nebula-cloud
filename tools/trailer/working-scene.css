@@ -1,0 +1,11 @@
+#working-scene { z-index: 8; visibility: hidden; opacity: 0; background: radial-gradient(ellipse at 18% 72%, #9aabc9 0%, transparent 58%), radial-gradient(ellipse at 85% 12%, #9d86be 0%, transparent 65%), #526b90; }
+#working-window { position: absolute; left: 80px; top: 60px; width: 1760px; height: 960px; border: 1px solid #ffffff24; border-radius: 26px; overflow: hidden; background: #080808; box-shadow: 0 24px 80px #17203466; }
+#working-messages { position: absolute; left: 276.7px; top: 35px; width: var(--content-width-reading); padding-inline: 24px; max-height: 430px; overflow: hidden; transform: scale(1.7); transform-origin: top left; display: flex; flex-direction: column; gap: 14px; }
+#working-messages .space-y-4 { gap: 0; }
+#working-input { position: absolute; left: 190px; bottom: 0; width: 870px; transform: scale(1.7); transform-origin: bottom left; }
+/* Freeze wall-clock entrances; tool state, disclosure and sheen remain real. */
+#working-messages *, #working-messages *::before, #working-messages *::after { animation: none !important; transition: none !important; }
+#working-messages div[style] { opacity: 1 !important; }
+#working-messages button[aria-expanded] + div { height: auto !important; opacity: 1 !important; }
+#working-messages button[aria-expanded="false"] + div { display: none !important; }
+#working-messages .tool-output-scroller { max-height: 135px; }

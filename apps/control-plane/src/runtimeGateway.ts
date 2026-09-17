@@ -537,13 +537,45 @@ export class RuntimeGateway {
     }
 
     let upstream: Response
+    let uploadBody: Uint8Array<ArrayBuffer> | undefined
+    if (runtimePath === '/files/upload' && request.method === 'POST') {
+      const maxBytes = 10 * 1024 * 1024
+      if (Number(request.headers.get('content-length')) > maxBytes) {
+        cleanup()
+        return gatewayError(413, 'upload_too_large', 'Maximum attachment size is 10 MiB')
+      }
+      const reader = request.body?.getReader()
+      const chunks: Uint8Array[] = []
+      let size = 0
+      try {
+        if (reader) while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          size += value.byteLength
+          if (size > maxBytes) {
+            await reader.cancel()
+            cleanup()
+            return gatewayError(413, 'upload_too_large', 'Maximum attachment size is 10 MiB')
+          }
+          chunks.push(value)
+        }
+      } catch {
+        cleanup()
+        return gatewayError(400, 'upload_interrupted', 'Attachment upload was interrupted')
+      } finally {
+        reader?.releaseLock()
+      }
+      uploadBody = new Uint8Array(size)
+      let offset = 0
+      for (const chunk of chunks) { uploadBody.set(chunk, offset); offset += chunk.byteLength }
+    }
     try {
       upstream = await this.#fetch(target, {
         method: request.method,
         headers: runtimeRequestHeaders(request, access.accessToken),
         body: request.method === 'GET' || request.method === 'HEAD'
           ? undefined
-          : request.body,
+          : uploadBody ?? request.body,
         redirect: 'manual',
         signal: upstreamController.signal,
       })

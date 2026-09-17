@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import '@nebula/runtime-ui/styles.css'
 import { initializeBorders, initializeTheme } from '@nebula/runtime-ui'
 import './cloud.css'
+import { AppErrorBoundary } from './components/public/RecoveryPage'
 
 initializeTheme()
 initializeBorders()
@@ -31,7 +32,7 @@ async function start() {
   }
 
   createRoot(document.getElementById('root')!).render(
-    <StrictMode>{app}</StrictMode>,
+    <StrictMode><AppErrorBoundary>{app}</AppErrorBoundary></StrictMode>,
   )
 }
 

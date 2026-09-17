@@ -1,0 +1,53 @@
+.assembly-scene { visibility: hidden; opacity: 0; z-index: 12; background: #080808; }
+.assembly-camera { position: absolute; inset: 0; transform-origin: center; background: #080808; }
+.assembly-title { position: absolute; inset: 0; margin: 0; display: flex; align-items: center; justify-content: center; gap: 26px; font: 400 90px/1.18 'Segoe UI', sans-serif; letter-spacing: -.045em; white-space: nowrap; }
+.assembly-prefix { display: flex; gap: .24em; }
+.assembly-prefix > span { opacity: 0; }
+.assembly-slot { position: relative; display: block; width: 440px; height: 156px; overflow: hidden; mask-image: linear-gradient(to bottom, transparent, black 18%, black 82%, transparent); }
+.assembly-slot.icons-only { width: 120px; }
+.assembly-item { position: absolute; inset: 0; display: flex; align-items: center; gap: 28px; opacity: 0; }
+.assembly-item img { width: 102px; height: 102px; object-fit: contain; }
+.icons-only .assembly-item { justify-content: center; }
+.icons-only img { width: 120px; height: 120px; }
+.fun-title > span { opacity: 0; }
+#finish-brand { position: absolute; inset: 0; display: flex; justify-content: center; align-items: center; gap: 28px; }
+#finish-brand .nebula-wordmark { font-size: 100px; font-weight: 700; top: 12px; }
+#redis-camera, #gameplay-camera { background: radial-gradient(ellipse at 18% 72%, #9aabc9 0%, transparent 58%), radial-gradient(ellipse at 85% 12%, #9d86be 0%, transparent 65%), #526b90; }
+#redis-window, .gameplay-window { position: absolute; left: 80px; top: 60px; width: 1760px; height: 960px; border: 1px solid #ffffff24; border-radius: 26px; overflow: hidden; background: #080808; box-shadow: 0 24px 80px #17203466; }
+#redis-messages { position: absolute; left: 276.7px; top: 110px; width: var(--content-width-reading); padding-inline: 24px; transform: scale(1.7); transform-origin: top left; display: flex; flex-direction: column; gap: 24px; }
+#redis-input { position: absolute; left: 190px; bottom: 0; width: 870px; transform: scale(1.7); transform-origin: bottom left; }
+#redis-window *, #redis-window *::before, #redis-window *::after { animation: none !important; transition: none !important; }
+#redis-messages div[style] { opacity: 1 !important; }
+.footage-placeholder { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; color: #f4f6f8; font-size: 52px; }
+.footage-placeholder small { font-size: 24px; color: #8b929a; }
+#minecraft-footage { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #080808; }
+#working-camera { background: transparent; }
+:root { --film-stage: radial-gradient(ellipse at 18% 72%, #9aabc9 0%, transparent 58%), radial-gradient(ellipse at 85% 12%, #9d86be 0%, transparent 65%), #526b90; }
+#redis-scene, #minecraft-scene, #gameplay-scene, #working-scene, #sidebar-scene, #chat-scene { background: var(--film-stage); }
+#redis-camera, #minecraft-camera, #gameplay-camera, #working-camera, #sidebar-camera { isolation: isolate; background: transparent; }
+#redis-camera::before { opacity: var(--redis-stage-opacity, 1); }
+/* A uniformly oversized 16:9 stage travels with the camera. Its parent also
+   carries the stage color, so neither translation nor zoom exposes black. */
+#redis-camera::before, #minecraft-camera::before, #gameplay-camera::before, #working-camera::before, #sidebar-camera::before { content: ''; position: absolute; left: -960px; top: -540px; width: 3840px; height: 2160px; background: var(--film-stage); z-index: -1; pointer-events: none; }
+#minecraft-window { position: absolute; left: 80px; top: 60px; width: 1760px; height: 960px; border: 1px solid #ffffff24; border-radius: 26px; overflow: hidden; background: #080808; box-shadow: 0 24px 80px #17203466; }
+.scripted-shader { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .7; }
+.scripted-heading { position: absolute; left: 190px; top: 330px; width: 1479px; text-align: center; font-size: 68px; line-height: 1.2; font-weight: 500; letter-spacing: -.035em; margin: 0; }
+#redis-input, #minecraft-input { position: absolute; left: 190px; top: 445px; bottom: auto; width: 870px; transform: scale(1.7); transform-origin: top left; }
+#redis-messages, #minecraft-messages { position: absolute; left: 276.7px; top: 35px; width: var(--content-width-reading); padding-inline: 24px; transform: scale(1.7); transform-origin: top left; display: flex; flex-direction: column; gap: 18px; }
+#minecraft-window *, #minecraft-window *::before, #minecraft-window *::after { animation: none !important; transition: none !important; }
+.scripted-messages div[style] { opacity: 1 !important; }
+.scripted-cursor { position: absolute; left: 0; top: 0; z-index: 9; width: 38px; height: 44px; pointer-events: none; filter: drop-shadow(0 2px 3px #0006); }
+.scripted-cursor svg { position: absolute; left: 0; top: 0; }
+.scripted-input button[data-demo-hover="true"] { background: rgb(255 255 255 / 95%); }
+.scripted-input textarea { caret-color: transparent; }
+#hookdemo-scene { background: var(--film-stage); }
+#hookdemo-camera { isolation: isolate; background: transparent; }
+#hookdemo-camera::before { content: ''; position: absolute; left: -960px; top: -540px; width: 3840px; height: 2160px; background: var(--film-stage); z-index: -1; }
+#hookdemo-window { position: absolute; left: 80px; top: 60px; width: 1760px; height: 960px; border: 1px solid #ffffff24; border-radius: 26px; overflow: hidden; background: #080808; box-shadow: 0 24px 80px #17203466; }
+#hookdemo-messages { position: absolute; left: 276.7px; top: 35px; width: var(--content-width-reading); height: 400px; padding: 10px 24px; overflow: hidden; transform: scale(1.7); transform-origin: top left; display: flex; flex-direction: column; gap: 22px; }
+#hookdemo-messages > * { flex-shrink: 0; }
+#hookdemo-input { position: absolute; left: 190px; bottom: 0; width: 870px; transform: scale(1.7); transform-origin: bottom left; }
+#hookdemo-window *, #hookdemo-window *::before, #hookdemo-window *::after { animation: none !important; transition: none !important; }
+#hookdemo-messages div[style] { opacity: 1 !important; }
+#hookdemo-messages div[data-tool-entry][style] { opacity: var(--tool-entry-opacity, 1) !important; filter: var(--tool-entry-filter, blur(0px)) !important; }
+#hookdemo-messages .new-hook[style] { opacity: var(--hook-opacity, 1) !important; filter: blur(var(--hook-blur, 0px)); }

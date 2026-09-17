@@ -12,7 +12,6 @@ import {
   Moon,
   Monitor,
   PanelLeftClose,
-  Play,
   Plus,
   Search,
   Sun,
@@ -44,6 +43,7 @@ import gitlabIcon from '../../assets/gitlab-logo-500-rgb.svg'
 import CIcon from '../../assets/C.svg'
 import { SectionEyebrow } from '../public/SectionEyebrow'
 import { SegmentedControl } from '../ui/SegmentedControl'
+import { ProductTrailer } from './ProductTrailer'
 
 const NEBULA_ASCII = String.raw`
     ██████   █████          █████                ████
@@ -122,13 +122,13 @@ export function LandingPage({ onLaunch }: LandingPageProps) {
         />
         <div className="relative z-10 mx-auto grid min-h-[100svh] max-w-[1480px] grid-cols-1 items-center gap-20 px-6 pb-14 pt-28 lg:grid-cols-[minmax(0,0.86fr)_minmax(0,1.14fr)] lg:gap-12 lg:px-10 lg:pb-8 lg:pt-24">
           <div className="hero-copy-blob mx-auto max-w-3xl text-center lg:mx-0 lg:text-left">
-            <h1 className="mx-auto max-w-[790px] text-balance text-[clamp(3.25rem,6.3vw,5.85rem)] font-medium leading-[0.9] tracking-[-0.06em] text-[var(--color-text-primary)] lg:mx-0">
+            <h1 className="hero-entrance mx-auto max-w-[790px] text-balance text-[clamp(3.25rem,6.3vw,5.85rem)] font-medium leading-[0.9] tracking-[-0.06em] text-[var(--color-text-primary)] lg:mx-0">
               AI operators, each with <span className="hero-title-accent">their own computer.</span>
             </h1>
-            <p className="mx-auto mt-6 max-w-xl text-[clamp(1rem,1.35vw,1.12rem)] leading-7 text-[var(--color-text-secondary)] lg:mx-0">
+            <p className="hero-entrance hero-entrance-description mx-auto mt-6 max-w-xl text-[clamp(1rem,1.35vw,1.12rem)] leading-7 text-[var(--color-text-secondary)] lg:mx-0">
               Deploy persistent AI teammates with a private Linux workspace, tools, memory, and controlled access. Delegate in Chat, take over in Console, and govern the whole operation from one place.
             </p>
-            <div className="mt-7 flex flex-wrap items-center justify-center gap-3 lg:justify-start">
+            <div className="hero-entrance hero-entrance-actions mt-7 flex flex-wrap items-center justify-center gap-3 lg:justify-start">
               <a href="/app" onClick={handleLaunch} className="group inline-flex h-12 items-center gap-2 rounded-full bg-[var(--color-control-primary)] px-6 text-sm font-semibold text-[var(--color-control-on-primary)] transition hover:bg-[var(--color-control-primary-hover)]">
                 Deploy an operator
                 <ArrowRight size={15} className="transition-transform group-hover:translate-x-0.5" />
@@ -352,6 +352,8 @@ function HeaderMenuLink({ href, title, description }: { href: string; title: str
 }
 
 function RuntimeCard() {
+  const reducedMotion = useReducedMotion()
+  const [entranceReady, setEntranceReady] = useState(false)
   const [preview, setPreview] = useState<'web' | 'tui'>('web')
   const [webPreviewReady, setWebPreviewReady] = useState(false)
   const boundsRef = useRef<HTMLDivElement>(null)
@@ -359,6 +361,16 @@ function RuntimeCard() {
   const hasAdjustedFrameRef = useRef(false)
   const [frame, setFrame] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
   const { resolvedTheme } = useThemePreference()
+
+  useEffect(() => {
+    // The final hero metric finishes at 1560ms. Let the window follow it,
+    // while the embedded preview loads in parallel with the copy entrance.
+    if (reducedMotion) return
+    const timer = window.setTimeout(() => setEntranceReady(true), 1560)
+    return () => window.clearTimeout(timer)
+  }, [reducedMotion])
+
+  const previewVisible = webPreviewReady && (reducedMotion || entranceReady)
 
   useEffect(() => {
     const bounds = boundsRef.current
@@ -517,7 +529,7 @@ function RuntimeCard() {
       <div className="absolute -inset-10 rounded-full bg-sky-300/[0.035] blur-3xl" />
       <div
         ref={previewWindowRef}
-        className={`absolute overflow-hidden rounded-2xl border border-[var(--color-border-strong)] bg-[var(--color-surface-page)] shadow-[var(--shadow-surface)] transition-[opacity,filter,transform] duration-700 ease-out ${webPreviewReady ? 'scale-100 opacity-100 blur-0' : 'pointer-events-none scale-[0.985] opacity-0 blur-sm'}`}
+        className={`absolute overflow-hidden rounded-2xl border border-[var(--color-border-strong)] bg-[var(--color-surface-page)] shadow-[var(--shadow-surface)] transition-[opacity,filter,transform] duration-700 ease-out motion-reduce:transition-none ${previewVisible ? 'scale-100 opacity-100 blur-0' : 'pointer-events-none scale-[0.985] opacity-0 blur-sm'}`}
         style={frame
           ? { left: frame.x, top: frame.y, width: frame.width, height: frame.height }
           : { inset: '31px 16px', maxWidth: 880, margin: 'auto' }}
@@ -820,7 +832,7 @@ function TypingTask() {
 
 function Metrics() {
   return (
-    <div className="mx-auto mt-7 grid w-full max-w-xl grid-cols-3 divide-x divide-[var(--color-border-strong)] text-center lg:mx-0 lg:text-left">
+    <div className="hero-metrics mx-auto mt-7 grid w-full max-w-xl grid-cols-3 divide-x divide-[var(--color-border-strong)] text-center lg:mx-0 lg:text-left">
       <Metric value="Linux" label="a persistent home for every operator" />
       <Metric value="Chat + Console" label="delegate work or take over directly" />
       <Metric value="<30 MB RAM" label="standalone Nebula core" />
@@ -830,7 +842,7 @@ function Metrics() {
 
 function Metric({ value, label }: { value: string; label: string }) {
   return (
-    <div className="min-w-0 px-3 py-3 first:pl-0 last:pr-0 sm:px-5">
+    <div className="hero-entrance min-w-0 px-3 py-3 first:pl-0 last:pr-0 sm:px-5">
       <div className="text-lg font-medium tracking-[-0.04em] text-[var(--color-text-primary)] sm:text-xl">{value}</div>
       <div className="mt-1.5 text-[10px] leading-4 text-[var(--color-text-muted)] sm:text-[11px]">{label}</div>
     </div>
@@ -1164,18 +1176,7 @@ function VideoShowcase() {
         </ScrollReveal>
 
         <ScrollReveal variant="visual" delay={0.08} className="mt-16">
-          <div className="group relative mx-auto aspect-video w-full overflow-hidden rounded-[2rem] bg-[var(--color-surface-diagram-node)] shadow-[0_30px_100px_rgba(0,0,0,0.35)] min-[1100px]:w-[61.5rem] min-[1200px]:w-[73rem]">
-            <div aria-hidden="true" className="absolute inset-0 bg-[radial-gradient(circle_at_50%_48%,rgba(122,195,241,0.14),transparent_26%),linear-gradient(145deg,rgba(255,255,255,0.035),transparent_42%,rgba(255,255,255,0.02))]" />
-            <div aria-hidden="true" className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 scale-75 opacity-[0.07] transition-transform duration-700 ease-out group-hover:scale-[0.8] sm:scale-100 sm:group-hover:scale-105">
-              <NebulaMark size={384} />
-            </div>
-
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white text-black shadow-[0_12px_40px_rgba(0,0,0,0.35)] transition-transform duration-300 ease-out group-hover:scale-105 sm:h-20 sm:w-20">
-                <Play className="ml-1 h-6 w-6 fill-current sm:h-7 sm:w-7" strokeWidth={1.8} />
-              </div>
-            </div>
-          </div>
+          <ProductTrailer />
         </ScrollReveal>
       </div>
     </section>

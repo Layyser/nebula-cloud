@@ -1,12 +1,28 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { pages, seoHead } from './src/seo'
 
 const controlPlaneTarget = process.env.NEBULA_DEV_CONTROL_PLANE_URL?.trim()
   || 'http://127.0.0.1:7790'
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), {
+    name: 'public-page-metadata',
+    transformIndexHtml: { order: 'pre', handler: html => html.replace('<!-- seo -->', seoHead('/')) },
+    writeBundle(options) {
+      const dir = resolve(options.dir ?? 'dist')
+      const base = readFileSync(resolve(dir, 'index.html'), 'utf8')
+      for (const path of [...Object.keys(pages).filter(path => path !== '/'), '/404', '/private']) {
+        const target = path === '/404' || path === '/private' ? resolve(dir, path.slice(1) + '.html') : resolve(dir, path.slice(1), 'index.html')
+        mkdirSync(resolve(target, '..'), { recursive: true })
+        const head = seoHead(path === '/private' ? '/login' : path)
+        writeFileSync(target, base.replace(/<!-- seo:start -->[\s\S]*?<!-- seo:end -->/, `<!-- seo:start -->${head}<!-- seo:end -->`))
+      }
+    },
+  }],
   optimizeDeps: {
     // The shared UI is intentionally distributed as source and imports GLSL
     // through Vite's `?raw` transform. Rolldown's dependency optimizer cannot

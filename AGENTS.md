@@ -48,6 +48,54 @@ Keep these boundaries strict:
   addresses, or container-engine access.
 - The worker never owns users, organizations, billing, or agent behavior.
 
+## Local build/update pipeline
+
+Run from `/home/jorge/nebula-cloud` inside WSL:
+
+```bash
+make local-plan COMPONENTS="frontend agent"  # read-only preview
+make local-update COMPONENTS=cloud
+make local-update COMPONENTS=frontend       # auto patch bump, tarball, checksum, dependency and lockfile
+make local-update COMPONENTS=agent          # default ROLLOUT=on-restart
+make local-update COMPONENTS="frontend cloud agent worker"
+make local-update COMPONENTS=agent ROLLOUT=force WORKSPACES="<workspace-id>"
+make local-rollout WORKSPACES="<workspace-id>"  # force current image, without rebuilding
+# Use WORKSPACES=--all only when interruption of every local operator is intended.
+```
+
+The Makefile delegates to `scripts/update-local.ts`. Selected repositories and
+affected Cloud consumers are tested/built before service restarts or forced
+operator rollout. Frontend propagation uses a new immutable tarball version;
+it never silently overwrites an existing archive. Commit resulting artifacts
+and version/dependency changes separately in their owner repositories.
+
+These commands are LOCAL ONLY: the worker endpoint must be loopback and local
+services must keep `nebula-workspace:dev` pinned. Do not use them for production
+or change the configured image tag/spec to implement deferred local updates:
+a changed spec hash triggers automatic replacement through reconciliation.
+
+- `on-restart` (default): rebuild/publish the local dev image without touching
+  running operators or restarting the worker/control plane solely for an agent
+  update. New operators use the image immediately. Existing operators adopt it
+  when the user invokes Operator Restart, which replaces compute and preserves
+  persistent data. Docker restart and stop/start alone do not update the image.
+- `force`: requires explicit workspace IDs or `--all`; immediately replaces
+  selected operators and interrupts their running agent turns, terminals and
+  services. Files persist, but processes do not. Each replacement image is
+  verified; a failed or partial rollout returns failure. `--all` selects healthy
+  or repaired reconciliation records, never deleted/orphan records; use explicit
+  IDs to retry failed operators. Test operators and test data must be cleaned up.
+- `worker`: validates/builds the worker and restarts its local service; requires
+  non-interactive sudo permission. This is separate from operator replacement.
+- `cloud` or `frontend`: rebuilds Cloud and restarts its active user control-plane
+  service. If inactive, start `bun run dev` separately. Refresh the browser after
+  a frontend package update. Dev startup itself never builds or rolls out images.
+
+The script never pulls, commits, resets, deploys remotely, or applies Nginx
+configuration. After a deferred update, report “image published; existing
+operators pending restart”, not “all operators updated”. Production immutable
+image rollout, scheduling, and rollback remain separate future work.
+
 ## Validate each repository
 
 Run commands inside WSL. Validate the owner repository and every downstream
@@ -143,34 +191,25 @@ out an immutable, versioned tag instead.
 
 ## Propagate nebula-frontend into nebula-cloud
 
-Cloud consumes an immutable tarball of `@nebula/runtime-ui`, not the sibling
-source tree. Bump the package version in
-`/home/jorge/nebula-frontend/package.json`, then run:
+Cloud's standard pipeline consumes an immutable tarball of
+`@nebula/runtime-ui`, not the sibling source tree. For the complete local
+pipeline (automatic patch-version bump, tests/build, packing, checksum,
+dependency/lockfile update, Cloud validation and active service refresh), run:
 
 ```bash
-cd /home/jorge/nebula-frontend
-/home/jorge/.bun/bin/bun test
-/home/jorge/.bun/bin/bun run build
-/home/jorge/.bun/bin/bun pm pack --destination /home/jorge/nebula-cloud/vendor
-
-VERSION="$(
-  /home/jorge/.bun/bin/bun -e \
-  "console.log(require('/home/jorge/nebula-frontend/package.json').version)"
-)"
 cd /home/jorge/nebula-cloud
-/home/jorge/.bun/bin/bun add \
-  --cwd apps/web \
-  "@nebula/runtime-ui@file:../../vendor/nebula-runtime-ui-$VERSION.tgz"
-sha256sum "vendor/nebula-runtime-ui-$VERSION.tgz" >> vendor/SHA256SUMS
-/home/jorge/.bun/bin/bun install
-/home/jorge/.bun/bin/bun test
-/home/jorge/.bun/bin/bun run build
+make local-update COMPONENTS=frontend
 ```
 
-Keep one checksum line per archive. Commit the frontend version bump in
-`nebula-frontend`; commit the new archive, dependency path, lockfile, and
-checksum in `nebula-cloud`. For a deployed Cloud Web process, deploy/restart
-that process after the Cloud build succeeds.
+Keep one checksum line per archive and never overwrite a published package
+version. Commit the frontend version bump in `nebula-frontend`; commit the new
+archive, dependency path, lockfile, and checksum in `nebula-cloud`. Refresh the
+browser after updating. Production Web deployment remains a separate action.
+
+The existing `nebula-frontend/update-package.sh` is a legacy local direct-link
+helper. It links sibling source into node_modules rather than publishing a
+tarball; it is not the standard release pipeline and must not be used as proof
+that Cloud's pinned package has been updated.
 
 ## Propagate a new nebula-worker version into Cloud
 

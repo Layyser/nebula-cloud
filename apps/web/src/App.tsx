@@ -57,6 +57,8 @@ import { ContactPage } from './components/contact/ContactPage'
 import { DocsPage } from './components/docs/DocsPage'
 import { LandingPage } from './components/landing/LandingPage'
 import { LegalPage } from './components/legal/LegalPage'
+import { RecoveryPage } from './components/public/RecoveryPage'
+import { updateSeo } from './seo'
 import { PlansPage } from './components/plans/PlansPage'
 import {
   OrganizationGate,
@@ -101,18 +103,23 @@ function usePathname() {
 
 export default function App() {
   const { pathname, navigate } = usePathname()
+  useEffect(() => {
+    updateSeo(pathname === '/pricing' ? '/plans' : pathname)
+    const main = document.querySelector('main')
+    if (main) { main.id = 'main-content'; main.tabIndex = -1 }
+  }, [pathname])
   const [cloudBackgroundVisible, setCloudBackgroundVisible] = useState(true)
   const cloudRoute = pathname === '/login'
     || pathname === '/reset-password'
     || pathname === '/invite'
     || pathname === '/verify-email'
-    || pathname.startsWith('/app')
+    || pathname === '/app' || pathname.startsWith('/app/')
     || isAuthenticationCallback(pathname)
   const plansRoute = pathname === '/plans' || pathname === '/pricing'
   const docsRoute = pathname === '/docs'
   const legalRoute = pathname === '/legal'
   const contactRoute = pathname === '/contact'
-  const plainPublicRoute = plansRoute || docsRoute || legalRoute || contactRoute
+  const plainPublicRoute = plansRoute || docsRoute || legalRoute || contactRoute || (!cloudRoute && pathname !== '/')
 
   useEffect(() => {
     if (pathname === '/pricing') navigate('/plans')
@@ -127,6 +134,7 @@ export default function App() {
       scrollReactive={!cloudRoute && !plainPublicRoute}
       visible={!plainPublicRoute && (!cloudRoute || cloudBackgroundVisible)}
     >
+      <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-black focus:p-3 focus:text-white">Skip to content</a>
       {cloudRoute ? (
         <CloudSessionRoute
           pathname={pathname}
@@ -141,8 +149,10 @@ export default function App() {
         <LegalPage onLaunch={() => navigate('/login')} />
       ) : contactRoute ? (
         <ContactPage onLaunch={() => navigate('/login')} />
-      ) : (
+      ) : pathname === '/' ? (
         <LandingPage onLaunch={() => navigate('/login')} />
+      ) : (
+        <RecoveryPage />
       )}
     </PageBackground>
   )

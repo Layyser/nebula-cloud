@@ -1,0 +1,47 @@
+@font-face { font-family: 'Segoe UI'; src: url('./assets/segoeui.ttf'); font-weight: 400; }
+@font-face { font-family: 'Courier Prime'; src: url('./assets/courier-prime.woff2'); font-weight: 700; }
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: #080808; color: #f4f6f8; font-family: 'Segoe UI', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+#opening, .clip { position: absolute; inset: 0; width: 1920px; height: 1080px; overflow: hidden; }
+#intro { background: #080808; z-index: 2; }
+#camera { position: absolute; inset: 0; display: grid; place-items: center; transform-origin: 50% 44%; }
+#title { margin: 0; font-size: 100px; line-height: 1.18; letter-spacing: -0.045em; font-weight: 400; text-align: center; }
+#title span { display: inline-block; opacity: 0; }
+#reveal { visibility: hidden; opacity: 0; z-index: 1; background: #080808; }
+#reveal-camera { position: absolute; inset: 0; }
+/* Shared 16:9 overscan for title shaders: 576px horizontal and 324px vertical
+   coverage on EVERY side, enough for the reusable 300px camera cuts. Never
+   size just one axis: the uniform scale preserves the shader's geometry. */
+.title-shader { position: absolute; left: 50%; top: 50%; width: 1920px; height: 1080px; transform: translate(-50%, -50%) scale(1.6); display: block; }
+#brand { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 64px; }
+#meet { font-size: 90px; font-weight: 400; letter-spacing: -0.045em; opacity: 0; }
+#identity { display: flex; align-items: center; gap: 24px; opacity: 0; }
+#logo { display: flex; align-items: center; }
+#logo img { width: 100px; height: 100px; object-fit: contain; }
+#wordmark { top: 12px; font-size: 100px; font-weight: 700; }
+#chat-scene { z-index: 3; visibility: hidden; background: radial-gradient(ellipse at 18% 72%, #9aabc9 0%, transparent 58%), radial-gradient(ellipse at 85% 12%, #9d86be 0%, transparent 65%), #526b90; }
+#chat-window { position: absolute; left: 80px; top: 60px; width: 1760px; height: 960px; overflow: hidden; border: 1px solid #ffffff24; border-radius: 26px; box-shadow: 0 24px 80px #17203466; background: #080808; }
+#chat-window-shader { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .7; }
+#chat-camera { position: absolute; left: 190px; top: 0; width: 870px; height: 564px; transform: scale(1.7); transform-origin: top left; }
+#chat-heading { position: absolute; top: 195px; width: 100%; display: flex; justify-content: center; }
+#chat-heading h1 { margin: 0; }
+#demo-cursor { position: absolute; top: 0; left: 0; width: 38px; height: 44px; opacity: 0; pointer-events: none; filter: drop-shadow(0 2px 3px #0006); }
+#demo-cursor svg { position: absolute; top: 0; left: 0; }
+#cursor-hand { visibility: hidden; }
+#chat-input button[data-demo-hover="true"] { background-color: rgb(255 255 255 / 95%); }
+#chat-input { position: absolute; top: 262px; width: 100%; }
+.demo-app-sidebar { position: absolute; left: 0; top: 0; width: 56px; height: 564px; transform: scale(1.7); transform-origin: top left; z-index: 2; }
+.demo-app-sidebar aside { height: 100%; opacity: 1 !important; transform: none !important; }
+.demo-app-sidebar *, #working-input * { transition: none !important; animation: none !important; }
+.demo-app-sidebar div[style] { opacity: 1 !important; }
+.demo-app-sidebar button[aria-label="Expand sidebar"] > * { visibility: hidden !important; }
+.demo-sidebar-brand { position: absolute; left: 16px; top: 20px; width: 24px; height: 24px; pointer-events: none; z-index: 5; }
+/* Freeze the shared tool entrance to composition time, including reverse seeks. */
+#working-messages div[data-tool-entry][style], .scripted-messages div[data-tool-entry][style] { opacity: var(--tool-entry-opacity, 1) !important; filter: var(--tool-entry-filter, blur(0px)) !important; }
+/* Preserve the component styling while freezing hover/caret clocks for export. */
+#chat-input *, #chat-input *::before, #chat-input *::after { transition: none !important; animation: none !important; }
+#chat-input textarea { caret-color: transparent; }
+#control-scene { z-index: 4; visibility: hidden; opacity: 0; background: #080808; }
+#control-camera { position: absolute; inset: 0; }
+#control-title { position: absolute; inset: 0; margin: 0; display: flex; align-items: center; justify-content: center; gap: .25em; font-size: 100px; font-weight: 400; line-height: 1.18; letter-spacing: -.045em; }
+#control-title span { display: inline-block; opacity: 0; }

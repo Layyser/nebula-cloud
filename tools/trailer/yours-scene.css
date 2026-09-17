@@ -1,0 +1,8 @@
+#yours-scene { z-index: 7; visibility: hidden; opacity: 0; background: #080808; }
+#yours-copy { position: absolute; inset: 0; display: grid; place-items: center; }
+#yours-title { margin: 0; display: flex; align-items: center; gap: .4em; font: 400 90px/1.18 'Segoe UI', sans-serif; letter-spacing: -.045em; white-space: nowrap; }
+.yours-prefix { display: flex; gap: .24em; }
+.yours-prefix > span { display: inline-block; opacity: 0; }
+#yours-slot { position: relative; display: block; width: 570px; height: 142px; overflow: hidden; mask-image: linear-gradient(to bottom, transparent, black 17%, black 83%, transparent); }
+.yours-item { position: absolute; inset: 0; display: flex; align-items: center; gap: 24px; opacity: 0; }
+.yours-item svg { width: 84px; height: 84px; flex: none; }

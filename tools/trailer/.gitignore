@@ -1,0 +1,9 @@
+node_modules/
+dist/
+hooks-dist/
+yours-dist/
+working-dist/
+proof-dist/
+export-2k/
+renders/
+.hyperframes/

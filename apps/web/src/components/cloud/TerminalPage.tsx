@@ -14,6 +14,7 @@ import {
   useThemePreference,
 } from '@nebula/runtime-ui'
 import { Plus, RefreshCw, X } from 'lucide-react'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -92,6 +93,10 @@ function TerminalSession({
   const terminalRef = useRef<Terminal | null>(null)
   const activeRef = useRef(active)
   const [status, setStatus] = useState<TerminalStatus>('connecting')
+  const [contentReady, setContentReady] = useState(false)
+  const [automaticRetry, setAutomaticRetry] = useState(0)
+  const retryAttemptsRef = useRef(0)
+  const reducedMotion = useReducedMotion()
   const { resolvedTheme } = useThemePreference()
   const initialThemeRef = useRef(resolvedTheme)
 
@@ -115,6 +120,7 @@ function TerminalSession({
     if (!container) return
 
     setStatus('connecting')
+    setContentReady(false)
     const terminal = new Terminal({
       allowProposedApi: false,
       convertEol: true,
@@ -133,7 +139,10 @@ function TerminalSession({
     terminal.open(container)
 
     let socket: WebSocket | null = null
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
     let disposed = false
+    // Reveal only once the first output has actually been parsed by xterm.
+    const revealContent = () => { if (!disposed) setContentReady(true) }
     const fitTerminal = () => {
       if (disposed || container.clientWidth === 0 || container.clientHeight === 0) return
       try { fit.fit() } catch { /* hidden or unmounted */ }
@@ -144,9 +153,18 @@ function TerminalSession({
     const observer = new ResizeObserver(() => window.requestAnimationFrame(fitTerminal))
     observer.observe(container)
 
+    const scheduleAutomaticRetry = () => {
+      if (retryAttemptsRef.current >= 3 || reconnectTimer) return
+      retryAttemptsRef.current += 1
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null
+        if (!disposed) setAutomaticRetry(value => value + 1)
+      }, 750)
+    }
+
     if (previewOutput) {
       setStatus('connected')
-      terminal.write(previewOutput.join('\r\n'))
+      terminal.write(previewOutput.join('\r\n'), revealContent)
       return () => {
         disposed = true
         observer.disconnect()
@@ -170,25 +188,31 @@ function TerminalSession({
     }
     socket.addEventListener('open', () => {
       if (disposed) return
+      retryAttemptsRef.current = 0
       setStatus('connected')
       sendResize()
       if (activeRef.current) terminal.focus()
     })
     socket.addEventListener('message', event => {
       if (disposed) return
-      if (typeof event.data === 'string') terminal.write(event.data)
-      else if (event.data instanceof ArrayBuffer) terminal.write(new Uint8Array(event.data))
+      if (typeof event.data === 'string') terminal.write(event.data, revealContent)
+      else if (event.data instanceof ArrayBuffer) terminal.write(new Uint8Array(event.data), revealContent)
       else if (event.data instanceof Blob) {
         void event.data.arrayBuffer().then(data => {
-          if (!disposed) terminal.write(new Uint8Array(data))
+          if (!disposed) terminal.write(new Uint8Array(data), revealContent)
         })
       }
     })
     socket.addEventListener('close', event => {
-      if (!disposed) setStatus(event.code === 1000 ? 'closed' : 'error')
+      if (disposed) return
+      setStatus(event.code === 1000 ? 'closed' : 'error')
+      if (event.code !== 1000) scheduleAutomaticRetry()
     })
     socket.addEventListener('error', () => {
-      if (!disposed) setStatus('error')
+      if (!disposed) {
+        setStatus('error')
+        scheduleAutomaticRetry()
+      }
     })
 
     const input = terminal.onData(data => {
@@ -197,6 +221,7 @@ function TerminalSession({
     const resize = terminal.onResize(sendResize)
     return () => {
       disposed = true
+      if (reconnectTimer) clearTimeout(reconnectTimer)
       observer.disconnect()
       input.dispose()
       resize.dispose()
@@ -205,11 +230,20 @@ function TerminalSession({
       terminalRef.current = null
       fitRef.current = null
     }
-  }, [previewOutput, retryToken, terminalId, workspaceId])
+  }, [automaticRetry, previewOutput, retryToken, terminalId, workspaceId])
 
   return (
     <div className={`terminal-session absolute inset-0 bg-[var(--color-surface-page)] ${active ? 'visible z-10' : 'invisible z-0'}`}>
-      <div ref={containerRef} className="h-full w-full" />
+      <motion.div
+        ref={containerRef}
+        className="h-full w-full"
+        initial={false}
+        animate={{
+          opacity: contentReady ? 1 : 0,
+          clipPath: contentReady || reducedMotion ? 'inset(0 0 0 0)' : 'inset(0 0 100% 0)',
+        }}
+        transition={{ duration: reducedMotion ? 0 : 0.4, ease: [0.22, 1, 0.36, 1] }}
+      />
     </div>
   )
 }
@@ -225,6 +259,7 @@ export function TerminalPage({
   const [activeId, setActiveId] = useState(() => tabs[0]?.id || 'terminal-1')
   const [statuses, setStatuses] = useState<Record<string, TerminalStatus>>({})
   const [retryTokens, setRetryTokens] = useState<Record<string, number>>({})
+  const reducedMotion = useReducedMotion()
 
   useEffect(() => {
     localStorage.setItem(`nebula:terminals:${workspaceId}`, JSON.stringify(tabs))
@@ -295,11 +330,19 @@ export function TerminalPage({
             size="default"
             className="terminal-tabs mb-5"
           >
+            <AnimatePresence initial={false}>
             {tabs.map(tab => (
-              <TabsTrigger
+              <motion.div
                 key={tab.id}
+                className="flex h-full shrink-0 overflow-hidden"
+                initial={{ width: 0, opacity: 0 }}
+                animate={{ width: 'auto', opacity: 1 }}
+                exit={{ width: 0, opacity: 0, pointerEvents: 'none' }}
+                transition={{ duration: reducedMotion ? 0 : 0.26, ease: [0.22, 1, 0.36, 1] }}
+              >
+              <TabsTrigger
                 value={tab.id}
-                className={tabs.length > 1 ? 'gap-1 pl-3 pr-1.5' : 'px-3'}
+                className={`shrink-0 ${tabs.length === 1 ? 'px-3' : 'gap-1 pl-3 pr-1.5'}`}
               >
                 <span>{tab.label}</span>
                 {tabs.length > 1 && (
@@ -321,7 +364,9 @@ export function TerminalPage({
                   </span>
                 )}
               </TabsTrigger>
+              </motion.div>
             ))}
+            </AnimatePresence>
             <TooltipProvider delayDuration={250}>
               <Tooltip>
                 <TooltipTrigger asChild>

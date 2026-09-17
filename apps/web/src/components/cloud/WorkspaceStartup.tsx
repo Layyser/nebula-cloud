@@ -27,7 +27,7 @@ export function WorkspaceStartup({
   const current = stageIndex(progress.stage)
   return (
     <div className="relative z-[2] flex min-h-screen items-center justify-center px-5 text-white">
-      <div className="w-full max-w-sm rounded-2xl bg-[var(--color-surface-auth)] p-6 shadow-[0_32px_100px_rgba(0,0,0,0.6)] backdrop-blur-xl">
+      <div className="ui-border-surface w-full max-w-sm rounded-2xl bg-[var(--color-surface-auth)] p-6 shadow-[0_32px_100px_rgba(0,0,0,0.6)] backdrop-blur-xl">
         <CloudBrand />
         <h1 className="mt-6 text-xl font-medium tracking-[-0.025em] text-white/90">
           Opening your operator
